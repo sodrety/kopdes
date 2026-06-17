@@ -71,13 +71,7 @@ func (s *Server) createMember(c *gin.Context) {
 		loginCreated = true
 	}
 
-	if c.GetHeader("HX-Request") == "true" {
-		c.Header("HX-Redirect", "/admin/members/"+member.ID)
-		c.Status(http.StatusNoContent)
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
+	respondCreatedOrHXRedirect(c, "/admin/members/"+member.ID, gin.H{
 		"id":            member.ID,
 		"member_no":     member.MemberNo,
 		"full_name":     member.FullName,

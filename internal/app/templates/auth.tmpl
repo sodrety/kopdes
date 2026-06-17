@@ -1,0 +1,22 @@
+{{define "login"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+{{template "asset-head" .}}
+</head>
+<body class="auth-page">
+  <main class="auth-card">
+    <h1>Kopdes</h1>
+    <form method="post" action="/api/auth/login" hx-post="/api/auth/login" hx-target="#login-error" hx-swap="innerHTML">
+      <label>Email <input name="email" type="email" autocomplete="username" required></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Log in</button>
+    </form>
+    <p id="login-error" class="form-error"></p>
+  </main>
+</body>
+</html>
+{{end}}

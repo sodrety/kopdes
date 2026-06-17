@@ -1,0 +1,29 @@
+{{define "summary-card"}}
+        <article class="summary-card"><span>{{.Label}}</span><strong>{{.Value}}</strong></article>
+{{end}}
+
+{{define "status-badge"}}
+<span class="status-badge">{{.}}</span>
+{{end}}
+
+{{define "empty-state"}}
+        <p class="empty-state">{{.}}</p>
+{{end}}
+
+{{define "form-error"}}
+          <p id="{{.ID}}" class="form-error"></p>
+{{end}}
+
+{{define "member-table-cell"}}
+<strong>{{.FullName}}</strong><br><span class="table-muted">{{.MemberNo}}</span>
+{{end}}
+
+{{define "table-open"}}
+        <div class="table-scroll">
+        <table>
+{{end}}
+
+{{define "table-close"}}
+        </table>
+        </div>
+{{end}}

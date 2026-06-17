@@ -1,0 +1,129 @@
+{{define "member-profile"}}
+{{template "member-shell-start" .}}
+    <section class="summary-grid">
+{{template "summary-card" (dict "Label" "Saving balance" "Value" .Summary.CurrentBalance)}}
+{{template "summary-card" (dict "Label" "Total deposits" "Value" .Summary.TotalDeposit)}}
+{{template "summary-card" (dict "Label" "Total withdrawals" "Value" .Summary.TotalWithdrawal)}}
+    </section>
+    {{if .ActiveLoan}}
+    <section class="panel">
+      <h2>Active loan</h2>
+      <div class="detail-grid">
+        <div><span>Approved amount</span><strong>{{.ActiveLoan.ApprovedAmount}}</strong></div>
+        <div><span>Monthly installment</span><strong>{{.ActiveLoan.MonthlyInstallment}}</strong></div>
+        <div><span>Remaining balance</span><strong>{{.ActiveLoan.RemainingBalance}}</strong></div>
+        <div><span>Duration</span><strong>{{.ActiveLoan.DurationMonths}} months</strong></div>
+        <div><span>Status</span><strong>{{.ActiveLoan.Status}}</strong></div>
+      </div>
+    </section>
+    {{end}}
+    <section class="panel detail-grid">
+      <div><span>Member no</span><strong>{{.Member.MemberNo}}</strong></div>
+      <div><span>Full name</span><strong>{{.Member.FullName}}</strong></div>
+      <div><span>Phone</span><strong>{{.Member.Phone}}</strong></div>
+      <div><span>Address</span><strong>{{.Member.Address}}</strong></div>
+      <div><span>Join date</span><strong>{{.Member.JoinDate}}</strong></div>
+      <div><span>Status</span><strong>{{.Member.Status}}</strong></div>
+    </section>
+    <section class="panel">
+      <h2>Saving history</h2>
+      {{if .Savings}}
+{{template "table-open" .}}
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>Reference</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Savings}}
+          <tr>
+            <td>{{.RecordDate}}</td>
+            <td>{{.Type}}</td>
+            <td>{{.Amount}}</td>
+            <td>{{.ReferenceNo}}</td>
+            <td>{{.Note}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+{{template "table-close" .}}
+      {{else}}
+{{template "empty-state" "No saving records yet."}}
+      {{end}}
+    </section>
+    <section class="panel">
+      <h2>Repayment history</h2>
+      {{if .Repayments}}
+{{template "table-open" .}}
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Amount</th>
+            <th>Reference</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Repayments}}
+          <tr>
+            <td>{{.RecordDate}}</td>
+            <td>{{.Amount}}</td>
+            <td>{{.ReferenceNo}}</td>
+            <td>{{.Note}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+{{template "table-close" .}}
+      {{else}}
+{{template "empty-state" "No repayments yet."}}
+      {{end}}
+    </section>
+{{template "member-shell-end" .}}
+{{end}}
+
+{{define "member-loan-requests"}}
+{{template "member-shell-start" .}}
+    <section class="two-column">
+      <article class="panel">
+        <h2>Submit loan request</h2>
+        <form method="post" action="/api/member/loan-requests" hx-post="/api/member/loan-requests" hx-target="#loan-request-error" hx-swap="innerHTML">
+          <label>Requested amount <input name="requested_amount" type="number" min="1" required></label>
+          <label>Duration months <input name="duration_months" type="number" min="1" required></label>
+          <label>Purpose <input name="purpose"></label>
+          <button type="submit">Submit loan request</button>
+        </form>
+{{template "form-error" (dict "ID" "loan-request-error")}}
+      </article>
+      <article class="panel">
+        <h2>Request history</h2>
+        {{if .LoanRequests}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>Amount</th>
+              <th>Duration</th>
+              <th>Status</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .LoanRequests}}
+            <tr>
+              <td>{{.RequestedAmount}}</td>
+              <td>{{.DurationMonths}}</td>
+              <td>{{template "status-badge" .Status}}</td>
+              <td>{{.Purpose}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" "No loan requests yet."}}
+        {{end}}
+      </article>
+    </section>
+{{template "member-shell-end" .}}
+{{end}}

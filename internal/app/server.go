@@ -3,6 +3,7 @@ package app
 import (
 	"database/sql"
 	"errors"
+	"html/template"
 	"net/http"
 	"strings"
 
@@ -24,6 +25,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	router.GET("/static/app.css", server.staticCSS)
+	router.GET("/static/vendor/*file", server.staticVendorAsset)
 	router.GET("/login", server.loginPage)
 	router.POST("/api/auth/login", server.login)
 	router.POST("/logout", server.logout)
@@ -102,14 +104,13 @@ func (s *Server) login(c *gin.Context) {
 		redirectPath = "/member/profile"
 	}
 
-	if c.GetHeader("HX-Request") == "true" {
+	if isHTMXRequest(c) {
 		s.setAuthCookie(c, token)
-		c.Header("HX-Redirect", redirectPath)
-		c.Status(http.StatusNoContent)
+		respondHXRedirect(c, redirectPath)
 		return
 	}
 
-	if strings.Contains(c.GetHeader("Content-Type"), "application/x-www-form-urlencoded") {
+	if isBrowserFormRequest(c) {
 		s.setAuthCookie(c, token)
 		c.Redirect(http.StatusSeeOther, redirectPath)
 		return
@@ -214,5 +215,39 @@ func bearerToken(header string) string {
 }
 
 func respondError(c *gin.Context, status int, code, message string) {
+	if isHTMXRequest(c) {
+		body := `<span class="form-error-message">` + template.HTMLEscapeString(message) + `</span>`
+		c.Data(status, "text/html; charset=utf-8", []byte(body))
+		return
+	}
 	c.JSON(status, errorBody{Error: errorDetail{Code: code, Message: message}})
+}
+
+func isHTMXRequest(c *gin.Context) bool {
+	return c.GetHeader("HX-Request") == "true"
+}
+
+func isBrowserFormRequest(c *gin.Context) bool {
+	return strings.Contains(c.GetHeader("Content-Type"), "application/x-www-form-urlencoded")
+}
+
+func respondHXRedirect(c *gin.Context, path string) {
+	c.Header("HX-Redirect", path)
+	c.Status(http.StatusNoContent)
+}
+
+func respondCreatedOrHXRedirect(c *gin.Context, redirectPath string, body any) {
+	if isHTMXRequest(c) {
+		respondHXRedirect(c, redirectPath)
+		return
+	}
+	c.JSON(http.StatusCreated, body)
+}
+
+func respondOKOrHXRedirect(c *gin.Context, redirectPath string, body any) {
+	if isHTMXRequest(c) {
+		respondHXRedirect(c, redirectPath)
+		return
+	}
+	c.JSON(http.StatusOK, body)
 }

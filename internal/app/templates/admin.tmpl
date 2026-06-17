@@ -1,0 +1,238 @@
+{{define "admin-dashboard"}}
+{{template "admin-shell-start" .}}
+      <section class="summary-grid">
+{{template "summary-card" (dict "Label" "Total members" "Value" .Summary.TotalMembers)}}
+{{template "summary-card" (dict "Label" "Active members" "Value" .Summary.ActiveMembers)}}
+{{template "summary-card" (dict "Label" "Total savings" "Value" .Summary.TotalSavings)}}
+{{template "summary-card" (dict "Label" "Active loans" "Value" .Summary.ActiveLoans)}}
+{{template "summary-card" (dict "Label" "Outstanding loan" "Value" .Summary.TotalOutstandingLoan)}}
+{{template "summary-card" (dict "Label" "Pending requests" "Value" .Summary.PendingLoanRequests)}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-members"}}
+{{template "admin-shell-start" .}}
+      <section class="two-column">
+        <article class="panel">
+          <h2>Create member</h2>
+          <form method="post" action="/api/admin/members" hx-post="/api/admin/members" hx-target="#member-form-error" hx-swap="innerHTML">
+            <label>Member number <input name="member_no" required></label>
+            <label>Full name <input name="full_name" required></label>
+            <label>Phone <input name="phone"></label>
+            <label>Address <input name="address"></label>
+            <label>Join date <input name="join_date" type="date" required></label>
+            <label>Status
+              <select name="status">
+                <option value="active">active</option>
+                <option value="inactive">inactive</option>
+                <option value="suspended">suspended</option>
+              </select>
+            </label>
+            <div class="form-section">
+              <h3>Member login</h3>
+              <label>Email <input name="email" type="email" autocomplete="off"></label>
+              <label>Password <input name="password" type="password" autocomplete="new-password"></label>
+            </div>
+            <button type="submit">Create member</button>
+          </form>
+{{template "form-error" (dict "ID" "member-form-error")}}
+        </article>
+        <article class="panel">
+          <h2>Member list</h2>
+          {{if .Members}}
+{{template "table-open" .}}
+            <thead>
+              <tr>
+                <th>Member no</th>
+                <th>Name</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Members}}
+              <tr>
+                <td><a href="/admin/members/{{.ID}}">{{.MemberNo}}</a></td>
+                <td>{{.FullName}}</td>
+                <td>{{template "status-badge" .Status}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+{{template "table-close" .}}
+          {{else}}
+{{template "empty-state" "No members yet."}}
+          {{end}}
+        </article>
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-savings"}}
+{{template "admin-shell-start" .}}
+      <section class="panel narrow-panel">
+        <form method="post" action="/api/admin/savings" hx-post="/api/admin/savings" hx-target="#saving-form-error" hx-swap="innerHTML">
+          <label>Member
+            <select name="member_id" required>
+              {{range .Members}}
+              <option value="{{.ID}}">{{.FullName}} - {{.MemberNo}}</option>
+              {{end}}
+            </select>
+          </label>
+          <label>Type
+            <select name="type">
+              <option value="deposit">deposit</option>
+              <option value="withdrawal">withdrawal</option>
+            </select>
+          </label>
+          <label>Amount <input name="amount" type="number" min="1" required></label>
+          <label>Record date <input name="record_date" type="date" required></label>
+          <label>Reference number <input name="reference_no"></label>
+          <label>Note <input name="note"></label>
+          <button type="submit">Record deposit</button>
+        </form>
+{{template "form-error" (dict "ID" "saving-form-error")}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-member-detail"}}
+{{template "admin-shell-start" .}}
+      <section class="panel detail-grid">
+        <div><span>Member no</span><strong>{{.Member.MemberNo}}</strong></div>
+        <div><span>Full name</span><strong>{{.Member.FullName}}</strong></div>
+        <div><span>Phone</span><strong>{{.Member.Phone}}</strong></div>
+        <div><span>Address</span><strong>{{.Member.Address}}</strong></div>
+        <div><span>Join date</span><strong>{{.Member.JoinDate}}</strong></div>
+        <div><span>Status</span><strong>{{.Member.Status}}</strong></div>
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-loan-requests"}}
+{{template "admin-shell-start" .}}
+      <section class="panel">
+        {{if .LoanRequests}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Amount</th>
+              <th>Duration</th>
+              <th>Purpose</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Review</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .LoanRequests}}
+            <tr>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.RequestedAmount}}</td>
+              <td>{{.DurationMonths}} months</td>
+              <td>{{.Purpose}}</td>
+              <td>{{template "status-badge" .Status}}</td>
+              <td>{{.CreatedAt}}</td>
+              <td>
+                <form class="inline-approval-form" method="post" action="/api/admin/loan-requests/{{.ID}}/approve" hx-post="/api/admin/loan-requests/{{.ID}}/approve" hx-target="#loan-review-error" hx-swap="innerHTML">
+                  <input name="approved_amount" type="number" min="1" value="{{.RequestedAmount}}" aria-label="Approved amount">
+                  <input name="duration_months" type="number" min="1" value="{{.DurationMonths}}" aria-label="Duration months">
+                  <div class="table-actions">
+                    <button type="submit">Approve</button>
+                  </div>
+                </form>
+                <form class="inline-rejection-form" method="post" action="/api/admin/loan-requests/{{.ID}}/reject" hx-post="/api/admin/loan-requests/{{.ID}}/reject" hx-target="#loan-review-error" hx-swap="innerHTML">
+                  <input name="rejection_reason" aria-label="Rejection reason" placeholder="Reason">
+                  <button class="button-secondary" type="submit">Reject</button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" "No pending loan requests."}}
+        {{end}}
+{{template "form-error" (dict "ID" "loan-review-error")}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-loans"}}
+{{template "admin-shell-start" .}}
+      <section class="panel">
+        {{if .Loans}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Approved</th>
+              <th>Installment</th>
+              <th>Remaining</th>
+              <th>Duration</th>
+              <th>Status</th>
+              <th>Repayment</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Loans}}
+            <tr>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.ApprovedAmount}}</td>
+              <td>{{.MonthlyInstallment}}</td>
+              <td>{{.RemainingBalance}}</td>
+              <td>{{.DurationMonths}} months</td>
+              <td>{{template "status-badge" .Status}}</td>
+              <td>
+                <form class="inline-repayment-form" method="post" action="/api/admin/loans/{{.ID}}/repayments" hx-post="/api/admin/loans/{{.ID}}/repayments" hx-target="#repayment-form-error" hx-swap="innerHTML">
+                  <input name="amount" type="number" min="1" max="{{.RemainingBalance}}" placeholder="Amount" aria-label="Repayment amount">
+                  <input name="record_date" type="date" aria-label="Repayment date">
+                  <input name="reference_no" placeholder="Reference" aria-label="Reference number">
+                  <input name="note" placeholder="Note" aria-label="Repayment note">
+                  <button type="submit">Record repayment</button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" "No active loans."}}
+        {{end}}
+{{template "form-error" (dict "ID" "repayment-form-error")}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-repayments"}}
+{{template "admin-shell-start" .}}
+      <section class="panel">
+        {{if .Repayments}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Member</th>
+              <th>Amount</th>
+              <th>Reference</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Repayments}}
+            <tr>
+              <td>{{.RecordDate}}</td>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.Amount}}</td>
+              <td>{{.ReferenceNo}}</td>
+              <td>{{.Note}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" "No repayments yet."}}
+        {{end}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}

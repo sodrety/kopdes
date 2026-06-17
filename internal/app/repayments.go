@@ -83,13 +83,7 @@ func (s *Server) recordLoanRepayment(c *gin.Context) {
 		return
 	}
 
-	if c.GetHeader("HX-Request") == "true" {
-		c.Header("HX-Redirect", "/admin/loans")
-		c.Status(http.StatusNoContent)
-		return
-	}
-
-	c.JSON(http.StatusCreated, repayment)
+	respondCreatedOrHXRedirect(c, "/admin/loans", repayment)
 }
 
 func (s *Server) memberRepayments(c *gin.Context) {

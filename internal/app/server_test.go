@@ -94,6 +94,27 @@ func TestLoginRejectsInvalidCredentialsWithStandardError(t *testing.T) {
 	assertError(t, rec.Body.Bytes(), "UNAUTHORIZED", "Invalid email or password")
 }
 
+func TestHtmxLoginFailureReturnsHTMLFormError(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader("email=admin%40coop.test&password=wrong"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+		t.Fatalf("expected HTML content type, got %q", contentType)
+	}
+	if body := rec.Body.String(); body != `<span class="form-error-message">Invalid email or password</span>` {
+		t.Fatalf("expected escaped HTML error fragment, got %s", body)
+	}
+}
+
 func TestAdminDashboardRequiresValidAdminToken(t *testing.T) {
 	fixture := newTestFixture(t)
 
@@ -253,6 +274,109 @@ func TestStaticCSSIncludesMobileAdminResponsiveRules(t *testing.T) {
 		if !strings.Contains(css, text) {
 			t.Fatalf("expected css to include %q, got %s", text, css)
 		}
+	}
+}
+
+func TestBrowserPagesUseLocalPinnedFrontendAssets(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	pageReq := httptest.NewRequest(http.MethodGet, "/login", nil)
+	pageRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(pageRec, pageReq)
+
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("expected login page status 200, got %d: %s", pageRec.Code, pageRec.Body.String())
+	}
+	body := pageRec.Body.String()
+	for _, text := range []string{`src="/static/vendor/htmx-2.0.10.min.js"`, `src="/static/vendor/lucide-0.468.0.min.js"`} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected login page to reference %q, got %s", text, body)
+		}
+	}
+	for _, text := range []string{"cdn.jsdelivr.net", "unpkg.com"} {
+		if strings.Contains(body, text) {
+			t.Fatalf("expected login page not to reference %q, got %s", text, body)
+		}
+	}
+
+	for _, path := range []string{"/static/vendor/htmx-2.0.10.min.js", "/static/vendor/lucide-0.468.0.min.js"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %s status 200, got %d: %s", path, rec.Code, rec.Body.String())
+		}
+		if rec.Body.Len() == 0 {
+			t.Fatalf("expected %s to return asset content", path)
+		}
+	}
+}
+
+func TestBrowserPagesRenderSharedLayoutsAndHtmxForms(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-0100","full_name":"Render Member","join_date":"2026-06-16","status":"active","email":"render-member@coop.test","password":"member-password"}`)
+
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	memberCookie := fixture.browserLogin(t, "render-member@coop.test", "member-password")
+
+	tests := []struct {
+		name     string
+		path     string
+		cookie   *http.Cookie
+		contains []string
+	}{
+		{
+			name:   "admin members page",
+			path:   "/admin/members",
+			cookie: adminCookie,
+			contains: []string{
+				`<aside class="admin-sidebar" aria-label="Admin menu">`,
+				`src="/static/vendor/htmx-2.0.10.min.js"`,
+				`src="/static/vendor/lucide-0.468.0.min.js"`,
+				`hx-post="/api/admin/members"`,
+				`hx-target="#member-form-error"`,
+				`id="member-form-error" class="form-error"`,
+				`<span class="status-badge">active</span>`,
+				member.MemberNo,
+			},
+		},
+		{
+			name:   "member loan request page",
+			path:   "/member/loan-requests",
+			cookie: memberCookie,
+			contains: []string{
+				`class="member-shell member-loan-requests-shell"`,
+				`src="/static/vendor/htmx-2.0.10.min.js"`,
+				`hx-post="/api/member/loan-requests"`,
+				`hx-target="#loan-request-error"`,
+				`id="loan-request-error" class="form-error"`,
+				`<p class="empty-state">No loan requests yet.</p>`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			req.AddCookie(tt.cookie)
+			rec := httptest.NewRecorder()
+
+			fixture.server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected page status 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, text := range tt.contains {
+				if !strings.Contains(body, text) {
+					t.Fatalf("expected page to include %q, got %s", text, body)
+				}
+			}
+		})
 	}
 }
 
@@ -840,6 +964,29 @@ func TestRecordDepositValidatesPositiveAmountAndActiveMember(t *testing.T) {
 		}
 		assertError(t, rec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Savings can only be recorded for active members")
 	})
+}
+
+func TestHtmxAdminFormFailureReturnsHTMLFormError(t *testing.T) {
+	fixture := newTestFixture(t)
+	authCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", strings.NewReader("member_id=&amount=&record_date="))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	req.AddCookie(authCookie)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+		t.Fatalf("expected HTML content type, got %q", contentType)
+	}
+	if body := rec.Body.String(); body != `<span class="form-error-message">Member, deposit amount, and record date are required</span>` {
+		t.Fatalf("expected escaped HTML error fragment, got %s", body)
+	}
 }
 
 func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) {

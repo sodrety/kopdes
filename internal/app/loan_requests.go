@@ -75,13 +75,7 @@ func (s *Server) submitLoanRequest(c *gin.Context) {
 		return
 	}
 
-	if c.GetHeader("HX-Request") == "true" {
-		c.Header("HX-Redirect", "/member/loan-requests")
-		c.Status(http.StatusNoContent)
-		return
-	}
-
-	c.JSON(http.StatusCreated, loanRequest)
+	respondCreatedOrHXRedirect(c, "/member/loan-requests", loanRequest)
 }
 
 func (s *Server) memberLoanRequests(c *gin.Context) {
@@ -138,13 +132,7 @@ func (s *Server) rejectLoanRequest(c *gin.Context) {
 		return
 	}
 
-	if c.GetHeader("HX-Request") == "true" {
-		c.Header("HX-Redirect", "/admin/loan-requests")
-		c.Status(http.StatusNoContent)
-		return
-	}
-
-	c.JSON(http.StatusOK, loanRequest)
+	respondOKOrHXRedirect(c, "/admin/loan-requests", loanRequest)
 }
 
 var (

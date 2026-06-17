@@ -1,0 +1,90 @@
+{{define "asset-head"}}
+  <script src="/static/vendor/htmx-2.0.10.min.js"></script>
+  <script src="/static/vendor/lucide-0.468.0.min.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+{{end}}
+
+{{define "admin-nav"}}
+      <nav class="sidebar-nav">
+        <a class="sidebar-link {{if eq .Active "dashboard"}}active{{end}}" href="/admin/dashboard" title="Dashboard"><i class="sidebar-icon" data-lucide="layout-dashboard"></i><span class="sidebar-label">Dashboard</span></a>
+        <a class="sidebar-link {{if eq .Active "members"}}active{{end}}" href="/admin/members" title="Members"><i class="sidebar-icon" data-lucide="users"></i><span class="sidebar-label">Members</span></a>
+        <a class="sidebar-link {{if eq .Active "savings"}}active{{end}}" href="/admin/savings" title="Savings"><i class="sidebar-icon" data-lucide="piggy-bank"></i><span class="sidebar-label">Savings</span></a>
+        <a class="sidebar-link {{if eq .Active "loan-requests"}}active{{end}}" href="/admin/loan-requests" title="Loan requests"><i class="sidebar-icon" data-lucide="file-clock"></i><span class="sidebar-label">Loan requests</span></a>
+        <a class="sidebar-link {{if eq .Active "loans"}}active{{end}}" href="/admin/loans" title="Loans"><i class="sidebar-icon" data-lucide="landmark"></i><span class="sidebar-label">Loans</span></a>
+        <a class="sidebar-link {{if eq .Active "repayments"}}active{{end}}" href="/admin/repayments" title="Repayments"><i class="sidebar-icon" data-lucide="receipt"></i><span class="sidebar-label">Repayments</span></a>
+      </nav>
+{{end}}
+
+{{define "admin-shell-start"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+{{template "asset-head" .}}
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar" aria-label="Admin menu">
+      <div class="sidebar-brand">Kopdes</div>
+{{template "admin-nav" .}}
+    </aside>
+    <main class="page-shell">
+      <header class="admin-topbar">
+        <button class="sidebar-toggle" type="button" aria-label="Toggle sidebar" onclick="document.body.classList.toggle('sidebar-collapsed')">☰</button>
+        <form class="logout-form" method="post" action="/logout">
+          <button class="button-secondary" type="submit">Logout</button>
+        </form>
+      </header>
+      <header class="page-header">
+        <h1>{{.Heading}}</h1>
+        <p>{{.Description}}</p>
+      </header>
+{{end}}
+
+{{define "admin-shell-end"}}
+    </main>
+  </div>
+  <script>if (window.lucide) { lucide.createIcons(); }</script>
+</body>
+</html>
+{{end}}
+
+{{define "member-nav"}}
+      <nav class="member-nav">
+        <a href="/member/profile">Profile</a>
+        <a href="/member/loan-requests">Loan requests</a>
+      </nav>
+{{end}}
+
+{{define "member-shell-start"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+{{template "asset-head" .}}
+</head>
+<body>
+  <main class="member-shell {{.ShellClass}}">
+    <header class="member-topbar">
+      <div class="sidebar-brand">Kopdes</div>
+{{template "member-nav" .}}
+      <form class="logout-form" method="post" action="/logout">
+        <button class="button-secondary" type="submit">Logout</button>
+      </form>
+    </header>
+    <section class="page-header">
+      <h1>{{.Heading}}</h1>
+      <p>{{.Description}}</p>
+    </section>
+{{end}}
+
+{{define "member-shell-end"}}
+  </main>
+  <script>if (window.lucide) { lucide.createIcons(); }</script>
+</body>
+</html>
+{{end}}

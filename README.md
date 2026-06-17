@@ -65,6 +65,15 @@ go run ./cmd/api
 go test ./...
 ```
 
+## Frontend Assets
+
+Browser pages use server-rendered HTML enhanced with local pinned runtime assets:
+
+- htmx `2.0.10` at `/static/vendor/htmx-2.0.10.min.js`
+- lucide `0.468.0` at `/static/vendor/lucide-0.468.0.min.js`
+
+Update these files intentionally when upgrading frontend runtime behavior.
+
 ## Staging
 
 Use `render.yaml` to create the staging web service and PostgreSQL database on Render. See `docs/deployment/staging.md` for setup and smoke-test steps.

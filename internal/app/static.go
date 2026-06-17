@@ -1,10 +1,15 @@
 package app
 
 import (
+	"embed"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
+
+//go:embed static/vendor/*.js
+var staticAssetFS embed.FS
 
 const appCSS = `:root {
   --primary: #9fe870;
@@ -595,4 +600,13 @@ th {
 
 func (s *Server) staticCSS(c *gin.Context) {
 	c.Data(http.StatusOK, "text/css; charset=utf-8", []byte(appCSS))
+}
+
+func (s *Server) staticVendorAsset(c *gin.Context) {
+	name := strings.TrimPrefix(c.Param("file"), "/")
+	if name == "" || strings.Contains(name, "..") || !strings.HasSuffix(name, ".js") {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.FileFromFS("static/vendor/"+name, http.FS(staticAssetFS))
 }

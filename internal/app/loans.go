@@ -93,13 +93,7 @@ func (s *Server) approveLoanRequest(c *gin.Context) {
 		return
 	}
 
-	if c.GetHeader("HX-Request") == "true" {
-		c.Header("HX-Redirect", "/admin/loans")
-		c.Status(http.StatusNoContent)
-		return
-	}
-
-	c.JSON(http.StatusCreated, loan)
+	respondCreatedOrHXRedirect(c, "/admin/loans", loan)
 }
 
 func (s *Server) memberActiveLoan(c *gin.Context) {

@@ -65,13 +65,7 @@ func (s *Server) recordSaving(c *gin.Context) {
 		return
 	}
 
-	if c.GetHeader("HX-Request") == "true" {
-		c.Header("HX-Redirect", "/admin/savings")
-		c.Status(http.StatusNoContent)
-		return
-	}
-
-	c.JSON(http.StatusCreated, record)
+	respondCreatedOrHXRedirect(c, "/admin/savings", record)
 }
 
 func (s *Server) memberSavings(c *gin.Context) {
