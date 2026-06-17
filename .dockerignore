@@ -1,0 +1,9 @@
+.git
+.github
+kopdes-dev.db
+*.db
+tmp
+coverage.out
+Dockerfile
+README.md
+docs
