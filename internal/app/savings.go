@@ -113,7 +113,32 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 		return SavingRecord{}, errInvalidSaving
 	}
 
-	member, err := s.memberByID(memberID)
+	s.financialMu.Lock()
+	defer s.financialMu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return SavingRecord{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.Exec(`UPDATE members SET updated_at = updated_at WHERE id = $1`, memberID)
+	if err != nil {
+		return SavingRecord{}, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return SavingRecord{}, err
+	}
+	if rowsAffected == 0 {
+		return SavingRecord{}, sql.ErrNoRows
+	}
+
+	var member Member
+	err = tx.QueryRow(
+		`SELECT id, member_no, full_name, phone, address, join_date, status FROM members WHERE id = $1`,
+		memberID,
+	).Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Phone, &member.Address, &member.JoinDate, &member.Status)
 	if err != nil {
 		return SavingRecord{}, err
 	}
@@ -121,7 +146,7 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 		return SavingRecord{}, errInactiveSavingMember
 	}
 	if recordType == "withdrawal" {
-		summary, err := s.savingSummary(member.ID)
+		summary, err := savingSummary(tx, member.ID)
 		if err != nil {
 			return SavingRecord{}, err
 		}
@@ -140,7 +165,7 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 		Note:        strings.TrimSpace(req.Note),
 		RecordedBy:  recordedBy,
 	}
-	_, err = s.db.Exec(
+	_, err = tx.Exec(
 		`INSERT INTO saving_records (id, member_id, type, amount, record_date, reference_no, note, recorded_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		record.ID,
 		record.MemberID,
@@ -152,6 +177,9 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 		record.RecordedBy,
 	)
 	if err != nil {
+		return SavingRecord{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return SavingRecord{}, err
 	}
 	return record, nil
@@ -215,8 +243,16 @@ type SavingSummary struct {
 }
 
 func (s *Server) savingSummary(memberID string) (SavingSummary, error) {
+	return savingSummary(s.db, memberID)
+}
+
+type savingSummaryQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func savingSummary(q savingSummaryQuerier, memberID string) (SavingSummary, error) {
 	var summary SavingSummary
-	err := s.db.QueryRow(
+	err := q.QueryRow(
 		`SELECT
 			COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN type = 'withdrawal' THEN amount ELSE 0 END), 0)

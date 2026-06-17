@@ -106,6 +106,9 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 		return LoanRepayment{}, errInvalidRepayment
 	}
 
+	s.financialMu.Lock()
+	defer s.financialMu.Unlock()
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return LoanRepayment{}, err
@@ -134,12 +137,6 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 		return LoanRepayment{}, errRepaymentOverBalance
 	}
 
-	remainingBalance := loan.RemainingBalance - req.Amount
-	status := "active"
-	if remainingBalance == 0 {
-		status = "paid"
-	}
-
 	repayment := LoanRepayment{
 		ID:          newID(),
 		LoanID:      loanID,
@@ -149,6 +146,26 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 		ReferenceNo: strings.TrimSpace(req.ReferenceNo),
 		Note:        strings.TrimSpace(req.Note),
 		RecordedBy:  adminID,
+	}
+
+	result, err := tx.Exec(
+		`UPDATE loans
+		SET remaining_balance = remaining_balance - $1,
+			status = CASE WHEN remaining_balance - $1 = 0 THEN 'paid' ELSE 'active' END,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2 AND status = 'active' AND remaining_balance >= $1`,
+		req.Amount,
+		loanID,
+	)
+	if err != nil {
+		return LoanRepayment{}, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return LoanRepayment{}, err
+	}
+	if rowsAffected == 0 {
+		return LoanRepayment{}, errRepaymentOverBalance
 	}
 
 	if _, err := tx.Exec(
@@ -162,16 +179,6 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 		repayment.ReferenceNo,
 		repayment.Note,
 		repayment.RecordedBy,
-	); err != nil {
-		return LoanRepayment{}, err
-	}
-	if _, err := tx.Exec(
-		`UPDATE loans
-		SET remaining_balance = $1, status = $2, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $3`,
-		remainingBalance,
-		status,
-		loanID,
 	); err != nil {
 		return LoanRepayment{}, err
 	}

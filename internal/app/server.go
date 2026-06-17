@@ -5,22 +5,34 @@ import (
 	"errors"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Server struct {
-	cfg Config
-	db  *sql.DB
+	cfg         Config
+	db          *sql.DB
+	financialMu sync.Mutex
+	loginMu     sync.Mutex
+	loginStates map[string]loginState
 }
 
 func NewServer(cfg Config, db *sql.DB) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
-	server := &Server{cfg: cfg, db: db}
+	server := &Server{
+		cfg:         cfg,
+		db:          db,
+		loginStates: make(map[string]loginState),
+	}
 
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(server.securityHeaders())
+	router.Use(server.requireSameOriginForCookieMutations())
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -68,6 +80,63 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	return router
 }
 
+func (s *Server) securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.Writer.Header()
+		header.Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+		header.Set("X-Content-Type-Options", "nosniff")
+		header.Set("X-Frame-Options", "DENY")
+		header.Set("Referrer-Policy", "same-origin")
+		c.Next()
+	}
+}
+
+func (s *Server) requireSameOriginForCookieMutations() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !isUnsafeMethod(c.Request.Method) || bearerToken(c.GetHeader("Authorization")) != "" {
+			c.Next()
+			return
+		}
+		if _, err := c.Cookie("auth_token"); err != nil {
+			c.Next()
+			return
+		}
+		if sameOriginRequest(c.Request) {
+			c.Next()
+			return
+		}
+		respondError(c, http.StatusForbidden, "FORBIDDEN", "Same-origin browser request is required")
+		c.Abort()
+	}
+}
+
+func isUnsafeMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func sameOriginRequest(r *http.Request) bool {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		return originMatchesHost(origin, r.Host)
+	}
+	if referer := r.Header.Get("Referer"); referer != "" {
+		return originMatchesHost(referer, r.Host)
+	}
+	return false
+}
+
+func originMatchesHost(raw, host string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	return strings.EqualFold(parsed.Host, host)
+}
+
 func (s *Server) logout(c *gin.Context) {
 	s.clearAuthCookie(c)
 	c.Redirect(http.StatusSeeOther, "/login")
@@ -83,8 +152,16 @@ func (s *Server) login(c *gin.Context) {
 		return
 	}
 
-	user, err := AuthenticateUser(s.db, req.Email, req.Password)
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	loginKey := loginThrottleKey(c, email)
+	if s.loginBlocked(loginKey) {
+		respondError(c, http.StatusTooManyRequests, "TOO_MANY_REQUESTS", "Too many failed login attempts. Try again later")
+		return
+	}
+
+	user, err := AuthenticateUser(s.db, email, req.Password)
 	if errors.Is(err, ErrInvalidCredentials) {
+		s.recordFailedLogin(loginKey)
 		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid email or password")
 		return
 	}
@@ -92,6 +169,7 @@ func (s *Server) login(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	s.clearFailedLogin(loginKey)
 
 	token, err := SignToken(s.cfg.JWTSecret, user)
 	if err != nil {
@@ -131,6 +209,7 @@ func (s *Server) login(c *gin.Context) {
 }
 
 func (s *Server) setAuthCookie(c *gin.Context, token string) {
+	// #nosec G124 -- Cookie Secure is controlled by deployment config so local HTTP tests can exercise browser flows.
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     "auth_token",
 		Value:    token,
@@ -143,6 +222,7 @@ func (s *Server) setAuthCookie(c *gin.Context, token string) {
 }
 
 func (s *Server) clearAuthCookie(c *gin.Context) {
+	// #nosec G124 -- Cookie Secure is controlled by deployment config so local HTTP tests can exercise browser flows.
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     "auth_token",
 		Value:    "",
@@ -178,7 +258,13 @@ func (s *Server) requireRole(role string) gin.HandlerFunc {
 			return
 		}
 
-		user, err := ParseToken(s.cfg.JWTSecret, tokenValue)
+		tokenUser, err := ParseToken(s.cfg.JWTSecret, tokenValue)
+		if err != nil {
+			respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid authentication token")
+			c.Abort()
+			return
+		}
+		user, err := s.validateSessionUser(tokenUser)
 		if err != nil {
 			respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid authentication token")
 			c.Abort()
@@ -189,9 +275,84 @@ func (s *Server) requireRole(role string) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if role == "member" {
+			if err := s.validateMemberSession(tokenUser, user); err != nil {
+				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid authentication token")
+				c.Abort()
+				return
+			}
+		}
 		c.Set("user", user)
 		c.Next()
 	}
+}
+
+const (
+	maxFailedLoginAttempts = 5
+	loginLockDuration      = 15 * time.Minute
+)
+
+type loginState struct {
+	Count       int
+	LockedUntil time.Time
+}
+
+func loginThrottleKey(c *gin.Context, email string) string {
+	return email + "|" + c.ClientIP()
+}
+
+func (s *Server) loginBlocked(key string) bool {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+
+	state, ok := s.loginStates[key]
+	if !ok {
+		return false
+	}
+	if !state.LockedUntil.IsZero() && time.Now().Before(state.LockedUntil) {
+		return true
+	}
+	if !state.LockedUntil.IsZero() {
+		delete(s.loginStates, key)
+	}
+	return false
+}
+
+func (s *Server) recordFailedLogin(key string) {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+
+	state := s.loginStates[key]
+	state.Count++
+	if state.Count >= maxFailedLoginAttempts {
+		state.LockedUntil = time.Now().Add(loginLockDuration)
+	}
+	s.loginStates[key] = state
+}
+
+func (s *Server) clearFailedLogin(key string) {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	delete(s.loginStates, key)
+}
+
+func (s *Server) validateSessionUser(tokenUser User) (User, error) {
+	current, err := UserByID(s.db, tokenUser.ID)
+	if err != nil {
+		return User{}, err
+	}
+	if current.Role != tokenUser.Role || !strings.EqualFold(current.Email, tokenUser.Email) {
+		return User{}, ErrUnauthorized
+	}
+	return current, nil
+}
+
+func (s *Server) validateMemberSession(tokenUser, current User) error {
+	if !current.MemberID.Valid || !tokenUser.MemberID.Valid || current.MemberID.String != tokenUser.MemberID.String {
+		return ErrUnauthorized
+	}
+	_, err := s.memberByID(current.MemberID.String)
+	return err
 }
 
 func currentUser(c *gin.Context) (User, bool) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -15,6 +16,9 @@ type Config struct {
 	AdminPassword  string
 	AppEnv         string
 	CookieSecure   bool
+	ReadTimeout    time.Duration
+	WriteTimeout   time.Duration
+	IdleTimeout    time.Duration
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -28,12 +32,18 @@ func ConfigFromEnv() (Config, error) {
 		AdminPassword:  os.Getenv("ADMIN_PASSWORD"),
 		AppEnv:         appEnv,
 		CookieSecure:   cookieSecureFromEnv(appEnv),
+		ReadTimeout:    10 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		IdleTimeout:    60 * time.Second,
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
 	}
 	if cfg.JWTSecret == "" {
 		return Config{}, errors.New("JWT_SECRET is required")
+	}
+	if len(cfg.JWTSecret) < 32 {
+		return Config{}, errors.New("JWT_SECRET must be at least 32 characters")
 	}
 	return cfg, nil
 }

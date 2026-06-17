@@ -69,6 +69,7 @@ func Migrate(db *sql.DB) error {
 			FOREIGN KEY (member_id) REFERENCES members(id),
 			FOREIGN KEY (approved_by) REFERENCES users(id)
 		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_loans_one_active_per_member ON loans(member_id) WHERE status = 'active'`,
 		`CREATE TABLE IF NOT EXISTS loan_repayments (
 			id TEXT PRIMARY KEY,
 			loan_id TEXT NOT NULL,

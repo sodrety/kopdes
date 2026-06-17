@@ -90,6 +90,15 @@ func AuthenticateUser(db *sql.DB, email, password string) (User, error) {
 	return user, nil
 }
 
+func UserByID(db *sql.DB, id string) (User, error) {
+	var user User
+	err := db.QueryRow(
+		`SELECT id, email, role, member_id FROM users WHERE id = $1`,
+		id,
+	).Scan(&user.ID, &user.Email, &user.Role, &user.MemberID)
+	return user, err
+}
+
 func SignToken(secret string, user User) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": user.ID,

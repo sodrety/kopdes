@@ -30,7 +30,14 @@ func main() {
 	}
 
 	log.Printf("listening on %s", cfg.Address)
-	if err := http.ListenAndServe(cfg.Address, app.NewServer(cfg, db)); err != nil {
+	server := &http.Server{
+		Addr:         cfg.Address,
+		Handler:      app.NewServer(cfg, db),
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }

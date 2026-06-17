@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sodrety/kopdes/internal/app"
@@ -115,6 +116,320 @@ func TestHtmxLoginFailureReturnsHTMLFormError(t *testing.T) {
 	}
 }
 
+func TestResponsesIncludeSecurityHeaders(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected login page status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	headers := rec.Header()
+	if csp := headers.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") || !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Fatalf("expected restrictive CSP, got %q", csp)
+	}
+	if got := headers.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("expected nosniff header, got %q", got)
+	}
+	if got := headers.Get("X-Frame-Options"); got != "DENY" {
+		t.Fatalf("expected DENY frame header, got %q", got)
+	}
+	if got := headers.Get("Referrer-Policy"); got != "same-origin" {
+		t.Fatalf("expected same-origin referrer policy, got %q", got)
+	}
+}
+
+func TestCookieAuthenticatedMutationRejectsCrossSiteOrigin(t *testing.T) {
+	fixture := newTestFixture(t)
+	authCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.Header.Set("Origin", "https://evil.test")
+	req.AddCookie(authCookie)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertError(t, rec.Body.Bytes(), "FORBIDDEN", "Same-origin browser request is required")
+}
+
+func TestBearerAuthenticatedMutationDoesNotRequireBrowserOrigin(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-CSRF","full_name":"CSRF Check","join_date":"2026-06-17","status":"active"}`)
+
+	id := fixture.recordDeposit(t, adminToken, member.ID, 100000)
+
+	if id == "" {
+		t.Fatal("expected bearer-authenticated mutation without Origin to succeed")
+	}
+}
+
+func TestLoginThrottlesRepeatedInvalidCredentials(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"email":"admin@coop.test","password":"wrong"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected failed login %d to return 401, got %d: %s", i+1, rec.Code, rec.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"email":"admin@coop.test","password":"password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected locked login to return 429, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertError(t, rec.Body.Bytes(), "TOO_MANY_REQUESTS", "Too many failed login attempts. Try again later")
+}
+
+func TestTokenIsRejectedAfterUserRecordChanges(t *testing.T) {
+	fixture := newTestFixture(t)
+	token := fixture.login(t, "admin@coop.test", "password")
+
+	if _, err := fixture.db.Exec(`UPDATE users SET email = $1 WHERE email = $2`, "renamed-admin@coop.test", "admin@coop.test"); err != nil {
+		t.Fatalf("update user email: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected stale token status 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertError(t, rec.Body.Bytes(), "UNAUTHORIZED", "Invalid authentication token")
+}
+
+func TestStatusFilterTreatsSQLInjectionPayloadAsLiteralValue(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-SQLI","full_name":"SQLI Check","join_date":"2026-06-17","status":"active"}`)
+	fixture.createMemberUser(t, adminToken, member.ID, "sqli-check@coop.test", "secret-password")
+	memberToken := fixture.login(t, "sqli-check@coop.test", "secret-password")
+	fixture.createLoanRequest(t, memberToken, 1000000, 5)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/loan-requests?status=pending%27%20OR%201%3D1%20--", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		LoanRequests []struct {
+			ID string `json:"id"`
+		} `json:"loan_requests"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode loan requests: %v", err)
+	}
+	if len(response.LoanRequests) != 0 {
+		t.Fatalf("expected SQL injection-like status to match no rows, got %+v", response.LoanRequests)
+	}
+}
+
+func TestAdminMemberPageEscapesMemberSuppliedHTML(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	authCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	fixture.createMember(t, adminToken, `{"member_no":"M-XSS","full_name":"<script>alert(1)</script>","join_date":"2026-06-17","status":"active"}`)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/members", nil)
+	req.AddCookie(authCookie)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected members page status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "<script>alert(1)</script>") {
+		t.Fatalf("expected raw script tag to be escaped, got %s", body)
+	}
+	if !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+		t.Fatalf("expected escaped script text, got %s", body)
+	}
+}
+
+func TestConcurrentWithdrawalsCannotOverdrawSavings(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-RACE-SAV","full_name":"Saving Race","join_date":"2026-06-17","status":"active"}`)
+	fixture.recordDeposit(t, adminToken, member.ID, 100000)
+
+	statuses := make(chan int, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{
+				"member_id":"`+member.ID+`",
+				"type":"withdrawal",
+				"amount":80000,
+				"record_date":"2026-06-17"
+			}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+adminToken)
+			rec := httptest.NewRecorder()
+
+			fixture.server.ServeHTTP(rec, req)
+			statuses <- rec.Code
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+
+	var created, rejected int
+	for status := range statuses {
+		if status == http.StatusCreated {
+			created++
+		}
+		if status == http.StatusBadRequest {
+			rejected++
+		}
+	}
+	if created != 1 || rejected != 1 {
+		t.Fatalf("expected one withdrawal created and one rejected, got created=%d rejected=%d", created, rejected)
+	}
+
+	var balance int
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount ELSE -amount END), 0) FROM saving_records WHERE member_id = $1`, member.ID).Scan(&balance); err != nil {
+		t.Fatalf("query saving balance: %v", err)
+	}
+	if balance != 20000 {
+		t.Fatalf("expected balance 20000 after one withdrawal, got %d", balance)
+	}
+}
+
+func TestConcurrentLoanApprovalsCreateOnlyOneActiveLoan(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-RACE-LOAN","full_name":"Loan Race","join_date":"2026-06-17","status":"active"}`)
+	fixture.createMemberUser(t, adminToken, member.ID, "loan-race@coop.test", "secret-password")
+	memberToken := fixture.login(t, "loan-race@coop.test", "secret-password")
+	firstRequestID := fixture.createLoanRequest(t, memberToken, 1000000, 5)
+	secondRequestID := "second-race-request"
+	if _, err := fixture.db.Exec(
+		`INSERT INTO loan_requests (id, member_id, requested_amount, duration_months, purpose, status) VALUES ($1, $2, $3, $4, $5, 'pending')`,
+		secondRequestID,
+		member.ID,
+		900000,
+		5,
+		"Concurrent approval test",
+	); err != nil {
+		t.Fatalf("seed second pending loan request: %v", err)
+	}
+
+	statuses := make(chan int, 2)
+	var wg sync.WaitGroup
+	for _, requestID := range []string{firstRequestID, secondRequestID} {
+		wg.Add(1)
+		go func(requestID string) {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(`{"approved_amount":500000,"duration_months":5}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+adminToken)
+			rec := httptest.NewRecorder()
+
+			fixture.server.ServeHTTP(rec, req)
+			statuses <- rec.Code
+		}(requestID)
+	}
+	wg.Wait()
+	close(statuses)
+
+	var created, rejected int
+	for status := range statuses {
+		if status == http.StatusCreated {
+			created++
+		}
+		if status == http.StatusBadRequest {
+			rejected++
+		}
+	}
+	if created != 1 || rejected != 1 {
+		t.Fatalf("expected one approval created and one rejected, got created=%d rejected=%d", created, rejected)
+	}
+
+	var activeLoans int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loans WHERE member_id = $1 AND status = 'active'`, member.ID).Scan(&activeLoans); err != nil {
+		t.Fatalf("query active loans: %v", err)
+	}
+	if activeLoans != 1 {
+		t.Fatalf("expected one active loan, got %d", activeLoans)
+	}
+}
+
+func TestConcurrentRepaymentsCannotOverpayLoan(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-RACE-REPAY","full_name":"Repayment Race","join_date":"2026-06-17","status":"active"}`)
+	fixture.createMemberUser(t, adminToken, member.ID, "repay-race@coop.test", "secret-password")
+	memberToken := fixture.login(t, "repay-race@coop.test", "secret-password")
+	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 100000, 5), 100000, 5)
+
+	statuses := make(chan int, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/loans/"+loan.ID+"/repayments", bytes.NewBufferString(`{"amount":80000,"record_date":"2026-06-17"}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+adminToken)
+			rec := httptest.NewRecorder()
+
+			fixture.server.ServeHTTP(rec, req)
+			statuses <- rec.Code
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+
+	var created, rejected int
+	for status := range statuses {
+		if status == http.StatusCreated {
+			created++
+		}
+		if status == http.StatusBadRequest {
+			rejected++
+		}
+	}
+	if created != 1 || rejected != 1 {
+		t.Fatalf("expected one repayment created and one rejected, got created=%d rejected=%d", created, rejected)
+	}
+
+	var remainingBalance int
+	if err := fixture.db.QueryRow(`SELECT remaining_balance FROM loans WHERE id = $1`, loan.ID).Scan(&remainingBalance); err != nil {
+		t.Fatalf("query remaining loan balance: %v", err)
+	}
+	if remainingBalance != 20000 {
+		t.Fatalf("expected remaining balance 20000, got %d", remainingBalance)
+	}
+}
+
 func TestAdminDashboardRequiresValidAdminToken(t *testing.T) {
 	fixture := newTestFixture(t)
 
@@ -201,7 +516,7 @@ func TestAdminCanUseBrowserLoginAndSeeDashboardPage(t *testing.T) {
 
 func TestBrowserLoginCookieUsesStagingSecuritySettings(t *testing.T) {
 	fixture := newTestFixtureWithConfig(t, app.Config{
-		JWTSecret:    "test-secret",
+		JWTSecret:    "0123456789abcdef0123456789abcdef",
 		CookieSecure: true,
 	})
 
@@ -385,6 +700,7 @@ func TestLogoutClearsBrowserSessionAndReturnsToLogin(t *testing.T) {
 	authCookie := fixture.browserLogin(t, "admin@coop.test", "password")
 
 	logoutReq := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	logoutReq.Header.Set("Origin", "http://example.com")
 	logoutReq.AddCookie(authCookie)
 	logoutRec := httptest.NewRecorder()
 
@@ -783,10 +1099,10 @@ func TestMemberProfileRequiresMemberRoleAndLinkedIdentity(t *testing.T) {
 
 		fixture.server.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "FORBIDDEN", "Member identity is required")
+		assertError(t, rec.Body.Bytes(), "UNAUTHORIZED", "Invalid authentication token")
 	})
 }
 
@@ -973,6 +1289,7 @@ func TestHtmxAdminFormFailureReturnsHTMLFormError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", strings.NewReader("member_id=&amount=&record_date="))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("HX-Request", "true")
+	req.Header.Set("Origin", "http://example.com")
 	req.AddCookie(authCookie)
 	rec := httptest.NewRecorder()
 
@@ -2144,6 +2461,7 @@ func TestDashboardPagesRenderRealAndEmptyStates(t *testing.T) {
 
 type testFixture struct {
 	server http.Handler
+	db     *sql.DB
 }
 
 func newTestServer(t *testing.T) http.Handler {
@@ -2154,7 +2472,7 @@ func newTestServer(t *testing.T) http.Handler {
 func newTestFixture(t *testing.T) testFixture {
 	t.Helper()
 	return newTestFixtureWithConfig(t, app.Config{
-		JWTSecret: "test-secret",
+		JWTSecret: "0123456789abcdef0123456789abcdef",
 	})
 }
 
@@ -2165,6 +2483,7 @@ func newTestFixtureWithConfig(t *testing.T, cfg app.Config) testFixture {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if err := app.Migrate(db); err != nil {
@@ -2175,7 +2494,7 @@ func newTestFixtureWithConfig(t *testing.T, cfg app.Config) testFixture {
 	}
 	seedUser(t, db, "member-user-id", "member@coop.test", "password", "member")
 
-	return testFixture{server: app.NewServer(cfg, db)}
+	return testFixture{server: app.NewServer(cfg, db), db: db}
 }
 
 func (f testFixture) login(t *testing.T, email, password string) string {

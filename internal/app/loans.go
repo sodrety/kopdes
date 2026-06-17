@@ -132,6 +132,9 @@ func (s *Server) approveLoanRequestByID(requestID, adminID string, req approveLo
 		return Loan{}, errInvalidLoanApprovalCalculated
 	}
 
+	s.financialMu.Lock()
+	defer s.financialMu.Unlock()
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Loan{}, err
@@ -202,6 +205,9 @@ func (s *Server) approveLoanRequestByID(requestID, adminID string, req approveLo
 		loan.RemainingBalance,
 		loan.ApprovedBy,
 	); err != nil {
+		if isUniqueViolation(err) {
+			return Loan{}, errMemberAlreadyHasActiveLoan
+		}
 		return Loan{}, err
 	}
 	if err := tx.Commit(); err != nil {
