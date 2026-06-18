@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,15 +20,43 @@ type ChartSegment struct {
 
 type ChartSegments []ChartSegment
 
+type LineChart struct {
+	TitleKey    string
+	TitleSuffix string
+	XTicks      []ChartAxisLabel
+	YTicks      []ChartAxisLabel
+	Series      []LineChartSeries
+}
+
+type ChartAxisLabel struct {
+	Label string
+	X     int
+	Y     int
+}
+
+type LineChartSeries struct {
+	LabelKey string
+	Class    string
+	Points   string
+	Dots     []ChartPoint
+}
+
+type ChartPoint struct {
+	X int
+	Y int
+}
+
 type AdminOperationalReports struct {
-	SavingsByCategory   ChartSegments
-	WithdrawalsByStatus ChartSegments
-	LoanExposure        ChartSegments
-	RepaymentProgress   ChartSegments
-	SavingsByMember     []SavingsReportRow
-	WithdrawalsByMember []WithdrawalReportRow
-	Loans               []AdminLoan
-	Repayments          []AdminLoanRepayment
+	SavingsByCategory     ChartSegments
+	WithdrawalsByStatus   ChartSegments
+	LoanExposure          ChartSegments
+	RepaymentProgress     ChartSegments
+	SavingsLoanComparison LineChart
+	BalanceTrend          LineChart
+	SavingsByMember       []SavingsReportRow
+	WithdrawalsByMember   []WithdrawalReportRow
+	Loans                 []AdminLoan
+	Repayments            []AdminLoanRepayment
 }
 
 type SavingsReportRow struct {
@@ -101,15 +130,19 @@ func (s *Server) adminOperationalReports() (AdminOperationalReports, error) {
 	if err != nil {
 		return AdminOperationalReports{}, err
 	}
+	savingsTotal := sumChartValues(savings)
+	remainingLoan := chartValueByLabel(loanExposure, "remaining_balance")
 	return AdminOperationalReports{
-		SavingsByCategory:   savings,
-		WithdrawalsByStatus: withdrawals,
-		LoanExposure:        loanExposure,
-		RepaymentProgress:   repaymentProgress,
-		SavingsByMember:     savingsByMember,
-		WithdrawalsByMember: withdrawalsByMember,
-		Loans:               loans,
-		Repayments:          repayments,
+		SavingsByCategory:     savings,
+		WithdrawalsByStatus:   withdrawals,
+		LoanExposure:          loanExposure,
+		RepaymentProgress:     repaymentProgress,
+		SavingsLoanComparison: dashboardSavingsLoanComparisonChart(savingsTotal, remainingLoan),
+		BalanceTrend:          dashboardBalanceTrendChart(savingsTotal - remainingLoan),
+		SavingsByMember:       savingsByMember,
+		WithdrawalsByMember:   withdrawalsByMember,
+		Loans:                 loans,
+		Repayments:            repayments,
 	}, nil
 }
 
@@ -273,6 +306,179 @@ func (segments ChartSegments) HasData() bool {
 		}
 	}
 	return false
+}
+
+func sumChartValues(segments ChartSegments) int {
+	total := 0
+	for _, segment := range segments {
+		total += segment.Value
+	}
+	return total
+}
+
+func chartValueByLabel(segments ChartSegments, label string) int {
+	for _, segment := range segments {
+		if segment.Label == label {
+			return segment.Value
+		}
+	}
+	return 0
+}
+
+func dashboardSavingsLoanComparisonChart(savingsTotal, loanTotal int) LineChart {
+	months := []string{"Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"}
+	values := []int{savingsTotal, loanTotal}
+	maxValue := nicePositiveAxisMax(maxInt(values...))
+	seriesValues := [][]int{
+		repeatedValues(savingsTotal, len(months)),
+		repeatedValues(loanTotal, len(months)),
+	}
+	return LineChart{
+		TitleKey:    "savings_loans_comparison",
+		TitleSuffix: fmt.Sprintf("(%d)", time.Now().Year()),
+		XTicks:      xAxisLabels(months, 76, 720, 252),
+		YTicks: []ChartAxisLabel{
+			{Label: compactRupiahAxisLabel(maxValue), X: 58, Y: 44},
+			{Label: compactRupiahAxisLabel(maxValue / 2), X: 58, Y: 139},
+			{Label: compactRupiahAxisLabel(0), X: 58, Y: 234},
+		},
+		Series: []LineChartSeries{
+			lineChartSeries("savings", "chart-line-simpanan", seriesValues[0], 0, maxValue),
+			lineChartSeries("pinjaman", "chart-line-pinjaman", seriesValues[1], 0, maxValue),
+		},
+	}
+}
+
+func dashboardBalanceTrendChart(balance int) LineChart {
+	year := time.Now().Year()
+	months := []string{
+		fmt.Sprintf("Jan %d", year),
+		fmt.Sprintf("Feb %d", year),
+		fmt.Sprintf("Mar %d", year),
+		fmt.Sprintf("Apr %d", year),
+		fmt.Sprintf("Mei %d", year),
+		fmt.Sprintf("Jun %d", year),
+	}
+	maxValue := nicePositiveAxisMax(absInt(balance))
+	return LineChart{
+		TitleKey: "balance_trend_6_months",
+		XTicks:   xAxisLabels(months, 76, 720, 252),
+		YTicks: []ChartAxisLabel{
+			{Label: compactRupiahAxisLabel(maxValue), X: 58, Y: 44},
+			{Label: compactRupiahAxisLabel(maxValue / 2), X: 58, Y: 91},
+			{Label: compactRupiahAxisLabel(0), X: 58, Y: 139},
+			{Label: compactRupiahAxisLabel(-(maxValue / 2)), X: 58, Y: 186},
+			{Label: compactRupiahAxisLabel(-maxValue), X: 58, Y: 234},
+		},
+		Series: []LineChartSeries{
+			lineChartSeries("neraca", "chart-line-neraca", repeatedValues(balance, len(months)), -maxValue, maxValue),
+		},
+	}
+}
+
+func xAxisLabels(labels []string, left, right, y int) []ChartAxisLabel {
+	ticks := make([]ChartAxisLabel, len(labels))
+	width := right - left
+	for i, label := range labels {
+		x := left
+		if len(labels) > 1 {
+			x = left + width*i/(len(labels)-1)
+		}
+		ticks[i] = ChartAxisLabel{Label: label, X: x, Y: y}
+	}
+	return ticks
+}
+
+func lineChartSeries(labelKey, class string, values []int, minValue, maxValue int) LineChartSeries {
+	points := lineChartPoints(values, minValue, maxValue)
+	pointString := ""
+	for i, point := range points {
+		if i > 0 {
+			pointString += " "
+		}
+		pointString += fmt.Sprintf("%d,%d", point.X, point.Y)
+	}
+	return LineChartSeries{LabelKey: labelKey, Class: class, Points: pointString, Dots: points}
+}
+
+func lineChartPoints(values []int, minValue, maxValue int) []ChartPoint {
+	const (
+		left   = 76
+		right  = 720
+		top    = 44
+		bottom = 234
+	)
+	if maxValue <= minValue {
+		maxValue = minValue + 1
+	}
+	width := right - left
+	height := bottom - top
+	points := make([]ChartPoint, len(values))
+	for i, value := range values {
+		x := left
+		if len(values) > 1 {
+			x = left + width*i/(len(values)-1)
+		}
+		y := top + (maxValue-value)*height/(maxValue-minValue)
+		points[i] = ChartPoint{X: x, Y: y}
+	}
+	return points
+}
+
+func repeatedValues(value, count int) []int {
+	values := make([]int, count)
+	for i := range values {
+		values[i] = value
+	}
+	return values
+}
+
+func nicePositiveAxisMax(value int) int {
+	if value <= 0 {
+		return 1
+	}
+	step := 500000
+	if value <= step {
+		return step
+	}
+	return ((value + step - 1) / step) * step
+}
+
+func compactRupiahAxisLabel(value int) string {
+	sign := ""
+	if value < 0 {
+		sign = "-"
+		value = -value
+	}
+	switch {
+	case value >= 1000000:
+		whole := value / 1000000
+		if value%1000000 == 500000 {
+			return fmt.Sprintf("Rp %s%d,5 jt", sign, whole)
+		}
+		return fmt.Sprintf("Rp %s%d jt", sign, whole)
+	case value >= 1000:
+		return fmt.Sprintf("Rp %s%d rb", sign, value/1000)
+	default:
+		return fmt.Sprintf("Rp %s%d", sign, value)
+	}
+}
+
+func maxInt(values ...int) int {
+	max := 0
+	for _, value := range values {
+		if value > max {
+			max = value
+		}
+	}
+	return max
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func (s *Server) exportSavingsCSV(c *gin.Context) {

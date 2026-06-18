@@ -1917,7 +1917,7 @@ func TestAdminReportsRenderOperationalChartsAndEmptyStates(t *testing.T) {
 	if dashboardRec.Code != http.StatusOK {
 		t.Fatalf("expected dashboard page status 200, got %d: %s", dashboardRec.Code, dashboardRec.Body.String())
 	}
-	if dashboardBody := dashboardRec.Body.String(); !strings.Contains(dashboardBody, "Simpanan by category") || !strings.Contains(dashboardBody, "Pinjaman exposure") || !strings.Contains(dashboardBody, `class="bar-fill chart-simpanan"`) {
+	if dashboardBody := dashboardRec.Body.String(); !strings.Contains(dashboardBody, "Perbandingan Simpanan &amp; Pinjaman") || !strings.Contains(dashboardBody, "Neraca Trend (6 Months)") || !strings.Contains(dashboardBody, `class="line-chart-path chart-line-simpanan"`) {
 		t.Fatalf("expected dashboard page to include operational charts, got %s", dashboardBody)
 	}
 }

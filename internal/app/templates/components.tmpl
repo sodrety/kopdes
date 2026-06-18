@@ -44,3 +44,37 @@
           {{end}}
         </div>
 {{end}}
+
+{{define "line-chart"}}
+        <article class="line-chart-card {{.Size}}">
+          <header class="line-chart-header">
+            <h2>{{t .Lang .Chart.TitleKey}}{{if .Chart.TitleSuffix}} {{.Chart.TitleSuffix}}{{end}}</h2>
+            <span aria-hidden="true">⋮</span>
+          </header>
+          <div class="line-chart-body">
+            <svg class="line-chart-svg" viewBox="0 0 760 320" role="img" aria-label="{{t .Lang .Chart.TitleKey}}">
+              {{range .Chart.YTicks}}
+              <line class="line-chart-gridline" x1="76" y1="{{.Y}}" x2="720" y2="{{.Y}}"></line>
+              <text class="line-chart-y-label" x="{{.X}}" y="{{.Y}}">{{.Label}}</text>
+              {{end}}
+              <line class="line-chart-axis" x1="76" y1="44" x2="76" y2="234"></line>
+              <line class="line-chart-axis" x1="76" y1="234" x2="720" y2="234"></line>
+              {{range .Chart.XTicks}}
+              <text class="line-chart-x-label" x="{{.X}}" y="{{.Y}}">{{.Label}}</text>
+              {{end}}
+              {{range .Chart.Series}}
+              {{$seriesClass := .Class}}
+              <polyline class="line-chart-path {{.Class}}" points="{{.Points}}"></polyline>
+              {{range .Dots}}
+              <circle class="line-chart-point {{$seriesClass}}" cx="{{.X}}" cy="{{.Y}}" r="4"></circle>
+              {{end}}
+              {{end}}
+            </svg>
+          </div>
+          <footer class="line-chart-legend">
+            {{range .Chart.Series}}
+            <span><i class="{{.Class}}"></i>{{t $.Lang .LabelKey}}</span>
+            {{end}}
+          </footer>
+        </article>
+{{end}}
