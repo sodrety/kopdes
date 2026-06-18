@@ -50,7 +50,7 @@ openssl rand -base64 32
    - `ADMIN_PASSWORD`
 6. Apply the Blueprint.
 
-The app runs database setup at startup through `app.Migrate`. This is acceptable for staging MVP because migrations are idempotent table creation statements. Before production, add versioned migration tracking.
+The app runs database setup at startup through `app.Migrate`. Applied migrations are recorded in the `schema_migrations` table so repeated startup skips already-applied versions and applies new versions in order. Failed migrations stop startup instead of silently continuing with a partial schema.
 
 The Blueprint creates:
 
@@ -80,3 +80,4 @@ After each staging deploy:
 - Use platform logs for first-stage observability.
 - Keep `COOKIE_SECURE=true` whenever staging is served over HTTPS.
 - Do not use local SQLite or `JWT_SECRET=dev-secret` in staging.
+- Treat migrations as forward-only during staging. If a rollback is needed, restore the managed PostgreSQL backup or apply a deliberate forward repair migration.

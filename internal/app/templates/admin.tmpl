@@ -70,6 +70,7 @@
 {{define "admin-savings"}}
 {{template "admin-shell-start" .}}
       <section class="panel narrow-panel">
+        {{if .Members}}
         <form method="post" action="/api/admin/savings" hx-post="/api/admin/savings" hx-target="#saving-form-error" hx-swap="innerHTML">
           <label>Member
             <select name="member_id" required>
@@ -79,24 +80,32 @@
             </select>
           </label>
           <label>Type
-            <select name="type">
+            <select name="type" onchange="this.form.querySelector('[data-saving-submit]').textContent = this.value === 'withdrawal' ? 'Record withdrawal' : 'Record deposit'">
               <option value="deposit">deposit</option>
               <option value="withdrawal">withdrawal</option>
             </select>
           </label>
           <label>Amount <input name="amount" type="number" min="1" required></label>
-          <label>Record date <input name="record_date" type="date" required></label>
+          <label>Record date <input name="record_date" type="date" value="{{.CurrentDate}}" required></label>
           <label>Reference number <input name="reference_no"></label>
           <label>Note <input name="note"></label>
-          <button type="submit">Record deposit</button>
+          <button type="submit" data-saving-submit>Record deposit</button>
         </form>
 {{template "form-error" (dict "ID" "saving-form-error")}}
+        {{else}}
+{{template "empty-state" "Create an active member before recording saving activity."}}
+        {{end}}
       </section>
 {{template "admin-shell-end" .}}
 {{end}}
 
 {{define "admin-member-detail"}}
 {{template "admin-shell-start" .}}
+      <section class="summary-grid">
+{{template "summary-card" (dict "Label" "Saving balance" "Value" .Summary.CurrentBalance)}}
+{{template "summary-card" (dict "Label" "Total deposits" "Value" .Summary.TotalDeposit)}}
+{{template "summary-card" (dict "Label" "Total withdrawals" "Value" .Summary.TotalWithdrawal)}}
+      </section>
       <section class="panel detail-grid">
         <div><span>Member no</span><strong>{{.Member.MemberNo}}</strong></div>
         <div><span>Full name</span><strong>{{.Member.FullName}}</strong></div>
@@ -104,6 +113,105 @@
         <div><span>Address</span><strong>{{.Member.Address}}</strong></div>
         <div><span>Join date</span><strong>{{.Member.JoinDate}}</strong></div>
         <div><span>Status</span><strong>{{.Member.Status}}</strong></div>
+      </section>
+      <section class="panel">
+        <h2>Saving records</h2>
+        {{if .Savings}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Amount</th>
+              <th>Reference</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Savings}}
+            <tr>
+              <td>{{.RecordDate}}</td>
+              <td>{{.Type}}</td>
+              <td>{{.Amount}}</td>
+              <td>{{.ReferenceNo}}</td>
+              <td>{{.Note}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" "No saving records yet."}}
+        {{end}}
+      </section>
+      <section class="panel">
+        <h2>Loan requests</h2>
+        {{if .LoanRequests}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>Amount</th>
+              <th>Duration</th>
+              <th>Status</th>
+              <th>Purpose</th>
+              <th>Rejection reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .LoanRequests}}
+            <tr>
+              <td>{{.RequestedAmount}}</td>
+              <td>{{.DurationMonths}} months</td>
+              <td>{{template "status-badge" .Status}}</td>
+              <td>{{.Purpose}}</td>
+              <td>{{.RejectionReason}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" "No loan requests yet."}}
+        {{end}}
+      </section>
+      <section class="panel">
+        <h2>Active loan</h2>
+        {{if .ActiveLoan}}
+        <div class="detail-grid">
+          <div><span>Approved amount</span><strong>{{.ActiveLoan.ApprovedAmount}}</strong></div>
+          <div><span>Monthly installment</span><strong>{{.ActiveLoan.MonthlyInstallment}}</strong></div>
+          <div><span>Remaining balance</span><strong>{{.ActiveLoan.RemainingBalance}}</strong></div>
+          <div><span>Duration</span><strong>{{.ActiveLoan.DurationMonths}} months</strong></div>
+          <div><span>Status</span><strong>{{.ActiveLoan.Status}}</strong></div>
+        </div>
+        {{else}}
+{{template "empty-state" "No active loan."}}
+        {{end}}
+      </section>
+      <section class="panel">
+        <h2>Repayment records</h2>
+        {{if .Repayments}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Amount</th>
+              <th>Reference</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Repayments}}
+            <tr>
+              <td>{{.RecordDate}}</td>
+              <td>{{.Amount}}</td>
+              <td>{{.ReferenceNo}}</td>
+              <td>{{.Note}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" "No repayment records yet."}}
+        {{end}}
       </section>
 {{template "admin-shell-end" .}}
 {{end}}
@@ -133,16 +241,16 @@
               <td>{{.Purpose}}</td>
               <td>{{template "status-badge" .Status}}</td>
               <td>{{.CreatedAt}}</td>
-              <td>
-                <form class="inline-approval-form" method="post" action="/api/admin/loan-requests/{{.ID}}/approve" hx-post="/api/admin/loan-requests/{{.ID}}/approve" hx-target="#loan-review-error" hx-swap="innerHTML">
-                  <input name="approved_amount" type="number" min="1" value="{{.RequestedAmount}}" aria-label="Approved amount">
-                  <input name="duration_months" type="number" min="1" value="{{.DurationMonths}}" aria-label="Duration months">
+              <td class="review-cell">
+                <form class="inline-approval-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/approve" hx-post="/api/admin/loan-requests/{{.ID}}/approve" hx-target="#loan-review-error" hx-swap="innerHTML">
+                  <label>Approved amount <input name="approved_amount" type="number" min="1" value="{{.RequestedAmount}}" aria-label="Approved amount"></label>
+                  <label>Duration <input name="duration_months" type="number" min="1" value="{{.DurationMonths}}" aria-label="Duration months"></label>
                   <div class="table-actions">
                     <button type="submit">Approve</button>
                   </div>
                 </form>
-                <form class="inline-rejection-form" method="post" action="/api/admin/loan-requests/{{.ID}}/reject" hx-post="/api/admin/loan-requests/{{.ID}}/reject" hx-target="#loan-review-error" hx-swap="innerHTML">
-                  <input name="rejection_reason" aria-label="Rejection reason" placeholder="Reason">
+                <form class="inline-rejection-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/reject" hx-post="/api/admin/loan-requests/{{.ID}}/reject" hx-target="#loan-review-error" hx-swap="innerHTML">
+                  <label>Rejection reason <input name="rejection_reason" aria-label="Rejection reason" placeholder="Reason"></label>
                   <button class="button-secondary" type="submit">Reject</button>
                 </form>
               </td>

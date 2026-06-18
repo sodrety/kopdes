@@ -23,6 +23,7 @@ type MemberDashboardSummary struct {
 	RemainingLoanBalance int             `json:"remaining_loan_balance"`
 	LatestSavings        []SavingRecord  `json:"latest_savings"`
 	LatestRepayments     []LoanRepayment `json:"latest_repayments"`
+	LoanRequests         []LoanRequest   `json:"loan_requests"`
 }
 
 func (s *Server) memberDashboard(c *gin.Context) {
@@ -77,6 +78,10 @@ func (s *Server) memberDashboardSummary(memberID string) (MemberDashboardSummary
 	if err != nil {
 		return MemberDashboardSummary{}, err
 	}
+	requests, err := s.loanRequestsByMember(memberID)
+	if err != nil {
+		return MemberDashboardSummary{}, err
+	}
 
 	var activeLoan *Loan
 	loan, err := s.activeLoanByMember(memberID)
@@ -97,5 +102,6 @@ func (s *Server) memberDashboardSummary(memberID string) (MemberDashboardSummary
 		RemainingLoanBalance: remainingBalance,
 		LatestSavings:        savings,
 		LatestRepayments:     repayments,
+		LoanRequests:         requests,
 	}, nil
 }

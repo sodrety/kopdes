@@ -321,6 +321,14 @@ th {
 	padding: 8px 12px;
 	font-size: 14px;
 }
+.review-cell {
+	min-width: 300px;
+}
+.review-action label {
+	gap: 4px;
+	font-size: 12px;
+	line-height: 16px;
+}
 .inline-approval-form {
 	display: grid;
 	grid-template-columns: minmax(112px, 1fr) minmax(80px, 0.6fr);
@@ -477,6 +485,9 @@ th {
   .inline-rejection-form,
   .inline-repayment-form {
     min-width: 0;
+  }
+  .review-cell {
+    min-width: 220px;
   }
   .inline-approval-form,
   .inline-repayment-form {

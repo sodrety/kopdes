@@ -74,6 +74,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.GET("/admin/loan-requests", server.requireRole("admin"), server.adminLoanRequestsPage)
 	router.GET("/admin/loans", server.requireRole("admin"), server.adminLoansPage)
 	router.GET("/admin/repayments", server.requireRole("admin"), server.adminRepaymentsPage)
+	router.GET("/member/dashboard", server.requireRole("member"), server.memberDashboardPage)
 	router.GET("/member/profile", server.requireRole("member"), server.memberProfilePage)
 	router.GET("/member/loan-requests", server.requireRole("member"), server.memberLoanRequestsPage)
 
@@ -179,7 +180,7 @@ func (s *Server) login(c *gin.Context) {
 
 	redirectPath := "/admin/dashboard"
 	if user.Role == "member" {
-		redirectPath = "/member/profile"
+		redirectPath = "/member/dashboard"
 	}
 
 	if isHTMXRequest(c) {

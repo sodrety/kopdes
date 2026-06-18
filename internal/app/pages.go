@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -88,7 +89,8 @@ func (s *Server) adminSavingsPage(c *gin.Context) {
 		return
 	}
 	renderPage(c, "admin-savings", pageData("Savings - Kopdes", "savings", "Record saving", "Record verified member saving deposits.", gin.H{
-		"Members": members,
+		"Members":     members,
+		"CurrentDate": time.Now().Format("2006-01-02"),
 	}))
 }
 
@@ -102,8 +104,42 @@ func (s *Server) adminMemberDetailPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	summary, err := s.savingSummary(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	savings, err := s.savingsByMember(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	requests, err := s.loanRequestsByMember(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	var activeLoan any
+	loan, err := s.activeLoanByMember(member.ID)
+	if err == nil {
+		activeLoan = loan
+	}
+	if err != nil && err != sql.ErrNoRows {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	repayments, err := s.repaymentsByMember(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
 	renderPage(c, "admin-member-detail", pageData("Member detail - Kopdes", "members", "Member detail", member.FullName, gin.H{
-		"Member": member,
+		"Member":       member,
+		"Summary":      summary,
+		"Savings":      savings,
+		"LoanRequests": requests,
+		"ActiveLoan":   activeLoan,
+		"Repayments":   repayments,
 	}))
 }
 
@@ -176,6 +212,23 @@ func (s *Server) memberProfilePage(c *gin.Context) {
 		"ActiveLoan": activeLoan,
 		"Repayments": repayments,
 		"ShellClass": "member-profile-shell",
+	}))
+}
+
+func (s *Server) memberDashboardPage(c *gin.Context) {
+	member, ok := s.profileMember(c)
+	if !ok {
+		return
+	}
+	dashboard, err := s.memberDashboardSummary(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	renderPage(c, "member-dashboard", pageData("Member dashboard - Kopdes", "dashboard", "Dashboard", member.FullName, gin.H{
+		"Member":     member,
+		"Dashboard":  dashboard,
+		"ShellClass": "member-dashboard-shell",
 	}))
 }
 

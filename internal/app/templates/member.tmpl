@@ -1,3 +1,98 @@
+{{define "member-dashboard"}}
+{{template "member-shell-start" .}}
+    <section class="summary-grid">
+{{template "summary-card" (dict "Label" "Saving balance" "Value" .Dashboard.SavingBalance)}}
+{{template "summary-card" (dict "Label" "Remaining loan" "Value" .Dashboard.RemainingLoanBalance)}}
+{{if .Dashboard.ActiveLoan}}
+{{template "summary-card" (dict "Label" "Active loan" "Value" .Dashboard.ActiveLoan.ApprovedAmount)}}
+{{else}}
+{{template "summary-card" (dict "Label" "Active loan" "Value" "None")}}
+{{end}}
+    </section>
+    <section class="panel">
+      <h2>Loan request status</h2>
+      {{if .Dashboard.LoanRequests}}
+{{template "table-open" .}}
+        <thead>
+          <tr>
+            <th>Amount</th>
+            <th>Duration</th>
+            <th>Status</th>
+            <th>Purpose</th>
+            <th>Rejection reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Dashboard.LoanRequests}}
+          <tr>
+            <td>{{.RequestedAmount}}</td>
+            <td>{{.DurationMonths}} months</td>
+            <td>{{template "status-badge" .Status}}</td>
+            <td>{{.Purpose}}</td>
+            <td>{{.RejectionReason}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+{{template "table-close" .}}
+      {{else}}
+{{template "empty-state" "No loan requests yet."}}
+      {{end}}
+    </section>
+    <section class="panel">
+      <h2>Latest saving records</h2>
+      {{if .Dashboard.LatestSavings}}
+{{template "table-open" .}}
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>Reference</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Dashboard.LatestSavings}}
+          <tr>
+            <td>{{.RecordDate}}</td>
+            <td>{{.Type}}</td>
+            <td>{{.Amount}}</td>
+            <td>{{.ReferenceNo}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+{{template "table-close" .}}
+      {{else}}
+{{template "empty-state" "No saving records yet."}}
+      {{end}}
+    </section>
+    <section class="panel">
+      <h2>Latest repayment records</h2>
+      {{if .Dashboard.LatestRepayments}}
+{{template "table-open" .}}
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Amount</th>
+            <th>Reference</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Dashboard.LatestRepayments}}
+          <tr>
+            <td>{{.RecordDate}}</td>
+            <td>{{.Amount}}</td>
+            <td>{{.ReferenceNo}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+{{template "table-close" .}}
+      {{else}}
+{{template "empty-state" "No repayment records yet."}}
+      {{end}}
+    </section>
+{{template "member-shell-end" .}}
+{{end}}
+
 {{define "member-profile"}}
 {{template "member-shell-start" .}}
     <section class="summary-grid">

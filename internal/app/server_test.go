@@ -116,6 +116,42 @@ func TestHtmxLoginFailureReturnsHTMLFormError(t *testing.T) {
 	}
 }
 
+func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+
+	if err := app.Migrate(db); err != nil {
+		t.Fatalf("first migrate: %v", err)
+	}
+	if err := app.Migrate(db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+
+	var migrationCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+	if migrationCount != 6 {
+		t.Fatalf("expected six tracked migrations, got %d", migrationCount)
+	}
+
+	var latestName string
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 6`).Scan(&latestName); err != nil {
+		t.Fatalf("read latest migration: %v", err)
+	}
+	if latestName != "create_loan_repayments" {
+		t.Fatalf("expected latest migration name create_loan_repayments, got %q", latestName)
+	}
+
+	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
+		t.Fatalf("expected migrated members table to be usable: %v", err)
+	}
+}
+
 func TestResponsesIncludeSecurityHeaders(t *testing.T) {
 	fixture := newTestFixture(t)
 
@@ -999,7 +1035,7 @@ func TestAdminMemberPagesRenderListCreateAndDetailFlows(t *testing.T) {
 		t.Fatalf("expected member detail page status 200, got %d: %s", detailRec.Code, detailRec.Body.String())
 	}
 	detailBody := detailRec.Body.String()
-	for _, text := range []string{"Admin menu", "Members", "Member detail", "Agus Wijaya", "M-0006", "2026-06-15"} {
+	for _, text := range []string{"Admin menu", "Members", "Member detail", "Agus Wijaya", "M-0006", "2026-06-15", "Saving balance", "No saving records yet.", "No loan requests yet.", "No active loan.", "No repayment records yet."} {
 		if !strings.Contains(detailBody, text) {
 			t.Fatalf("expected member detail page to include %q, got %s", text, detailBody)
 		}
@@ -1111,6 +1147,21 @@ func TestMemberCanUseBrowserLoginAndSeeProfilePage(t *testing.T) {
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-0010","full_name":"Browser Member","phone":"0822222222","address":"Surabaya","join_date":"2026-06-16","status":"active"}`)
 	fixture.createMemberUser(t, adminToken, member.ID, "browser-member@coop.test", "secret-password")
+
+	loginBody := strings.NewReader("email=browser-member%40coop.test&password=secret-password")
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody)
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(loginRec, loginReq)
+
+	if loginRec.Code != http.StatusSeeOther {
+		t.Fatalf("expected member browser login redirect status 303, got %d: %s", loginRec.Code, loginRec.Body.String())
+	}
+	if location := loginRec.Header().Get("Location"); location != "/member/dashboard" {
+		t.Fatalf("expected member browser login to redirect to dashboard, got %q", location)
+	}
+
 	memberCookie := fixture.browserLogin(t, "browser-member@coop.test", "secret-password")
 
 	req := httptest.NewRequest(http.MethodGet, "/member/profile", nil)
@@ -1418,6 +1469,20 @@ func TestSavingPagesRenderDepositFormAndMemberBalance(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+
+	emptyAdminPageReq := httptest.NewRequest(http.MethodGet, "/admin/savings", nil)
+	emptyAdminPageReq.AddCookie(adminCookie)
+	emptyAdminPageRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(emptyAdminPageRec, emptyAdminPageReq)
+
+	if emptyAdminPageRec.Code != http.StatusOK {
+		t.Fatalf("expected empty admin savings page status 200, got %d: %s", emptyAdminPageRec.Code, emptyAdminPageRec.Body.String())
+	}
+	if body := emptyAdminPageRec.Body.String(); !strings.Contains(body, "Create an active member before recording saving activity.") || strings.Contains(body, `name="member_id"`) {
+		t.Fatalf("expected savings page to show no-member empty state without selectable member form, got %s", body)
+	}
+
 	member := fixture.createMember(t, adminToken, `{
 		"member_no":"M-0014",
 		"full_name":"Saving Page Member",
@@ -1440,7 +1505,7 @@ func TestSavingPagesRenderDepositFormAndMemberBalance(t *testing.T) {
 		t.Fatalf("expected admin savings page status 200, got %d: %s", adminPageRec.Code, adminPageRec.Body.String())
 	}
 	adminBody := adminPageRec.Body.String()
-	for _, text := range []string{"Record saving", "Saving Page Member", "deposit", "withdrawal", `name="amount"`, `name="record_date"`} {
+	for _, text := range []string{"Record saving", "Saving Page Member", "deposit", "withdrawal", `name="amount"`, `name="record_date"`, `data-saving-submit`, `value="`} {
 		if !strings.Contains(adminBody, text) {
 			t.Fatalf("expected admin savings page to include %q, got %s", text, adminBody)
 		}
@@ -1911,7 +1976,7 @@ func TestLoanApprovalPagesRenderReviewAndActiveLoanViews(t *testing.T) {
 		t.Fatalf("expected review page status 200, got %d: %s", reviewRec.Code, reviewRec.Body.String())
 	}
 	reviewBody := reviewRec.Body.String()
-	for _, text := range []string{"/api/admin/loan-requests/" + requestID + "/approve", `name="approved_amount"`, `name="duration_months"`, "Approve"} {
+	for _, text := range []string{"/api/admin/loan-requests/" + requestID + "/approve", `name="approved_amount"`, `name="duration_months"`, "Approved amount", "Duration", "Approve"} {
 		if !strings.Contains(reviewBody, text) {
 			t.Fatalf("expected review page to include %q, got %s", text, reviewBody)
 		}
@@ -2092,7 +2157,7 @@ func TestLoanRejectionPageRendersReasonForm(t *testing.T) {
 		t.Fatalf("expected review page status 200, got %d: %s", reviewRec.Code, reviewRec.Body.String())
 	}
 	reviewBody := reviewRec.Body.String()
-	for _, text := range []string{"/api/admin/loan-requests/" + requestID + "/reject", `name="rejection_reason"`, "Reject"} {
+	for _, text := range []string{"/api/admin/loan-requests/" + requestID + "/reject", `name="rejection_reason"`, "Rejection reason", "Reject"} {
 		if !strings.Contains(reviewBody, text) {
 			t.Fatalf("expected review page to include %q, got %s", text, reviewBody)
 		}
@@ -2233,10 +2298,11 @@ func TestRepaymentValidationBalanceAndPaidTransition(t *testing.T) {
 func TestRepaymentHistoryIsMemberIsolatedAndPagesRender(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
-	fixture.createMember(t, adminToken, `{"member_no":"M-0030","full_name":"First Borrower","join_date":"2026-06-16","status":"active","email":"first-borrower@coop.test","password":"member-password"}`)
+	firstMember := fixture.createMember(t, adminToken, `{"member_no":"M-0030","full_name":"First Borrower","join_date":"2026-06-16","status":"active","email":"first-borrower@coop.test","password":"member-password"}`)
 	fixture.createMember(t, adminToken, `{"member_no":"M-0031","full_name":"Second Borrower","join_date":"2026-06-16","status":"active","email":"second-borrower@coop.test","password":"member-password"}`)
 	firstToken := fixture.login(t, "first-borrower@coop.test", "member-password")
 	secondToken := fixture.login(t, "second-borrower@coop.test", "member-password")
+	fixture.recordSaving(t, adminToken, firstMember.ID, "deposit", 350000, "DETAIL-SAVE", "Detail saving")
 	firstLoan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, firstToken, 800000, 4), 800000, 4)
 	fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, secondToken, 600000, 3), 600000, 3)
 	fixture.recordRepayment(t, adminToken, firstLoan.ID, 200000)
@@ -2281,6 +2347,25 @@ func TestRepaymentHistoryIsMemberIsolatedAndPagesRender(t *testing.T) {
 		if !strings.Contains(profileBody, text) {
 			t.Fatalf("expected member profile to include %q, got %s", text, profileBody)
 		}
+	}
+
+	adminMemberDetailReq := httptest.NewRequest(http.MethodGet, "/admin/members/"+firstMember.ID, nil)
+	adminMemberDetailReq.AddCookie(adminCookie)
+	adminMemberDetailRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(adminMemberDetailRec, adminMemberDetailReq)
+
+	if adminMemberDetailRec.Code != http.StatusOK {
+		t.Fatalf("expected admin member detail status 200, got %d: %s", adminMemberDetailRec.Code, adminMemberDetailRec.Body.String())
+	}
+	detailBody := adminMemberDetailRec.Body.String()
+	for _, text := range []string{"Saving balance", "350000", "Saving records", "DETAIL-SAVE", "Loan requests", "800000", "Active loan", "600000", "Repayment records", "RPY-TEST"} {
+		if !strings.Contains(detailBody, text) {
+			t.Fatalf("expected admin member detail to include %q, got %s", text, detailBody)
+		}
+	}
+	if strings.Contains(detailBody, "Second Borrower") {
+		t.Fatalf("expected admin member detail not to include another member's activity, got %s", detailBody)
 	}
 }
 
@@ -2415,6 +2500,26 @@ func TestMemberDashboardIsIsolatedAndIncludesLatestActivity(t *testing.T) {
 	}
 	if body := secondDashboardRec.Body.String(); strings.Contains(body, "FIRST-DEP") || strings.Contains(body, firstLoan.ID) {
 		t.Fatalf("expected second dashboard not to expose first member data, got %s", body)
+	}
+
+	firstCookie := fixture.browserLogin(t, "dashboard-first@coop.test", "member-password")
+	dashboardPageReq := httptest.NewRequest(http.MethodGet, "/member/dashboard", nil)
+	dashboardPageReq.AddCookie(firstCookie)
+	dashboardPageRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(dashboardPageRec, dashboardPageReq)
+
+	if dashboardPageRec.Code != http.StatusOK {
+		t.Fatalf("expected member dashboard page status 200, got %d: %s", dashboardPageRec.Code, dashboardPageRec.Body.String())
+	}
+	pageBody := dashboardPageRec.Body.String()
+	for _, text := range []string{"member-dashboard-shell", "Saving balance", "700000", "Remaining loan", "400000", "Loan request status", "FIRST-DEP", "Latest repayment records", "100000"} {
+		if !strings.Contains(pageBody, text) {
+			t.Fatalf("expected member dashboard page to include %q, got %s", text, pageBody)
+		}
+	}
+	if strings.Contains(pageBody, "SECOND-DEP") {
+		t.Fatalf("expected member dashboard page not to expose second member data, got %s", pageBody)
 	}
 }
 
