@@ -116,6 +116,81 @@ func TestHtmxLoginFailureReturnsHTMLFormError(t *testing.T) {
 	}
 }
 
+func TestBrowserLanguageSelectionLocalizesLoginAndHtmxErrors(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	defaultReq := httptest.NewRequest(http.MethodGet, "/login", nil)
+	defaultRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(defaultRec, defaultReq)
+	if defaultRec.Code != http.StatusOK {
+		t.Fatalf("expected login page status 200, got %d: %s", defaultRec.Code, defaultRec.Body.String())
+	}
+	if body := defaultRec.Body.String(); !strings.Contains(body, "Language") || !strings.Contains(body, "Log in") || strings.Contains(body, "Kata sandi") {
+		t.Fatalf("expected English default login page, got %s", body)
+	}
+
+	langCookie := fixture.setLanguage(t, "id", "/login")
+	localizedReq := httptest.NewRequest(http.MethodGet, "/login", nil)
+	localizedReq.AddCookie(langCookie)
+	localizedRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(localizedRec, localizedReq)
+	if localizedRec.Code != http.StatusOK {
+		t.Fatalf("expected localized login page status 200, got %d: %s", localizedRec.Code, localizedRec.Body.String())
+	}
+	if body := localizedRec.Body.String(); !strings.Contains(body, "Bahasa") || !strings.Contains(body, "Kata sandi") || !strings.Contains(body, "Masuk") {
+		t.Fatalf("expected Bahasa login page, got %s", body)
+	}
+
+	failReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader("email=admin%40coop.test&password=wrong"))
+	failReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	failReq.Header.Set("HX-Request", "true")
+	failReq.AddCookie(langCookie)
+	failRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(failRec, failReq)
+	if failRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected localized login failure status 401, got %d: %s", failRec.Code, failRec.Body.String())
+	}
+	if body := failRec.Body.String(); body != `<span class="form-error-message">Email atau kata sandi tidak valid</span>` {
+		t.Fatalf("expected localized login error fragment, got %s", body)
+	}
+}
+
+func TestBahasaRenderingForAuthenticatedAdminAndMemberPages(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-LANG","full_name":"Bahasa Member","join_date":"2026-06-18","status":"active","email":"bahasa-member@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "bahasa-member@coop.test", "member-password")
+	fixture.recordSaving(t, adminToken, member.ID, "deposit", 250000, "LANG-DEP", "Bahasa deposit")
+	fixture.createLoanRequest(t, memberToken, 1000000, 5)
+	langCookie := fixture.setLanguage(t, "id", "/admin/dashboard")
+
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	adminReq := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	adminReq.AddCookie(adminCookie)
+	adminReq.AddCookie(langCookie)
+	adminRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(adminRec, adminReq)
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("expected localized admin dashboard status 200, got %d: %s", adminRec.Code, adminRec.Body.String())
+	}
+	if body := adminRec.Body.String(); !strings.Contains(body, "Dasbor") || !strings.Contains(body, "Total anggota") || !strings.Contains(body, "Simpanan") || !strings.Contains(body, "Keluar") {
+		t.Fatalf("expected Bahasa admin dashboard, got %s", body)
+	}
+
+	memberCookie := fixture.browserLogin(t, "bahasa-member@coop.test", "member-password")
+	memberReq := httptest.NewRequest(http.MethodGet, "/member/loan-requests", nil)
+	memberReq.AddCookie(memberCookie)
+	memberReq.AddCookie(langCookie)
+	memberRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(memberRec, memberReq)
+	if memberRec.Code != http.StatusOK {
+		t.Fatalf("expected localized member loan request page status 200, got %d: %s", memberRec.Code, memberRec.Body.String())
+	}
+	if body := memberRec.Body.String(); !strings.Contains(body, "Permintaan pinjaman") || !strings.Contains(body, "Ajukan permintaan pinjaman") || !strings.Contains(body, "Riwayat permintaan") || !strings.Contains(body, "menunggu") {
+		t.Fatalf("expected Bahasa member loan request page, got %s", body)
+	}
+}
+
 func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -2644,6 +2719,27 @@ func (f testFixture) browserLogin(t *testing.T, email, password string) *http.Co
 		}
 	}
 	t.Fatal("expected auth_token cookie")
+	return nil
+}
+
+func (f testFixture) setLanguage(t *testing.T, lang, redirectPath string) *http.Cookie {
+	t.Helper()
+
+	body := strings.NewReader("lang=" + lang + "&redirect=" + redirectPath)
+	req := httptest.NewRequest(http.MethodPost, "/language", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	f.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected language redirect status 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "kopdes_lang" {
+			return cookie
+		}
+	}
+	t.Fatal("expected kopdes_lang cookie")
 	return nil
 }
 

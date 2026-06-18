@@ -39,6 +39,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.GET("/static/app.css", server.staticCSS)
 	router.GET("/static/vendor/*file", server.staticVendorAsset)
 	router.GET("/login", server.loginPage)
+	router.POST("/language", server.setLanguage)
 	router.POST("/api/auth/login", server.login)
 	router.POST("/logout", server.logout)
 
@@ -378,7 +379,7 @@ func bearerToken(header string) string {
 
 func respondError(c *gin.Context, status int, code, message string) {
 	if isHTMXRequest(c) {
-		body := `<span class="form-error-message">` + template.HTMLEscapeString(message) + `</span>`
+		body := `<span class="form-error-message">` + template.HTMLEscapeString(localizedErrorMessage(c, message)) + `</span>`
 		c.Data(status, "text/html; charset=utf-8", []byte(body))
 		return
 	}

@@ -203,6 +203,22 @@ button:disabled {
 .logout-form {
   display: block;
 }
+.language-form {
+  display: block;
+}
+.language-form label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.language-form select {
+  width: auto;
+  min-width: 150px;
+  border-radius: 9999px;
+  padding: 8px 12px;
+  font-size: 14px;
+  line-height: 20px;
+}
 .member-shell {
   width: min(960px, 100%);
   margin: 0 auto;
@@ -532,6 +548,9 @@ th {
   .member-topbar .logout-form {
     margin-left: auto;
   }
+  .member-topbar .language-form {
+    width: 100%;
+  }
   .member-topbar .button-secondary {
     padding: 8px 14px;
     font-size: 14px;
@@ -592,10 +611,12 @@ th {
     grid-column: auto;
   }
   .member-nav,
+  .language-form,
   .member-topbar .logout-form {
     width: 100%;
   }
   .member-nav a,
+  .language-form select,
   .member-topbar .logout-form button {
     width: 100%;
     text-align: center;

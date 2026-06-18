@@ -1,12 +1,12 @@
 {{define "admin-dashboard"}}
 {{template "admin-shell-start" .}}
       <section class="summary-grid">
-{{template "summary-card" (dict "Label" "Total members" "Value" .Summary.TotalMembers)}}
-{{template "summary-card" (dict "Label" "Active members" "Value" .Summary.ActiveMembers)}}
-{{template "summary-card" (dict "Label" "Total savings" "Value" .Summary.TotalSavings)}}
-{{template "summary-card" (dict "Label" "Active loans" "Value" .Summary.ActiveLoans)}}
-{{template "summary-card" (dict "Label" "Outstanding loan" "Value" .Summary.TotalOutstandingLoan)}}
-{{template "summary-card" (dict "Label" "Pending requests" "Value" .Summary.PendingLoanRequests)}}
+{{template "summary-card" (dict "Label" (t .Lang "total_members") "Value" .Summary.TotalMembers)}}
+{{template "summary-card" (dict "Label" (t .Lang "active_members") "Value" .Summary.ActiveMembers)}}
+{{template "summary-card" (dict "Label" (t .Lang "total_savings") "Value" .Summary.TotalSavings)}}
+{{template "summary-card" (dict "Label" (t .Lang "active_loans") "Value" .Summary.ActiveLoans)}}
+{{template "summary-card" (dict "Label" (t .Lang "outstanding_loan") "Value" .Summary.TotalOutstandingLoan)}}
+{{template "summary-card" (dict "Label" (t .Lang "pending_requests") "Value" .Summary.PendingLoanRequests)}}
       </section>
 {{template "admin-shell-end" .}}
 {{end}}
@@ -15,14 +15,14 @@
 {{template "admin-shell-start" .}}
       <section class="two-column">
         <article class="panel">
-          <h2>Create member</h2>
+          <h2>{{t .Lang "create_member"}}</h2>
           <form method="post" action="/api/admin/members" hx-post="/api/admin/members" hx-target="#member-form-error" hx-swap="innerHTML">
-            <label>Member number <input name="member_no" required></label>
-            <label>Full name <input name="full_name" required></label>
-            <label>Phone <input name="phone"></label>
-            <label>Address <input name="address"></label>
-            <label>Join date <input name="join_date" type="date" required></label>
-            <label>Status
+            <label>{{t .Lang "member_number"}} <input name="member_no" required></label>
+            <label>{{t .Lang "full_name"}} <input name="full_name" required></label>
+            <label>{{t .Lang "phone"}} <input name="phone"></label>
+            <label>{{t .Lang "address"}} <input name="address"></label>
+            <label>{{t .Lang "join_date"}} <input name="join_date" type="date" required></label>
+            <label>{{t .Lang "status"}}
               <select name="status">
                 <option value="active">active</option>
                 <option value="inactive">inactive</option>
@@ -30,23 +30,23 @@
               </select>
             </label>
             <div class="form-section">
-              <h3>Member login</h3>
-              <label>Email <input name="email" type="email" autocomplete="off"></label>
-              <label>Password <input name="password" type="password" autocomplete="new-password"></label>
+              <h3>{{t .Lang "member_login"}}</h3>
+              <label>{{t .Lang "email"}} <input name="email" type="email" autocomplete="off"></label>
+              <label>{{t .Lang "password"}} <input name="password" type="password" autocomplete="new-password"></label>
             </div>
-            <button type="submit">Create member</button>
+            <button type="submit">{{t .Lang "create_member"}}</button>
           </form>
 {{template "form-error" (dict "ID" "member-form-error")}}
         </article>
         <article class="panel">
-          <h2>Member list</h2>
+          <h2>{{t .Lang "member_list"}}</h2>
           {{if .Members}}
 {{template "table-open" .}}
             <thead>
               <tr>
-                <th>Member no</th>
-                <th>Name</th>
-                <th>Status</th>
+                <th>{{t $.Lang "member_no"}}</th>
+                <th>{{t $.Lang "name"}}</th>
+                <th>{{t $.Lang "status"}}</th>
               </tr>
             </thead>
             <tbody>
@@ -54,13 +54,13 @@
               <tr>
                 <td><a href="/admin/members/{{.ID}}">{{.MemberNo}}</a></td>
                 <td>{{.FullName}}</td>
-                <td>{{template "status-badge" .Status}}</td>
+                <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               </tr>
               {{end}}
             </tbody>
 {{template "table-close" .}}
           {{else}}
-{{template "empty-state" "No members yet."}}
+{{template "empty-state" (t .Lang "no_members")}}
           {{end}}
         </article>
       </section>
@@ -72,28 +72,28 @@
       <section class="panel narrow-panel">
         {{if .Members}}
         <form method="post" action="/api/admin/savings" hx-post="/api/admin/savings" hx-target="#saving-form-error" hx-swap="innerHTML">
-          <label>Member
+          <label>{{t .Lang "member"}}
             <select name="member_id" required>
               {{range .Members}}
               <option value="{{.ID}}">{{.FullName}} - {{.MemberNo}}</option>
               {{end}}
             </select>
           </label>
-          <label>Type
-            <select name="type" onchange="this.form.querySelector('[data-saving-submit]').textContent = this.value === 'withdrawal' ? 'Record withdrawal' : 'Record deposit'">
+          <label>{{t .Lang "type"}}
+            <select name="type" onchange="this.form.querySelector('[data-saving-submit]').textContent = this.value === 'withdrawal' ? this.dataset.withdrawalText : this.dataset.depositText" data-deposit-text="{{t .Lang "record_deposit"}}" data-withdrawal-text="{{t .Lang "record_withdrawal"}}">
               <option value="deposit">deposit</option>
               <option value="withdrawal">withdrawal</option>
             </select>
           </label>
-          <label>Amount <input name="amount" type="number" min="1" required></label>
-          <label>Record date <input name="record_date" type="date" value="{{.CurrentDate}}" required></label>
-          <label>Reference number <input name="reference_no"></label>
-          <label>Note <input name="note"></label>
-          <button type="submit" data-saving-submit>Record deposit</button>
+          <label>{{t .Lang "amount"}} <input name="amount" type="number" min="1" required></label>
+          <label>{{t .Lang "date"}} <input name="record_date" type="date" value="{{.CurrentDate}}" required></label>
+          <label>{{t .Lang "reference_number"}} <input name="reference_no"></label>
+          <label>{{t .Lang "note"}} <input name="note"></label>
+          <button type="submit" data-saving-submit>{{t .Lang "record_deposit"}}</button>
         </form>
 {{template "form-error" (dict "ID" "saving-form-error")}}
         {{else}}
-{{template "empty-state" "Create an active member before recording saving activity."}}
+{{template "empty-state" (t .Lang "create_active_member_before_saving")}}
         {{end}}
       </section>
 {{template "admin-shell-end" .}}
@@ -102,36 +102,36 @@
 {{define "admin-member-detail"}}
 {{template "admin-shell-start" .}}
       <section class="summary-grid">
-{{template "summary-card" (dict "Label" "Saving balance" "Value" .Summary.CurrentBalance)}}
-{{template "summary-card" (dict "Label" "Total deposits" "Value" .Summary.TotalDeposit)}}
-{{template "summary-card" (dict "Label" "Total withdrawals" "Value" .Summary.TotalWithdrawal)}}
+{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" .Summary.CurrentBalance)}}
+{{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" .Summary.TotalDeposit)}}
+{{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" .Summary.TotalWithdrawal)}}
       </section>
       <section class="panel detail-grid">
-        <div><span>Member no</span><strong>{{.Member.MemberNo}}</strong></div>
-        <div><span>Full name</span><strong>{{.Member.FullName}}</strong></div>
-        <div><span>Phone</span><strong>{{.Member.Phone}}</strong></div>
-        <div><span>Address</span><strong>{{.Member.Address}}</strong></div>
-        <div><span>Join date</span><strong>{{.Member.JoinDate}}</strong></div>
-        <div><span>Status</span><strong>{{.Member.Status}}</strong></div>
+        <div><span>{{t .Lang "member_no"}}</span><strong>{{.Member.MemberNo}}</strong></div>
+        <div><span>{{t .Lang "full_name"}}</span><strong>{{.Member.FullName}}</strong></div>
+        <div><span>{{t .Lang "phone"}}</span><strong>{{.Member.Phone}}</strong></div>
+        <div><span>{{t .Lang "address"}}</span><strong>{{.Member.Address}}</strong></div>
+        <div><span>{{t .Lang "join_date"}}</span><strong>{{.Member.JoinDate}}</strong></div>
+        <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .Member.Status}}</strong></div>
       </section>
       <section class="panel">
-        <h2>Saving records</h2>
+        <h2>{{t .Lang "saving_records"}}</h2>
         {{if .Savings}}
 {{template "table-open" .}}
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Type</th>
-              <th>Amount</th>
-              <th>Reference</th>
-              <th>Note</th>
+              <th>{{t $.Lang "date"}}</th>
+              <th>{{t $.Lang "type"}}</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "reference"}}</th>
+              <th>{{t $.Lang "note"}}</th>
             </tr>
           </thead>
           <tbody>
             {{range .Savings}}
             <tr>
               <td>{{.RecordDate}}</td>
-              <td>{{.Type}}</td>
+              <td>{{t $.Lang .Type}}</td>
               <td>{{.Amount}}</td>
               <td>{{.ReferenceNo}}</td>
               <td>{{.Note}}</td>
@@ -140,20 +140,20 @@
           </tbody>
 {{template "table-close" .}}
         {{else}}
-{{template "empty-state" "No saving records yet."}}
+{{template "empty-state" (t .Lang "no_saving_records")}}
         {{end}}
       </section>
       <section class="panel">
-        <h2>Loan requests</h2>
+        <h2>{{t .Lang "loan_requests"}}</h2>
         {{if .LoanRequests}}
 {{template "table-open" .}}
           <thead>
             <tr>
-              <th>Amount</th>
-              <th>Duration</th>
-              <th>Status</th>
-              <th>Purpose</th>
-              <th>Rejection reason</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "duration"}}</th>
+              <th>{{t $.Lang "status"}}</th>
+              <th>{{t $.Lang "purpose"}}</th>
+              <th>{{t $.Lang "rejection_reason"}}</th>
             </tr>
           </thead>
           <tbody>
@@ -161,7 +161,7 @@
             <tr>
               <td>{{.RequestedAmount}}</td>
               <td>{{.DurationMonths}} months</td>
-              <td>{{template "status-badge" .Status}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>{{.Purpose}}</td>
               <td>{{.RejectionReason}}</td>
             </tr>
@@ -169,33 +169,33 @@
           </tbody>
 {{template "table-close" .}}
         {{else}}
-{{template "empty-state" "No loan requests yet."}}
+{{template "empty-state" (t .Lang "no_loan_requests")}}
         {{end}}
       </section>
       <section class="panel">
-        <h2>Active loan</h2>
+        <h2>{{t .Lang "active_loan"}}</h2>
         {{if .ActiveLoan}}
         <div class="detail-grid">
-          <div><span>Approved amount</span><strong>{{.ActiveLoan.ApprovedAmount}}</strong></div>
-          <div><span>Monthly installment</span><strong>{{.ActiveLoan.MonthlyInstallment}}</strong></div>
-          <div><span>Remaining balance</span><strong>{{.ActiveLoan.RemainingBalance}}</strong></div>
-          <div><span>Duration</span><strong>{{.ActiveLoan.DurationMonths}} months</strong></div>
-          <div><span>Status</span><strong>{{.ActiveLoan.Status}}</strong></div>
+          <div><span>{{t .Lang "approved_amount"}}</span><strong>{{.ActiveLoan.ApprovedAmount}}</strong></div>
+          <div><span>{{t .Lang "monthly_installment"}}</span><strong>{{.ActiveLoan.MonthlyInstallment}}</strong></div>
+          <div><span>{{t .Lang "remaining_balance"}}</span><strong>{{.ActiveLoan.RemainingBalance}}</strong></div>
+          <div><span>{{t .Lang "duration"}}</span><strong>{{.ActiveLoan.DurationMonths}} months</strong></div>
+          <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .ActiveLoan.Status}}</strong></div>
         </div>
         {{else}}
-{{template "empty-state" "No active loan."}}
+{{template "empty-state" (t .Lang "no_active_loan")}}
         {{end}}
       </section>
       <section class="panel">
-        <h2>Repayment records</h2>
+        <h2>{{t .Lang "repayment_records"}}</h2>
         {{if .Repayments}}
 {{template "table-open" .}}
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Amount</th>
-              <th>Reference</th>
-              <th>Note</th>
+              <th>{{t $.Lang "date"}}</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "reference"}}</th>
+              <th>{{t $.Lang "note"}}</th>
             </tr>
           </thead>
           <tbody>
@@ -210,7 +210,7 @@
           </tbody>
 {{template "table-close" .}}
         {{else}}
-{{template "empty-state" "No repayment records yet."}}
+{{template "empty-state" (t .Lang "no_repayment_records")}}
         {{end}}
       </section>
 {{template "admin-shell-end" .}}
@@ -223,13 +223,13 @@
 {{template "table-open" .}}
           <thead>
             <tr>
-              <th>Member</th>
-              <th>Amount</th>
-              <th>Duration</th>
-              <th>Purpose</th>
-              <th>Status</th>
-              <th>Created</th>
-              <th>Review</th>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "duration"}}</th>
+              <th>{{t $.Lang "purpose"}}</th>
+              <th>{{t $.Lang "status"}}</th>
+              <th>{{t $.Lang "created"}}</th>
+              <th>{{t $.Lang "review"}}</th>
             </tr>
           </thead>
           <tbody>
@@ -239,19 +239,19 @@
               <td>{{.RequestedAmount}}</td>
               <td>{{.DurationMonths}} months</td>
               <td>{{.Purpose}}</td>
-              <td>{{template "status-badge" .Status}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>{{.CreatedAt}}</td>
               <td class="review-cell">
                 <form class="inline-approval-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/approve" hx-post="/api/admin/loan-requests/{{.ID}}/approve" hx-target="#loan-review-error" hx-swap="innerHTML">
-                  <label>Approved amount <input name="approved_amount" type="number" min="1" value="{{.RequestedAmount}}" aria-label="Approved amount"></label>
-                  <label>Duration <input name="duration_months" type="number" min="1" value="{{.DurationMonths}}" aria-label="Duration months"></label>
+                  <label>{{t $.Lang "approved_amount"}} <input name="approved_amount" type="number" min="1" value="{{.RequestedAmount}}" aria-label="{{t $.Lang "approved_amount"}}"></label>
+                  <label>{{t $.Lang "duration"}} <input name="duration_months" type="number" min="1" value="{{.DurationMonths}}" aria-label="{{t $.Lang "duration_months"}}"></label>
                   <div class="table-actions">
-                    <button type="submit">Approve</button>
+                    <button type="submit">{{t $.Lang "approve"}}</button>
                   </div>
                 </form>
                 <form class="inline-rejection-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/reject" hx-post="/api/admin/loan-requests/{{.ID}}/reject" hx-target="#loan-review-error" hx-swap="innerHTML">
-                  <label>Rejection reason <input name="rejection_reason" aria-label="Rejection reason" placeholder="Reason"></label>
-                  <button class="button-secondary" type="submit">Reject</button>
+                  <label>{{t $.Lang "rejection_reason"}} <input name="rejection_reason" aria-label="{{t $.Lang "rejection_reason"}}" placeholder="{{t $.Lang "rejection_reason"}}"></label>
+                  <button class="button-secondary" type="submit">{{t $.Lang "reject"}}</button>
                 </form>
               </td>
             </tr>
@@ -259,7 +259,7 @@
           </tbody>
 {{template "table-close" .}}
         {{else}}
-{{template "empty-state" "No pending loan requests."}}
+{{template "empty-state" (t .Lang "no_pending_loan_requests")}}
         {{end}}
 {{template "form-error" (dict "ID" "loan-review-error")}}
       </section>
@@ -273,13 +273,13 @@
 {{template "table-open" .}}
           <thead>
             <tr>
-              <th>Member</th>
-              <th>Approved</th>
-              <th>Installment</th>
-              <th>Remaining</th>
-              <th>Duration</th>
-              <th>Status</th>
-              <th>Repayment</th>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "approved"}}</th>
+              <th>{{t $.Lang "installment"}}</th>
+              <th>{{t $.Lang "remaining"}}</th>
+              <th>{{t $.Lang "duration"}}</th>
+              <th>{{t $.Lang "status"}}</th>
+              <th>{{t $.Lang "repayment"}}</th>
             </tr>
           </thead>
           <tbody>
@@ -290,14 +290,14 @@
               <td>{{.MonthlyInstallment}}</td>
               <td>{{.RemainingBalance}}</td>
               <td>{{.DurationMonths}} months</td>
-              <td>{{template "status-badge" .Status}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>
                 <form class="inline-repayment-form" method="post" action="/api/admin/loans/{{.ID}}/repayments" hx-post="/api/admin/loans/{{.ID}}/repayments" hx-target="#repayment-form-error" hx-swap="innerHTML">
-                  <input name="amount" type="number" min="1" max="{{.RemainingBalance}}" placeholder="Amount" aria-label="Repayment amount">
-                  <input name="record_date" type="date" aria-label="Repayment date">
-                  <input name="reference_no" placeholder="Reference" aria-label="Reference number">
-                  <input name="note" placeholder="Note" aria-label="Repayment note">
-                  <button type="submit">Record repayment</button>
+                  <input name="amount" type="number" min="1" max="{{.RemainingBalance}}" placeholder="{{t $.Lang "amount"}}" aria-label="{{t $.Lang "repayment_amount"}}">
+                  <input name="record_date" type="date" aria-label="{{t $.Lang "repayment_date"}}">
+                  <input name="reference_no" placeholder="{{t $.Lang "reference"}}" aria-label="{{t $.Lang "reference_number"}}">
+                  <input name="note" placeholder="{{t $.Lang "note"}}" aria-label="{{t $.Lang "repayment_note"}}">
+                  <button type="submit">{{t $.Lang "record_repayment"}}</button>
                 </form>
               </td>
             </tr>
@@ -305,7 +305,7 @@
           </tbody>
 {{template "table-close" .}}
         {{else}}
-{{template "empty-state" "No active loans."}}
+{{template "empty-state" (t .Lang "no_active_loans")}}
         {{end}}
 {{template "form-error" (dict "ID" "repayment-form-error")}}
       </section>
@@ -319,11 +319,11 @@
 {{template "table-open" .}}
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Member</th>
-              <th>Amount</th>
-              <th>Reference</th>
-              <th>Note</th>
+              <th>{{t $.Lang "date"}}</th>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "reference"}}</th>
+              <th>{{t $.Lang "note"}}</th>
             </tr>
           </thead>
           <tbody>
@@ -339,7 +339,7 @@
           </tbody>
 {{template "table-close" .}}
         {{else}}
-{{template "empty-state" "No repayments yet."}}
+{{template "empty-state" (t .Lang "no_repayments")}}
         {{end}}
       </section>
 {{template "admin-shell-end" .}}

@@ -1,0 +1,327 @@
+package app
+
+import (
+	"net/http"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+)
+
+const (
+	defaultLanguage = "en"
+	bahasaLanguage  = "id"
+	languageCookie  = "kopdes_lang"
+)
+
+var translations = map[string]map[string]string{
+	defaultLanguage: {
+		"active":                             "active",
+		"active_loan":                        "Active loan",
+		"active_loans":                       "Active loans",
+		"active_members":                     "Active members",
+		"address":                            "Address",
+		"admin_menu":                         "Admin menu",
+		"amount":                             "Amount",
+		"approve":                            "Approve",
+		"approved":                           "approved",
+		"approved_amount":                    "Approved amount",
+		"create_active_member_before_saving": "Create an active member before recording saving activity.",
+		"create_and_inspect_members":         "Create and inspect cooperative members.",
+		"create_member":                      "Create member",
+		"created":                            "Created",
+		"current_language":                   "Language",
+		"dashboard":                          "Dashboard",
+		"date":                               "Date",
+		"deposit":                            "deposit",
+		"duration":                           "Duration",
+		"duration_months":                    "Duration months",
+		"email":                              "Email",
+		"full_name":                          "Full name",
+		"inactive":                           "inactive",
+		"inspect_pending_loan_requests":      "Inspect pending member loan requests before approval or rejection.",
+		"installment":                        "Installment",
+		"join_date":                          "Join date",
+		"latest_repayment_records":           "Latest repayment records",
+		"latest_saving_records":              "Latest saving records",
+		"loan_request_status":                "Loan request status",
+		"loan_request_review":                "Loan request review",
+		"loan_requests":                      "Loan requests",
+		"loans":                              "Loans",
+		"log_in":                             "Log in",
+		"logout":                             "Logout",
+		"member":                             "Member",
+		"member_detail":                      "Member detail",
+		"member_list":                        "Member list",
+		"member_login":                       "Member login",
+		"member_no":                          "Member no",
+		"member_number":                      "Member number",
+		"member_profile":                     "Member profile",
+		"members":                            "Members",
+		"monthly_installment":                "Monthly installment",
+		"monitor_loans":                      "Monitor approved cooperative loans and remaining balances.",
+		"name":                               "Name",
+		"no_active_loan":                     "No active loan.",
+		"no_active_loans":                    "No active loans.",
+		"no_loan_requests":                   "No loan requests yet.",
+		"no_members":                         "No members yet.",
+		"no_pending_loan_requests":           "No pending loan requests.",
+		"no_repayment_records":               "No repayment records yet.",
+		"no_repayments":                      "No repayments yet.",
+		"no_saving_records":                  "No saving records yet.",
+		"none":                               "None",
+		"note":                               "Note",
+		"operating_summary":                  "Cooperative operating summary.",
+		"outstanding_loan":                   "Outstanding loan",
+		"password":                           "Password",
+		"pending":                            "pending",
+		"pending_requests":                   "Pending requests",
+		"phone":                              "Phone",
+		"profile":                            "Profile",
+		"purpose":                            "Purpose",
+		"record_deposit":                     "Record deposit",
+		"record_repayment":                   "Record repayment",
+		"record_saving":                      "Record saving",
+		"record_saving_deposits":             "Record verified member saving deposits.",
+		"record_withdrawal":                  "Record withdrawal",
+		"reference":                          "Reference",
+		"reference_number":                   "Reference number",
+		"reject":                             "Reject",
+		"rejected":                           "rejected",
+		"rejection_reason":                   "Rejection reason",
+		"remaining":                          "Remaining",
+		"remaining_balance":                  "Remaining balance",
+		"remaining_loan":                     "Remaining loan",
+		"repayment":                          "Repayment",
+		"repayment_amount":                   "Repayment amount",
+		"repayment_date":                     "Repayment date",
+		"repayment_history":                  "Repayment history",
+		"repayment_note":                     "Repayment note",
+		"repayment_records":                  "Repayment records",
+		"repayments":                         "Repayments",
+		"request_history":                    "Request history",
+		"requested_amount":                   "Requested amount",
+		"review":                             "Review",
+		"review_repayments":                  "Review recorded loan repayments.",
+		"saving_balance":                     "Saving balance",
+		"saving_history":                     "Saving history",
+		"saving_records":                     "Saving records",
+		"savings":                            "Savings",
+		"status":                             "Status",
+		"submit_loan_request":                "Submit loan request",
+		"suspended":                          "suspended",
+		"toggle_sidebar":                     "Toggle sidebar",
+		"total_deposits":                     "Total deposits",
+		"total_members":                      "Total members",
+		"total_savings":                      "Total savings",
+		"total_withdrawals":                  "Total withdrawals",
+		"track_loan_requests":                "Submit and track cooperative loan requests.",
+		"type":                               "Type",
+		"withdrawal":                         "withdrawal",
+		"error.Approved amount and duration months must be greater than zero":      "Approved amount and duration months must be greater than zero",
+		"error.Approved amount cannot exceed requested amount":                     "Approved amount cannot exceed requested amount",
+		"error.Email and password are required":                                    "Email and password are required",
+		"error.Email and password must both be provided to create a member login":  "Email and password must both be provided to create a member login",
+		"error.Email already exists":                                               "Email already exists",
+		"error.Invalid email or password":                                          "Invalid email or password",
+		"error.Member already has a pending loan request":                          "Member already has a pending loan request",
+		"error.Member already has an active loan":                                  "Member already has an active loan",
+		"error.Member number already exists":                                       "Member number already exists",
+		"error.Member number, full name, join date, and valid status are required": "Member number, full name, join date, and valid status are required",
+		"error.Member, deposit amount, and record date are required":               "Member, deposit amount, and record date are required",
+		"error.Only active loans can receive repayments":                           "Only active loans can receive repayments",
+		"error.Only active members can request loans":                              "Only active members can request loans",
+		"error.Only pending loan requests can be approved":                         "Only pending loan requests can be approved",
+		"error.Only pending loan requests can be rejected":                         "Only pending loan requests can be rejected",
+		"error.Rejection reason is required":                                       "Rejection reason is required",
+		"error.Repayment amount and record date are required":                      "Repayment amount and record date are required",
+		"error.Repayment amount cannot exceed remaining loan balance":              "Repayment amount cannot exceed remaining loan balance",
+		"error.Requested amount and duration months must be greater than zero":     "Requested amount and duration months must be greater than zero",
+		"error.Same-origin browser request is required":                            "Same-origin browser request is required",
+		"error.Savings can only be recorded for active members":                    "Savings can only be recorded for active members",
+		"error.Too many failed login attempts. Try again later":                    "Too many failed login attempts. Try again later",
+		"error.Withdrawal cannot exceed current saving balance":                    "Withdrawal cannot exceed current saving balance",
+	},
+	bahasaLanguage: {
+		"active":                             "aktif",
+		"active_loan":                        "Pinjaman aktif",
+		"active_loans":                       "Pinjaman aktif",
+		"active_members":                     "Anggota aktif",
+		"address":                            "Alamat",
+		"admin_menu":                         "Menu admin",
+		"amount":                             "Jumlah",
+		"approve":                            "Setujui",
+		"approved":                           "disetujui",
+		"approved_amount":                    "Jumlah disetujui",
+		"create_active_member_before_saving": "Buat anggota aktif sebelum mencatat simpanan.",
+		"create_and_inspect_members":         "Buat dan periksa anggota koperasi.",
+		"create_member":                      "Buat anggota",
+		"created":                            "Dibuat",
+		"current_language":                   "Bahasa",
+		"dashboard":                          "Dasbor",
+		"date":                               "Tanggal",
+		"deposit":                            "setoran",
+		"duration":                           "Durasi",
+		"duration_months":                    "Durasi bulan",
+		"email":                              "Email",
+		"full_name":                          "Nama lengkap",
+		"inactive":                           "nonaktif",
+		"inspect_pending_loan_requests":      "Periksa permintaan pinjaman anggota yang menunggu keputusan.",
+		"installment":                        "Angsuran",
+		"join_date":                          "Tanggal bergabung",
+		"latest_repayment_records":           "Catatan angsuran terbaru",
+		"latest_saving_records":              "Catatan simpanan terbaru",
+		"loan_request_status":                "Status permintaan pinjaman",
+		"loan_request_review":                "Tinjauan permintaan pinjaman",
+		"loan_requests":                      "Permintaan pinjaman",
+		"loans":                              "Pinjaman",
+		"log_in":                             "Masuk",
+		"logout":                             "Keluar",
+		"member":                             "Anggota",
+		"member_detail":                      "Detail anggota",
+		"member_list":                        "Daftar anggota",
+		"member_login":                       "Login anggota",
+		"member_no":                          "No anggota",
+		"member_number":                      "Nomor anggota",
+		"member_profile":                     "Profil anggota",
+		"members":                            "Anggota",
+		"monthly_installment":                "Angsuran bulanan",
+		"monitor_loans":                      "Pantau pinjaman koperasi yang sudah disetujui dan sisa saldonya.",
+		"name":                               "Nama",
+		"no_active_loan":                     "Belum ada pinjaman aktif.",
+		"no_active_loans":                    "Belum ada pinjaman aktif.",
+		"no_loan_requests":                   "Belum ada permintaan pinjaman.",
+		"no_members":                         "Belum ada anggota.",
+		"no_pending_loan_requests":           "Tidak ada permintaan pinjaman yang menunggu.",
+		"no_repayment_records":               "Belum ada catatan angsuran.",
+		"no_repayments":                      "Belum ada angsuran.",
+		"no_saving_records":                  "Belum ada catatan simpanan.",
+		"none":                               "Tidak ada",
+		"note":                               "Catatan",
+		"operating_summary":                  "Ringkasan operasional koperasi.",
+		"outstanding_loan":                   "Sisa pinjaman",
+		"password":                           "Kata sandi",
+		"pending":                            "menunggu",
+		"pending_requests":                   "Permintaan menunggu",
+		"phone":                              "Telepon",
+		"profile":                            "Profil",
+		"purpose":                            "Tujuan",
+		"record_deposit":                     "Catat setoran",
+		"record_repayment":                   "Catat angsuran",
+		"record_saving":                      "Catat simpanan",
+		"record_saving_deposits":             "Catat setoran simpanan anggota yang sudah diverifikasi.",
+		"record_withdrawal":                  "Catat penarikan",
+		"reference":                          "Referensi",
+		"reference_number":                   "Nomor referensi",
+		"reject":                             "Tolak",
+		"rejected":                           "ditolak",
+		"rejection_reason":                   "Alasan penolakan",
+		"remaining":                          "Sisa",
+		"remaining_balance":                  "Sisa saldo",
+		"remaining_loan":                     "Sisa pinjaman",
+		"repayment":                          "Angsuran",
+		"repayment_amount":                   "Jumlah angsuran",
+		"repayment_date":                     "Tanggal angsuran",
+		"repayment_history":                  "Riwayat angsuran",
+		"repayment_note":                     "Catatan angsuran",
+		"repayment_records":                  "Catatan angsuran",
+		"repayments":                         "Angsuran",
+		"request_history":                    "Riwayat permintaan",
+		"requested_amount":                   "Jumlah diminta",
+		"review":                             "Tinjau",
+		"review_repayments":                  "Tinjau angsuran pinjaman yang sudah dicatat.",
+		"saving_balance":                     "Saldo simpanan",
+		"saving_history":                     "Riwayat simpanan",
+		"saving_records":                     "Catatan simpanan",
+		"savings":                            "Simpanan",
+		"status":                             "Status",
+		"submit_loan_request":                "Ajukan permintaan pinjaman",
+		"suspended":                          "ditangguhkan",
+		"toggle_sidebar":                     "Buka/tutup sidebar",
+		"total_deposits":                     "Total setoran",
+		"total_members":                      "Total anggota",
+		"total_savings":                      "Total simpanan",
+		"total_withdrawals":                  "Total penarikan",
+		"track_loan_requests":                "Ajukan dan pantau permintaan pinjaman koperasi.",
+		"type":                               "Jenis",
+		"withdrawal":                         "penarikan",
+		"error.Approved amount and duration months must be greater than zero":      "Jumlah disetujui dan durasi bulan harus lebih dari nol",
+		"error.Approved amount cannot exceed requested amount":                     "Jumlah disetujui tidak boleh melebihi jumlah yang diminta",
+		"error.Email and password are required":                                    "Email dan kata sandi wajib diisi",
+		"error.Email and password must both be provided to create a member login":  "Email dan kata sandi harus diisi untuk membuat login anggota",
+		"error.Email already exists":                                               "Email sudah digunakan",
+		"error.Invalid email or password":                                          "Email atau kata sandi tidak valid",
+		"error.Member already has a pending loan request":                          "Anggota sudah memiliki permintaan pinjaman yang menunggu",
+		"error.Member already has an active loan":                                  "Anggota sudah memiliki pinjaman aktif",
+		"error.Member number already exists":                                       "Nomor anggota sudah digunakan",
+		"error.Member number, full name, join date, and valid status are required": "Nomor anggota, nama lengkap, tanggal bergabung, dan status valid wajib diisi",
+		"error.Member, deposit amount, and record date are required":               "Anggota, jumlah setoran, dan tanggal pencatatan wajib diisi",
+		"error.Only active loans can receive repayments":                           "Angsuran hanya dapat dicatat untuk pinjaman aktif",
+		"error.Only active members can request loans":                              "Hanya anggota aktif yang dapat mengajukan pinjaman",
+		"error.Only pending loan requests can be approved":                         "Hanya permintaan pinjaman yang menunggu yang dapat disetujui",
+		"error.Only pending loan requests can be rejected":                         "Hanya permintaan pinjaman yang menunggu yang dapat ditolak",
+		"error.Rejection reason is required":                                       "Alasan penolakan wajib diisi",
+		"error.Repayment amount and record date are required":                      "Jumlah angsuran dan tanggal pencatatan wajib diisi",
+		"error.Repayment amount cannot exceed remaining loan balance":              "Jumlah angsuran tidak boleh melebihi sisa pinjaman",
+		"error.Requested amount and duration months must be greater than zero":     "Jumlah diminta dan durasi bulan harus lebih dari nol",
+		"error.Same-origin browser request is required":                            "Permintaan browser harus berasal dari origin yang sama",
+		"error.Savings can only be recorded for active members":                    "Simpanan hanya dapat dicatat untuk anggota aktif",
+		"error.Too many failed login attempts. Try again later":                    "Terlalu banyak percobaan login gagal. Coba lagi nanti",
+		"error.Withdrawal cannot exceed current saving balance":                    "Penarikan tidak boleh melebihi saldo simpanan saat ini",
+	},
+}
+
+func (s *Server) setLanguage(c *gin.Context) {
+	lang := normalizeLanguage(c.PostForm("lang"))
+	redirectPath := c.PostForm("redirect")
+	if redirectPath == "" || !strings.HasPrefix(redirectPath, "/") || strings.HasPrefix(redirectPath, "//") {
+		redirectPath = "/login"
+	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     languageCookie,
+		Value:    lang,
+		Path:     "/",
+		MaxAge:   31536000,
+		HttpOnly: true,
+		Secure:   s.cfg.CookieSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
+	c.Redirect(http.StatusSeeOther, redirectPath)
+}
+
+func languageFromRequest(c *gin.Context) string {
+	if cookie, err := c.Cookie(languageCookie); err == nil {
+		return normalizeLanguage(cookie)
+	}
+	header := strings.ToLower(c.GetHeader("Accept-Language"))
+	if strings.HasPrefix(header, "id") || strings.Contains(header, "id-id") {
+		return bahasaLanguage
+	}
+	return defaultLanguage
+}
+
+func normalizeLanguage(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case bahasaLanguage, "id-id", "indonesia", "bahasa", "bahasa-indonesia":
+		return bahasaLanguage
+	default:
+		return defaultLanguage
+	}
+}
+
+func translate(lang, key string) string {
+	lang = normalizeLanguage(lang)
+	if catalog, ok := translations[lang]; ok {
+		if translated, ok := catalog[key]; ok {
+			return translated
+		}
+	}
+	return key
+}
+
+func translateTemplate(lang, key string) string {
+	return translate(lang, key)
+}
+
+func localizedErrorMessage(c *gin.Context, message string) string {
+	return translate(languageFromRequest(c), "error."+message)
+}

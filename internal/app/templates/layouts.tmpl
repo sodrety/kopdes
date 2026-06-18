@@ -4,20 +4,32 @@
   <link rel="stylesheet" href="/static/app.css">
 {{end}}
 
+{{define "language-form"}}
+      <form class="language-form" method="post" action="/language">
+        <input type="hidden" name="redirect" value="{{.CurrentPath}}">
+        <label>{{t .Lang "current_language"}}
+          <select name="lang" onchange="this.form.submit()">
+            <option value="en" {{if eq .Lang "en"}}selected{{end}}>English</option>
+            <option value="id" {{if eq .Lang "id"}}selected{{end}}>Bahasa Indonesia</option>
+          </select>
+        </label>
+      </form>
+{{end}}
+
 {{define "admin-nav"}}
       <nav class="sidebar-nav">
-        <a class="sidebar-link {{if eq .Active "dashboard"}}active{{end}}" href="/admin/dashboard" title="Dashboard"><i class="sidebar-icon" data-lucide="layout-dashboard"></i><span class="sidebar-label">Dashboard</span></a>
-        <a class="sidebar-link {{if eq .Active "members"}}active{{end}}" href="/admin/members" title="Members"><i class="sidebar-icon" data-lucide="users"></i><span class="sidebar-label">Members</span></a>
-        <a class="sidebar-link {{if eq .Active "savings"}}active{{end}}" href="/admin/savings" title="Savings"><i class="sidebar-icon" data-lucide="piggy-bank"></i><span class="sidebar-label">Savings</span></a>
-        <a class="sidebar-link {{if eq .Active "loan-requests"}}active{{end}}" href="/admin/loan-requests" title="Loan requests"><i class="sidebar-icon" data-lucide="file-clock"></i><span class="sidebar-label">Loan requests</span></a>
-        <a class="sidebar-link {{if eq .Active "loans"}}active{{end}}" href="/admin/loans" title="Loans"><i class="sidebar-icon" data-lucide="landmark"></i><span class="sidebar-label">Loans</span></a>
-        <a class="sidebar-link {{if eq .Active "repayments"}}active{{end}}" href="/admin/repayments" title="Repayments"><i class="sidebar-icon" data-lucide="receipt"></i><span class="sidebar-label">Repayments</span></a>
+        <a class="sidebar-link {{if eq .Active "dashboard"}}active{{end}}" href="/admin/dashboard" title="{{t .Lang "dashboard"}}"><i class="sidebar-icon" data-lucide="layout-dashboard"></i><span class="sidebar-label">{{t .Lang "dashboard"}}</span></a>
+        <a class="sidebar-link {{if eq .Active "members"}}active{{end}}" href="/admin/members" title="{{t .Lang "members"}}"><i class="sidebar-icon" data-lucide="users"></i><span class="sidebar-label">{{t .Lang "members"}}</span></a>
+        <a class="sidebar-link {{if eq .Active "savings"}}active{{end}}" href="/admin/savings" title="{{t .Lang "savings"}}"><i class="sidebar-icon" data-lucide="piggy-bank"></i><span class="sidebar-label">{{t .Lang "savings"}}</span></a>
+        <a class="sidebar-link {{if eq .Active "loan-requests"}}active{{end}}" href="/admin/loan-requests" title="{{t .Lang "loan_requests"}}"><i class="sidebar-icon" data-lucide="file-clock"></i><span class="sidebar-label">{{t .Lang "loan_requests"}}</span></a>
+        <a class="sidebar-link {{if eq .Active "loans"}}active{{end}}" href="/admin/loans" title="{{t .Lang "loans"}}"><i class="sidebar-icon" data-lucide="landmark"></i><span class="sidebar-label">{{t .Lang "loans"}}</span></a>
+        <a class="sidebar-link {{if eq .Active "repayments"}}active{{end}}" href="/admin/repayments" title="{{t .Lang "repayments"}}"><i class="sidebar-icon" data-lucide="receipt"></i><span class="sidebar-label">{{t .Lang "repayments"}}</span></a>
       </nav>
 {{end}}
 
 {{define "admin-shell-start"}}
 <!doctype html>
-<html lang="en">
+<html lang="{{.Lang}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -26,20 +38,21 @@
 </head>
 <body>
   <div class="admin-shell">
-    <aside class="admin-sidebar" aria-label="Admin menu">
+    <aside class="admin-sidebar" aria-label="{{t .Lang "admin_menu"}}">
       <div class="sidebar-brand">Kopdes</div>
 {{template "admin-nav" .}}
     </aside>
     <main class="page-shell">
       <header class="admin-topbar">
-        <button class="sidebar-toggle" type="button" aria-label="Toggle sidebar" onclick="document.body.classList.toggle('sidebar-collapsed')">☰</button>
+        <button class="sidebar-toggle" type="button" aria-label="{{t .Lang "toggle_sidebar"}}" onclick="document.body.classList.toggle('sidebar-collapsed')">☰</button>
+{{template "language-form" .}}
         <form class="logout-form" method="post" action="/logout">
-          <button class="button-secondary" type="submit">Logout</button>
+          <button class="button-secondary" type="submit">{{t .Lang "logout"}}</button>
         </form>
       </header>
       <header class="page-header">
-        <h1>{{.Heading}}</h1>
-        <p>{{.Description}}</p>
+        <h1>{{t .Lang .Heading}}</h1>
+        <p>{{t .Lang .Description}}</p>
       </header>
 {{end}}
 
@@ -53,15 +66,15 @@
 
 {{define "member-nav"}}
       <nav class="member-nav">
-        <a href="/member/dashboard">Dashboard</a>
-        <a href="/member/profile">Profile</a>
-        <a href="/member/loan-requests">Loan requests</a>
+        <a href="/member/dashboard">{{t .Lang "dashboard"}}</a>
+        <a href="/member/profile">{{t .Lang "profile"}}</a>
+        <a href="/member/loan-requests">{{t .Lang "loan_requests"}}</a>
       </nav>
 {{end}}
 
 {{define "member-shell-start"}}
 <!doctype html>
-<html lang="en">
+<html lang="{{.Lang}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -73,13 +86,14 @@
     <header class="member-topbar">
       <div class="sidebar-brand">Kopdes</div>
 {{template "member-nav" .}}
+      {{template "language-form" .}}
       <form class="logout-form" method="post" action="/logout">
-        <button class="button-secondary" type="submit">Logout</button>
+        <button class="button-secondary" type="submit">{{t .Lang "logout"}}</button>
       </form>
     </header>
     <section class="page-header">
-      <h1>{{.Heading}}</h1>
-      <p>{{.Description}}</p>
+      <h1>{{t .Lang .Heading}}</h1>
+      <p>{{t .Lang .Description}}</p>
     </section>
 {{end}}
 
