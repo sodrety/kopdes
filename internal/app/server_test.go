@@ -210,16 +210,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 7 {
-		t.Fatalf("expected seven tracked migrations, got %d", migrationCount)
+	if migrationCount != 8 {
+		t.Fatalf("expected eight tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 7`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 8`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "add_saving_record_categories" {
-		t.Fatalf("expected latest migration name add_saving_record_categories, got %q", latestName)
+	if latestName != "create_withdrawal_requests" {
+		t.Fatalf("expected latest migration name create_withdrawal_requests, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -1737,6 +1737,468 @@ func TestAdminCanFilterSimpananHistoryByCategory(t *testing.T) {
 	}
 }
 
+func TestAdminCanExportFilteredSimpananCSV(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-EXP-1","full_name":"Export One","join_date":"2026-06-16","status":"active"}`)
+	other := fixture.createMember(t, adminToken, `{"member_no":"M-EXP-2","full_name":"Export Two","join_date":"2026-06-16","status":"active"}`)
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "wajib", 100000, "EXP-WJB", "Export wajib")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 200000, "EXP-SUK", "Export sukarela")
+	fixture.recordSavingInCategory(t, adminToken, other.ID, "deposit", "wajib", 300000, "EXP-OTHER", "Other export")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/exports/savings.csv?member_id="+member.ID+"&category=wajib", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected simpanan export status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/csv") {
+		t.Fatalf("expected CSV content type, got %q", contentType)
+	}
+	if disposition := rec.Header().Get("Content-Disposition"); !strings.Contains(disposition, "simpanan-export.csv") {
+		t.Fatalf("expected stable simpanan export filename, got %q", disposition)
+	}
+	body := rec.Body.String()
+	for _, text := range []string{"member_no,member,category,type,amount,date,reference_no,note,recorded_by", "M-EXP-1,Export One,wajib,deposit,100000,2026-06-16,EXP-WJB,Export wajib"} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected simpanan export to include %q, got %s", text, body)
+		}
+	}
+	for _, text := range []string{"EXP-SUK", "EXP-OTHER"} {
+		if strings.Contains(body, text) {
+			t.Fatalf("expected filtered simpanan export not to include %q, got %s", text, body)
+		}
+	}
+}
+
+func TestAdminCanExportPinjamanAndAngsuranCSV(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	fixture.createMember(t, adminToken, `{"member_no":"M-LOAN-EXP","full_name":"Loan Export","join_date":"2026-06-16","status":"active","email":"loan-export@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "loan-export@coop.test", "member-password")
+	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 900000, 9), 900000, 9)
+	fixture.recordRepayment(t, adminToken, loan.ID, 100000)
+
+	loanReq := httptest.NewRequest(http.MethodGet, "/api/admin/exports/loans.csv?status=active", nil)
+	loanReq.Header.Set("Authorization", "Bearer "+adminToken)
+	loanRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(loanRec, loanReq)
+
+	if loanRec.Code != http.StatusOK {
+		t.Fatalf("expected pinjaman export status 200, got %d: %s", loanRec.Code, loanRec.Body.String())
+	}
+	loanBody := loanRec.Body.String()
+	for _, text := range []string{"member_no,member,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_at", "M-LOAN-EXP,Loan Export,900000,9,100000,800000,active"} {
+		if !strings.Contains(loanBody, text) {
+			t.Fatalf("expected pinjaman export to include %q, got %s", text, loanBody)
+		}
+	}
+
+	repaymentReq := httptest.NewRequest(http.MethodGet, "/api/admin/exports/repayments.csv", nil)
+	repaymentReq.Header.Set("Authorization", "Bearer "+adminToken)
+	repaymentRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(repaymentRec, repaymentReq)
+
+	if repaymentRec.Code != http.StatusOK {
+		t.Fatalf("expected angsuran export status 200, got %d: %s", repaymentRec.Code, repaymentRec.Body.String())
+	}
+	repaymentBody := repaymentRec.Body.String()
+	for _, text := range []string{"member_no,member,loan_id,amount,date,reference_no,note", "M-LOAN-EXP,Loan Export," + loan.ID + ",100000,2026-06-16,RPY-TEST,Test repayment"} {
+		if !strings.Contains(repaymentBody, text) {
+			t.Fatalf("expected angsuran export to include %q, got %s", text, repaymentBody)
+		}
+	}
+}
+
+func TestAdminCanExportFilteredPenarikanCSV(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-WD-EXP","full_name":"Withdrawal Export","join_date":"2026-06-16","status":"active","email":"wd-export@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "wd-export@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 500000, "WD-EXP-SAV", "Export balance")
+	fixture.createWithdrawalRequest(t, memberToken, 100000, "Pending export")
+	rejectedID := fixture.createWithdrawalRequest(t, memberToken, 125000, "Rejected export")
+
+	rejectReq := httptest.NewRequest(http.MethodPost, "/api/admin/withdrawal-requests/"+rejectedID+"/reject", bytes.NewBufferString(`{"rejection_reason":"Missing approval"}`))
+	rejectReq.Header.Set("Content-Type", "application/json")
+	rejectReq.Header.Set("Authorization", "Bearer "+adminToken)
+	rejectRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(rejectRec, rejectReq)
+	if rejectRec.Code != http.StatusOK {
+		t.Fatalf("expected withdrawal reject status 200, got %d: %s", rejectRec.Code, rejectRec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/exports/withdrawal-requests.csv?status=pending", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected penarikan export status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/csv") {
+		t.Fatalf("expected CSV content type, got %q", contentType)
+	}
+	if disposition := rec.Header().Get("Content-Disposition"); !strings.Contains(disposition, "penarikan-export.csv") {
+		t.Fatalf("expected stable penarikan export filename, got %q", disposition)
+	}
+	body := rec.Body.String()
+	for _, text := range []string{"member_no,member,amount,status,requested_at,reviewed_at,note,review_note,saving_record_id", "M-WD-EXP,Withdrawal Export,100000,pending"} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected penarikan export to include %q, got %s", text, body)
+		}
+	}
+	if !strings.Contains(body, "Pending export") {
+		t.Fatalf("expected pending export row, got %s", body)
+	}
+	for _, text := range []string{"Rejected export", "Missing approval"} {
+		if strings.Contains(body, text) {
+			t.Fatalf("expected filtered penarikan export not to include %q, got %s", text, body)
+		}
+	}
+}
+
+func TestAdminReportsRenderOperationalChartsAndEmptyStates(t *testing.T) {
+	emptyFixture := newTestFixture(t)
+	emptyCookie := emptyFixture.browserLogin(t, "admin@coop.test", "password")
+	emptyReq := httptest.NewRequest(http.MethodGet, "/admin/reports", nil)
+	emptyReq.AddCookie(emptyCookie)
+	emptyRec := httptest.NewRecorder()
+
+	emptyFixture.server.ServeHTTP(emptyRec, emptyReq)
+
+	if emptyRec.Code != http.StatusOK {
+		t.Fatalf("expected empty reports page status 200, got %d: %s", emptyRec.Code, emptyRec.Body.String())
+	}
+	if body := emptyRec.Body.String(); !strings.Contains(body, "Reports") || !strings.Contains(body, "No report data yet.") || !strings.Contains(body, "Simpanan by category") {
+		t.Fatalf("expected empty reports page to render chart empty states, got %s", body)
+	}
+
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-CHART","full_name":"Chart Member","join_date":"2026-06-16","status":"active","email":"chart-member@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "chart-member@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "pokok", 50000, "CH-POK", "Pokok")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "wajib", 150000, "CH-WAJ", "Wajib")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 300000, "CH-SUK", "Sukarela")
+	fixture.createWithdrawalRequest(t, memberToken, 100000, "Chart withdrawal")
+	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 600000, 6), 600000, 6)
+	fixture.recordRepayment(t, adminToken, loan.ID, 200000)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/reports", nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected reports page status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, text := range []string{"Simpanan by category", "Penarikan by status", "Pinjaman exposure", "Angsuran progress", "Simpanan report", "Penarikan report", "Pinjaman report", "Angsuran report", "Chart Member", "M-CHART", "Simpanan Pokok", "50000", "Simpanan Wajib", "150000", "Simpanan Sukarela", "300000", "Menunggu", "Approved principal", "600000", "Remaining balance", "400000", "Actual repayment", "200000"} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected reports page to include %q, got %s", text, body)
+		}
+	}
+
+	dashboardReq := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	dashboardReq.AddCookie(adminCookie)
+	dashboardRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(dashboardRec, dashboardReq)
+
+	if dashboardRec.Code != http.StatusOK {
+		t.Fatalf("expected dashboard page status 200, got %d: %s", dashboardRec.Code, dashboardRec.Body.String())
+	}
+	if dashboardBody := dashboardRec.Body.String(); !strings.Contains(dashboardBody, "Simpanan by category") || !strings.Contains(dashboardBody, "Pinjaman exposure") || !strings.Contains(dashboardBody, `class="bar-fill chart-simpanan"`) {
+		t.Fatalf("expected dashboard page to include operational charts, got %s", dashboardBody)
+	}
+}
+
+func TestMemberCanRequestPenarikanAndAdminApproveCreatesSukarelaWithdrawal(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-WD-REQ","full_name":"Withdrawal Request","join_date":"2026-06-16","status":"active","email":"wd-request@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "wd-request@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 300000, "SUK-WD", "Sukarela balance")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "wajib", 500000, "WJB-WD", "Wajib balance")
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/member/withdrawal-requests", bytes.NewBufferString(`{"amount":125000,"note":"Need cash"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+memberToken)
+	createRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(createRec, createReq)
+
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected withdrawal request status 201, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	var created struct {
+		ID       string `json:"id"`
+		MemberID string `json:"member_id"`
+		Amount   int    `json:"amount"`
+		Note     string `json:"note"`
+		Status   string `json:"status"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode withdrawal request: %v", err)
+	}
+	if created.ID == "" || created.MemberID != member.ID || created.Amount != 125000 || created.Note != "Need cash" || created.Status != "pending" {
+		t.Fatalf("unexpected withdrawal request: %+v", created)
+	}
+
+	adminListReq := httptest.NewRequest(http.MethodGet, "/api/admin/withdrawal-requests?status=pending", nil)
+	adminListReq.Header.Set("Authorization", "Bearer "+adminToken)
+	adminListRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(adminListRec, adminListReq)
+
+	if adminListRec.Code != http.StatusOK {
+		t.Fatalf("expected admin withdrawal request list status 200, got %d: %s", adminListRec.Code, adminListRec.Body.String())
+	}
+	var adminList struct {
+		WithdrawalRequests []struct {
+			ID       string `json:"id"`
+			MemberNo string `json:"member_no"`
+			FullName string `json:"full_name"`
+			Amount   int    `json:"amount"`
+			Status   string `json:"status"`
+		} `json:"withdrawal_requests"`
+	}
+	if err := json.Unmarshal(adminListRec.Body.Bytes(), &adminList); err != nil {
+		t.Fatalf("decode admin withdrawal requests: %v", err)
+	}
+	if len(adminList.WithdrawalRequests) != 1 || adminList.WithdrawalRequests[0].ID != created.ID || adminList.WithdrawalRequests[0].MemberNo != "M-WD-REQ" || adminList.WithdrawalRequests[0].FullName != "Withdrawal Request" || adminList.WithdrawalRequests[0].Amount != 125000 || adminList.WithdrawalRequests[0].Status != "pending" {
+		t.Fatalf("unexpected admin withdrawal requests: %+v", adminList.WithdrawalRequests)
+	}
+
+	approveReq := httptest.NewRequest(http.MethodPost, "/api/admin/withdrawal-requests/"+created.ID+"/approve", nil)
+	approveReq.Header.Set("Authorization", "Bearer "+adminToken)
+	approveRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(approveRec, approveReq)
+
+	if approveRec.Code != http.StatusOK {
+		t.Fatalf("expected withdrawal approval status 200, got %d: %s", approveRec.Code, approveRec.Body.String())
+	}
+	var approved struct {
+		ID             string `json:"id"`
+		Status         string `json:"status"`
+		SavingRecordID string `json:"saving_record_id"`
+	}
+	if err := json.Unmarshal(approveRec.Body.Bytes(), &approved); err != nil {
+		t.Fatalf("decode approved withdrawal request: %v", err)
+	}
+	if approved.ID != created.ID || approved.Status != "approved" || approved.SavingRecordID == "" {
+		t.Fatalf("unexpected approved withdrawal request: %+v", approved)
+	}
+
+	summaryReq := httptest.NewRequest(http.MethodGet, "/api/member/savings/summary", nil)
+	summaryReq.Header.Set("Authorization", "Bearer "+memberToken)
+	summaryRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(summaryRec, summaryReq)
+
+	if summaryRec.Code != http.StatusOK {
+		t.Fatalf("expected saving summary status 200, got %d: %s", summaryRec.Code, summaryRec.Body.String())
+	}
+	var summary struct {
+		TotalWithdrawal int `json:"total_withdrawal"`
+		CurrentBalance  int `json:"current_balance"`
+		WajibBalance    int `json:"wajib_balance"`
+		SukarelaBalance int `json:"sukarela_balance"`
+	}
+	if err := json.Unmarshal(summaryRec.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("decode saving summary: %v", err)
+	}
+	if summary.TotalWithdrawal != 125000 || summary.CurrentBalance != 675000 || summary.WajibBalance != 500000 || summary.SukarelaBalance != 175000 {
+		t.Fatalf("unexpected summary after approved withdrawal: %+v", summary)
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/member/savings", nil)
+	historyReq.Header.Set("Authorization", "Bearer "+memberToken)
+	historyRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(historyRec, historyReq)
+
+	if historyRec.Code != http.StatusOK {
+		t.Fatalf("expected saving history status 200, got %d: %s", historyRec.Code, historyRec.Body.String())
+	}
+	var history struct {
+		Savings []struct {
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Category string `json:"category"`
+			Amount   int    `json:"amount"`
+			Note     string `json:"note"`
+		} `json:"savings"`
+	}
+	if err := json.Unmarshal(historyRec.Body.Bytes(), &history); err != nil {
+		t.Fatalf("decode saving history: %v", err)
+	}
+	var sawWithdrawal bool
+	for _, record := range history.Savings {
+		if record.ID == approved.SavingRecordID && record.Type == "withdrawal" && record.Category == "sukarela" && record.Amount == 125000 && record.Note == "Need cash" {
+			sawWithdrawal = true
+		}
+	}
+	if !sawWithdrawal {
+		t.Fatalf("expected approved withdrawal saving record, got %+v", history.Savings)
+	}
+}
+
+func TestPenarikanValidationAndRejectionKeepsBalances(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-WD-RULE","full_name":"Withdrawal Rules","join_date":"2026-06-16","status":"active","email":"wd-rules@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "wd-rules@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "wajib", 500000, "WJB-ONLY", "Wajib only")
+
+	t.Run("request cannot exceed sukarela balance", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/member/withdrawal-requests", bytes.NewBufferString(`{"amount":100000,"note":"No sukarela"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+memberToken)
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected over-sukarela request status 400, got %d: %s", rec.Code, rec.Body.String())
+		}
+		assertError(t, rec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Withdrawal cannot exceed Simpanan Sukarela balance")
+	})
+
+	t.Run("direct withdrawal cannot use wajib", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{
+			"member_id":"`+member.ID+`",
+			"type":"withdrawal",
+			"category":"wajib",
+			"amount":100000,
+			"record_date":"2026-06-16"
+		}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected wajib withdrawal status 400, got %d: %s", rec.Code, rec.Body.String())
+		}
+		assertError(t, rec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Withdrawals can only use Simpanan Sukarela")
+	})
+
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 200000, "SUK-REJ", "Sukarela for reject")
+	createReq := httptest.NewRequest(http.MethodPost, "/api/member/withdrawal-requests", bytes.NewBufferString(`{"amount":150000,"note":"Rejected request"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+memberToken)
+	createRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(createRec, createReq)
+
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected withdrawal request status 201, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode withdrawal request: %v", err)
+	}
+
+	rejectReq := httptest.NewRequest(http.MethodPost, "/api/admin/withdrawal-requests/"+created.ID+"/reject", bytes.NewBufferString(`{"rejection_reason":"Insufficient documentation"}`))
+	rejectReq.Header.Set("Content-Type", "application/json")
+	rejectReq.Header.Set("Authorization", "Bearer "+adminToken)
+	rejectRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rejectRec, rejectReq)
+
+	if rejectRec.Code != http.StatusOK {
+		t.Fatalf("expected withdrawal reject status 200, got %d: %s", rejectRec.Code, rejectRec.Body.String())
+	}
+	var rejected struct {
+		ID              string `json:"id"`
+		Status          string `json:"status"`
+		RejectionReason string `json:"rejection_reason"`
+	}
+	if err := json.Unmarshal(rejectRec.Body.Bytes(), &rejected); err != nil {
+		t.Fatalf("decode rejected withdrawal request: %v", err)
+	}
+	if rejected.ID != created.ID || rejected.Status != "rejected" || rejected.RejectionReason != "Insufficient documentation" {
+		t.Fatalf("unexpected rejected withdrawal request: %+v", rejected)
+	}
+
+	summaryReq := httptest.NewRequest(http.MethodGet, "/api/member/savings/summary", nil)
+	summaryReq.Header.Set("Authorization", "Bearer "+memberToken)
+	summaryRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(summaryRec, summaryReq)
+
+	if summaryRec.Code != http.StatusOK {
+		t.Fatalf("expected saving summary status 200, got %d: %s", summaryRec.Code, summaryRec.Body.String())
+	}
+	var summary struct {
+		TotalWithdrawal int `json:"total_withdrawal"`
+		SukarelaBalance int `json:"sukarela_balance"`
+	}
+	if err := json.Unmarshal(summaryRec.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("decode saving summary: %v", err)
+	}
+	if summary.TotalWithdrawal != 0 || summary.SukarelaBalance != 200000 {
+		t.Fatalf("expected rejected withdrawal to leave balances unchanged, got %+v", summary)
+	}
+}
+
+func TestPenarikanPagesRenderMemberAndAdminFlows(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-WD-PAGE","full_name":"Withdrawal Page","join_date":"2026-06-16","status":"active","email":"wd-page@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "wd-page@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 400000, "SUK-PAGE", "Page sukarela")
+	requestID := fixture.createWithdrawalRequest(t, memberToken, 100000, "Page withdrawal")
+
+	memberCookie := fixture.browserLogin(t, "wd-page@coop.test", "member-password")
+	memberReq := httptest.NewRequest(http.MethodGet, "/member/withdrawal-requests", nil)
+	memberReq.AddCookie(memberCookie)
+	memberRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(memberRec, memberReq)
+
+	if memberRec.Code != http.StatusOK {
+		t.Fatalf("expected member withdrawal page status 200, got %d: %s", memberRec.Code, memberRec.Body.String())
+	}
+	memberBody := memberRec.Body.String()
+	for _, text := range []string{"Penarikan", "Submit withdrawal request", `hx-post="/api/member/withdrawal-requests"`, "Simpanan Sukarela", "Page withdrawal", "Menunggu"} {
+		if !strings.Contains(memberBody, text) {
+			t.Fatalf("expected member withdrawal page to include %q, got %s", text, memberBody)
+		}
+	}
+
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	adminReq := httptest.NewRequest(http.MethodGet, "/admin/withdrawal-requests", nil)
+	adminReq.AddCookie(adminCookie)
+	adminRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(adminRec, adminReq)
+
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("expected admin withdrawal page status 200, got %d: %s", adminRec.Code, adminRec.Body.String())
+	}
+	adminBody := adminRec.Body.String()
+	for _, text := range []string{"Penarikan review", "Withdrawal Page", "M-WD-PAGE", "100000", "Page withdrawal", "/api/admin/withdrawal-requests/" + requestID + "/approve", "/api/admin/withdrawal-requests/" + requestID + "/reject", "/api/admin/exports/withdrawal-requests.csv?status=pending", "Menunggu"} {
+		if !strings.Contains(adminBody, text) {
+			t.Fatalf("expected admin withdrawal page to include %q, got %s", text, adminBody)
+		}
+	}
+}
+
 func TestMemberCanSubmitAndTrackLoanRequest(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
@@ -2983,6 +3445,30 @@ func (f testFixture) createLoanRequest(t *testing.T, memberToken string, amount,
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode loan request response: %v", err)
+	}
+	return response.ID
+}
+
+func (f testFixture) createWithdrawalRequest(t *testing.T, memberToken string, amount int, note string) string {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/member/withdrawal-requests", bytes.NewBufferString(`{
+		"amount":`+strconv.Itoa(amount)+`,
+		"note":"`+note+`"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rec := httptest.NewRecorder()
+
+	f.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected withdrawal request status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode withdrawal request response: %v", err)
 	}
 	return response.ID
 }

@@ -1,6 +1,6 @@
-# Kopdes
+# KKSUK PD Dharma Jaya
 
-Kopdes is a saving and loan cooperative system. The MVP records member, saving, loan request, loan approval, and repayment activity after those activities have been verified outside the application.
+KKSUK PD Dharma Jaya is a saving and loan cooperative system. The MVP records member, saving, loan request, loan approval, and repayment activity after those activities have been verified outside the application.
 
 ## Current Slice
 

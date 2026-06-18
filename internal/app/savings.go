@@ -73,6 +73,10 @@ func (s *Server) recordSaving(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Withdrawal cannot exceed current saving balance")
 		return
 	}
+	if errors.Is(err, errInvalidSavingWithdrawalCategory) {
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Withdrawals can only use Simpanan Sukarela")
+		return
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", "Member not found")
 		return
@@ -174,6 +178,9 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 		return SavingRecord{}, errInactiveSavingMember
 	}
 	if recordType == "withdrawal" {
+		if category != "sukarela" {
+			return SavingRecord{}, errInvalidSavingWithdrawalCategory
+		}
 		summary, err := savingSummary(tx, member.ID)
 		if err != nil {
 			return SavingRecord{}, err

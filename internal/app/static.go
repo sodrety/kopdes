@@ -106,6 +106,11 @@ button {
   font-weight: 700;
   text-decoration: none;
 }
+.button-link-secondary {
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
 button:disabled {
   opacity: 0.48;
   cursor: not-allowed;
@@ -165,10 +170,10 @@ button:disabled {
   min-width: 0;
 }
 .brand-name {
-  font-size: 24px;
-  line-height: 28px;
+  font-size: 20px;
+  line-height: 24px;
   font-weight: 900;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .brand-subtitle {
   color: var(--body);
@@ -187,8 +192,8 @@ button:disabled {
   flex-basis: 72px;
 }
 .auth-card .brand-name {
-  font-size: 32px;
-  line-height: 36px;
+  font-size: 28px;
+  line-height: 32px;
 }
 .admin-shell {
   min-height: 100vh;
@@ -373,6 +378,8 @@ button:disabled {
 .page-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
 }
 .page-shell > section + section,
@@ -383,6 +390,62 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
+}
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.chart-panel {
+  display: grid;
+  gap: 16px;
+}
+.chart-panel h2 {
+  margin: 0;
+}
+.bar-chart {
+  display: grid;
+  gap: 14px;
+}
+.bar-row {
+  display: grid;
+  gap: 8px;
+}
+.bar-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--body);
+  font-size: 14px;
+  font-weight: 700;
+}
+.bar-label strong {
+  color: var(--ink);
+}
+.bar-track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--canvas-soft);
+  border: 1px solid var(--line);
+}
+.bar-fill {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+}
+.chart-simpanan {
+  background: var(--primary);
+}
+.chart-pinjaman {
+  background: var(--pinjaman);
+}
+.chart-warning {
+  background: var(--warning);
+}
+.chart-danger {
+  background: var(--negative);
 }
 .summary-card {
   display: grid;
@@ -773,8 +836,8 @@ th {
     flex-basis: 42px;
   }
   .brand-name {
-    font-size: 22px;
-    line-height: 26px;
+    font-size: 20px;
+    line-height: 24px;
   }
   .brand-subtitle {
     white-space: normal;

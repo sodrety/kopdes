@@ -186,6 +186,53 @@
 {{template "member-shell-end" .}}
 {{end}}
 
+{{define "member-withdrawal-requests"}}
+{{template "member-shell-start" .}}
+    <section class="summary-grid">
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" .Summary.SukarelaBalance)}}
+{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" .Summary.CurrentBalance)}}
+    </section>
+    <section class="two-column">
+      <article class="panel">
+        <h2>{{t .Lang "submit_withdrawal_request"}}</h2>
+        <form method="post" action="/api/member/withdrawal-requests" hx-post="/api/member/withdrawal-requests" hx-target="#withdrawal-request-error" hx-swap="innerHTML">
+          <label>{{t .Lang "amount"}} <input name="amount" type="number" min="1" max="{{.Summary.SukarelaBalance}}" required></label>
+          <label>{{t .Lang "note"}} <input name="note"></label>
+          <button type="submit">{{t .Lang "submit_withdrawal_request"}}</button>
+        </form>
+{{template "form-error" (dict "ID" "withdrawal-request-error")}}
+      </article>
+      <article class="panel">
+        <h2>{{t .Lang "withdrawal_request_history"}}</h2>
+        {{if .WithdrawalRequests}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "status"}}</th>
+              <th>{{t $.Lang "note"}}</th>
+              <th>{{t $.Lang "rejection_reason"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .WithdrawalRequests}}
+            <tr>
+              <td>{{.Amount}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
+              <td>{{.Note}}</td>
+              <td>{{.RejectionReason}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_withdrawal_requests")}}
+        {{end}}
+      </article>
+    </section>
+{{template "member-shell-end" .}}
+{{end}}
+
 {{define "member-loan-requests"}}
 {{template "member-shell-start" .}}
     <section class="two-column">

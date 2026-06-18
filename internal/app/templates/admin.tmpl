@@ -8,6 +8,267 @@
 {{template "summary-card" (dict "Label" (t .Lang "outstanding_loan") "Value" .Summary.TotalOutstandingLoan)}}
 {{template "summary-card" (dict "Label" (t .Lang "pending_requests") "Value" .Summary.PendingLoanRequests)}}
       </section>
+      <section class="chart-grid">
+        <article class="panel chart-panel">
+          <h2>{{t .Lang "simpanan_by_category"}}</h2>
+{{template "bar-chart" (dict "Lang" .Lang "Segments" .Reports.SavingsByCategory)}}
+        </article>
+        <article class="panel chart-panel">
+          <h2>{{t .Lang "pinjaman_exposure"}}</h2>
+{{template "bar-chart" (dict "Lang" .Lang "Segments" .Reports.LoanExposure)}}
+        </article>
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "simpanan_report"}}</h2>
+        {{if .Reports.SavingsByMember}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "simpanan_pokok"}}</th>
+              <th>{{t $.Lang "simpanan_wajib"}}</th>
+              <th>{{t $.Lang "simpanan_sukarela"}}</th>
+              <th>{{t $.Lang "total"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Reports.SavingsByMember}}
+            <tr>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.Pokok}}</td>
+              <td>{{.Wajib}}</td>
+              <td>{{.Sukarela}}</td>
+              <td>{{.Total}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_report_data")}}
+        {{end}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "penarikan_report"}}</h2>
+        {{if .Reports.WithdrawalsByMember}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "status_pending"}}</th>
+              <th>{{t $.Lang "status_approved"}}</th>
+              <th>{{t $.Lang "status_rejected"}}</th>
+              <th>{{t $.Lang "total"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Reports.WithdrawalsByMember}}
+            <tr>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.Pending}}</td>
+              <td>{{.Approved}}</td>
+              <td>{{.Rejected}}</td>
+              <td>{{.Total}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_report_data")}}
+        {{end}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "pinjaman_report"}}</h2>
+        {{if .Reports.Loans}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "approved_amount"}}</th>
+              <th>{{t $.Lang "monthly_installment"}}</th>
+              <th>{{t $.Lang "remaining_balance"}}</th>
+              <th>{{t $.Lang "status"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Reports.Loans}}
+            <tr>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.ApprovedAmount}}</td>
+              <td>{{.MonthlyInstallment}}</td>
+              <td>{{.RemainingBalance}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_report_data")}}
+        {{end}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "angsuran_report"}}</h2>
+        {{if .Reports.Repayments}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "date"}}</th>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "reference"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Reports.Repayments}}
+            <tr>
+              <td>{{.RecordDate}}</td>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.Amount}}</td>
+              <td>{{.ReferenceNo}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_report_data")}}
+        {{end}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-reports"}}
+{{template "admin-shell-start" .}}
+      <section class="chart-grid">
+        <article class="panel chart-panel">
+          <h2>{{t .Lang "simpanan_by_category"}}</h2>
+{{template "bar-chart" (dict "Lang" .Lang "Segments" .Reports.SavingsByCategory)}}
+        </article>
+        <article class="panel chart-panel">
+          <h2>{{t .Lang "penarikan_by_status"}}</h2>
+{{template "bar-chart" (dict "Lang" .Lang "Segments" .Reports.WithdrawalsByStatus)}}
+        </article>
+        <article class="panel chart-panel">
+          <h2>{{t .Lang "pinjaman_exposure"}}</h2>
+{{template "bar-chart" (dict "Lang" .Lang "Segments" .Reports.LoanExposure)}}
+        </article>
+        <article class="panel chart-panel">
+          <h2>{{t .Lang "angsuran_progress"}}</h2>
+{{template "bar-chart" (dict "Lang" .Lang "Segments" .Reports.RepaymentProgress)}}
+        </article>
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "simpanan_report"}}</h2>
+        {{if .Reports.SavingsByMember}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "simpanan_pokok"}}</th>
+              <th>{{t $.Lang "simpanan_wajib"}}</th>
+              <th>{{t $.Lang "simpanan_sukarela"}}</th>
+              <th>{{t $.Lang "total"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Reports.SavingsByMember}}
+            <tr>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.Pokok}}</td>
+              <td>{{.Wajib}}</td>
+              <td>{{.Sukarela}}</td>
+              <td>{{.Total}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_report_data")}}
+        {{end}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "penarikan_report"}}</h2>
+        {{if .Reports.WithdrawalsByMember}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "status_pending"}}</th>
+              <th>{{t $.Lang "status_approved"}}</th>
+              <th>{{t $.Lang "status_rejected"}}</th>
+              <th>{{t $.Lang "total"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Reports.WithdrawalsByMember}}
+            <tr>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.Pending}}</td>
+              <td>{{.Approved}}</td>
+              <td>{{.Rejected}}</td>
+              <td>{{.Total}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_report_data")}}
+        {{end}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "pinjaman_report"}}</h2>
+        {{if .Reports.Loans}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "approved_amount"}}</th>
+              <th>{{t $.Lang "monthly_installment"}}</th>
+              <th>{{t $.Lang "remaining_balance"}}</th>
+              <th>{{t $.Lang "status"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Reports.Loans}}
+            <tr>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.ApprovedAmount}}</td>
+              <td>{{.MonthlyInstallment}}</td>
+              <td>{{.RemainingBalance}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_report_data")}}
+        {{end}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "angsuran_report"}}</h2>
+        {{if .Reports.Repayments}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "date"}}</th>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "reference"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Reports.Repayments}}
+            <tr>
+              <td>{{.RecordDate}}</td>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.Amount}}</td>
+              <td>{{.ReferenceNo}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_report_data")}}
+        {{end}}
+      </section>
 {{template "admin-shell-end" .}}
 {{end}}
 
@@ -76,6 +337,7 @@
 {{template "admin-shell-start" .}}
       <section class="page-actions">
         <a class="button-link" href="/admin/savings/new">{{t .Lang "record_saving"}}</a>
+        <a class="button-link button-link-secondary" href="{{.ExportPath}}">{{t .Lang "export_csv"}}</a>
       </section>
       <section class="panel">
         <h2>{{t .Lang "saving_records"}}</h2>
@@ -300,6 +562,53 @@
 {{template "admin-shell-end" .}}
 {{end}}
 
+{{define "admin-withdrawal-requests"}}
+{{template "admin-shell-start" .}}
+      <section class="page-actions">
+        <a class="button-link button-link-secondary" href="/api/admin/exports/withdrawal-requests.csv?status=pending">{{t .Lang "export_csv"}}</a>
+      </section>
+      <section class="panel">
+        {{if .WithdrawalRequests}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "note"}}</th>
+              <th>{{t $.Lang "status"}}</th>
+              <th>{{t $.Lang "review"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .WithdrawalRequests}}
+            <tr>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.Amount}}</td>
+              <td>{{.Note}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
+              <td class="review-cell">
+                <div class="table-actions">
+                  <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                    <button type="submit">{{t $.Lang "approve"}}</button>
+                  </form>
+                </div>
+                <form class="inline-rejection-form" method="post" action="/api/admin/withdrawal-requests/{{.ID}}/reject" hx-post="/api/admin/withdrawal-requests/{{.ID}}/reject" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                  <input name="rejection_reason" placeholder="{{t $.Lang "rejection_reason"}}" aria-label="{{t $.Lang "rejection_reason"}}">
+                  <button class="button-secondary" type="submit">{{t $.Lang "reject"}}</button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+{{template "form-error" (dict "ID" "withdrawal-review-error")}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_pending_withdrawal_requests")}}
+        {{end}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
 {{define "admin-loan-requests"}}
 {{template "admin-shell-start" .}}
       <section class="panel">
@@ -352,6 +661,9 @@
 
 {{define "admin-loans"}}
 {{template "admin-shell-start" .}}
+      <section class="page-actions">
+        <a class="button-link button-link-secondary" href="/api/admin/exports/loans.csv?status=active">{{t .Lang "export_csv"}}</a>
+      </section>
       <section class="panel">
         {{if .Loans}}
 {{template "table-open" .}}
@@ -398,6 +710,9 @@
 
 {{define "admin-repayments"}}
 {{template "admin-shell-start" .}}
+      <section class="page-actions">
+        <a class="button-link button-link-secondary" href="/api/admin/exports/repayments.csv">{{t .Lang "export_csv"}}</a>
+      </section>
       <section class="panel">
         {{if .Repayments}}
 {{template "table-open" .}}

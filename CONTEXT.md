@@ -127,11 +127,11 @@ _Avoid_: Renaming stable internal enum values only to match display text
 - "payment" can imply the system moved money. Resolved: use **Saving Record** or **Repayment Record** because the system records verified external activity only.
 - "Simpanan" can mean either a saving activity row or the member's derived savings area. Resolved: use **Saving Record** or **Saving Balance** when precision matters, and **Simpanan** for the UI area.
 - "Pinjaman" can mean either a request or an approved obligation. Resolved: use **Loan Request** or **Loan** when precision matters, and **Pinjaman** for the UI area.
-- KOPKARLYTA-style roles such as Bendahara, Pimpinan, and Manager are not current Kopdes roles. Resolved: keep **Admin** and **Member** until a future workflow explicitly accepts more roles.
+- KOPKARLYTA-style roles such as Bendahara, Pimpinan, and Manager are not current KKSUK PD Dharma Jaya roles. Resolved: keep **Admin** and **Member** until a future workflow explicitly accepts more roles.
 - "Bunga" can mean flat interest, declining-balance interest, penalty, or fee. Resolved: **Bunga** is flat monthly interest on the approved **Loan** principal.
 - "Remaining Balance" can mean principal-only or total owed. Resolved: **Remaining Balance** includes approved principal and scheduled **Bunga**.
 - "Simpanan Pokok" can mean a one-time row or a category total. Resolved: it is a category total that may be built from one or more **Saving Records**.
-- "registration" can mean public self-registration or Admin-created membership. Resolved: Kopdes uses Admin-created **Member** registration only until a future decision accepts public intake.
+- "registration" can mean public self-registration or Admin-created membership. Resolved: KKSUK PD Dharma Jaya uses Admin-created **Member** registration only until a future decision accepts public intake.
 - "Penarikan" can imply in-app money movement or withdrawals from any saving category. Resolved: **Penarikan** is an Admin-reviewed withdrawal request from **Simpanan Sukarela** only, with money movement verified outside the app.
 - "status" can mean internal workflow state or visible Bahasa text. Resolved: keep internal enum/code names stable in English, and display Bahasa **Status Labels** such as Menunggu, Disetujui, Ditolak, and Selesai in the browser UI.
 - "Angsuran" can mean expected schedule or actual repayment. Resolved: use **Installment Schedule** for expected monthly rows and **Repayment Record** for verified actual repayments, which may be partial, exact, or extra.

@@ -27,3 +27,20 @@
         </table>
         </div>
 {{end}}
+
+{{define "bar-chart"}}
+        <div class="bar-chart">
+          {{if .Segments.HasData}}
+            {{range .Segments}}
+            <div class="bar-row">
+              <div class="bar-label"><span>{{t $.Lang .Label}}</span><strong>{{.Value}}</strong></div>
+              <div class="bar-track" aria-label="{{t $.Lang .Label}} {{.Value}}">
+                <span class="bar-fill {{.Class}}" style="width: {{.Percent}}%"></span>
+              </div>
+            </div>
+            {{end}}
+          {{else}}
+{{template "empty-state" (t .Lang "no_report_data")}}
+          {{end}}
+        </div>
+{{end}}

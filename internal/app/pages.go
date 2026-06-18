@@ -60,7 +60,7 @@ func pageData(c *gin.Context, title, active, heading, description string, values
 }
 
 func (s *Server) loginPage(c *gin.Context) {
-	renderPage(c, "login", pageData(c, "Kopdes Login", "", "", "", nil))
+	renderPage(c, "login", pageData(c, "KKSUK PD Dharma Jaya Login", "", "", "", nil))
 }
 
 func (s *Server) adminDashboardPage(c *gin.Context) {
@@ -69,8 +69,14 @@ func (s *Server) adminDashboardPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-dashboard", pageData(c, "Admin Dashboard - Kopdes", "dashboard", "dashboard", "operating_summary", gin.H{
+	reports, err := s.adminOperationalReports()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	renderPage(c, "admin-dashboard", pageData(c, "Admin Dashboard - KKSUK PD Dharma Jaya", "dashboard", "dashboard", "operating_summary", gin.H{
 		"Summary": summary,
+		"Reports": reports,
 	}))
 }
 
@@ -80,13 +86,13 @@ func (s *Server) adminMembersPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-members", pageData(c, "Members - Kopdes", "members", "members", "member_list", gin.H{
+	renderPage(c, "admin-members", pageData(c, "Members - KKSUK PD Dharma Jaya", "members", "members", "member_list", gin.H{
 		"Members": members,
 	}))
 }
 
 func (s *Server) adminMemberNewPage(c *gin.Context) {
-	renderPage(c, "admin-member-new", pageData(c, "Create member - Kopdes", "members", "create_member", "create_and_inspect_members", nil))
+	renderPage(c, "admin-member-new", pageData(c, "Create member - KKSUK PD Dharma Jaya", "members", "create_member", "create_and_inspect_members", nil))
 }
 
 func (s *Server) adminSavingsPage(c *gin.Context) {
@@ -101,10 +107,11 @@ func (s *Server) adminSavingsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-savings", pageData(c, "Savings - Kopdes", "savings", "saving_records", "record_saving_deposits", gin.H{
+	renderPage(c, "admin-savings", pageData(c, "Savings - KKSUK PD Dharma Jaya", "savings", "saving_records", "record_saving_deposits", gin.H{
 		"Members":     members,
 		"Filters":     filters,
 		"Savings":     savings,
+		"ExportPath":  savingsExportPath(filters),
 		"CurrentDate": time.Now().Format("2006-01-02"),
 	}))
 }
@@ -115,9 +122,20 @@ func (s *Server) adminSavingNewPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-saving-new", pageData(c, "Record saving - Kopdes", "savings", "record_saving", "record_saving_deposits", gin.H{
+	renderPage(c, "admin-saving-new", pageData(c, "Record saving - KKSUK PD Dharma Jaya", "savings", "record_saving", "record_saving_deposits", gin.H{
 		"Members":     members,
 		"CurrentDate": time.Now().Format("2006-01-02"),
+	}))
+}
+
+func (s *Server) adminWithdrawalRequestsPage(c *gin.Context) {
+	requests, err := s.withdrawalRequestsForAdmin("pending")
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	renderPage(c, "admin-withdrawal-requests", pageData(c, "Penarikan review - KKSUK PD Dharma Jaya", "withdrawal-requests", "withdrawal_request_review", "inspect_pending_withdrawal_requests", gin.H{
+		"WithdrawalRequests": requests,
 	}))
 }
 
@@ -160,7 +178,7 @@ func (s *Server) adminMemberDetailPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-member-detail", pageData(c, "Member detail - Kopdes", "members", "member_detail", member.FullName, gin.H{
+	renderPage(c, "admin-member-detail", pageData(c, "Member detail - KKSUK PD Dharma Jaya", "members", "member_detail", member.FullName, gin.H{
 		"Member":       member,
 		"Summary":      summary,
 		"Savings":      savings,
@@ -176,7 +194,7 @@ func (s *Server) adminLoanRequestsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-loan-requests", pageData(c, "Loan request review - Kopdes", "loan-requests", "loan_request_review", "inspect_pending_loan_requests", gin.H{
+	renderPage(c, "admin-loan-requests", pageData(c, "Loan request review - KKSUK PD Dharma Jaya", "loan-requests", "loan_request_review", "inspect_pending_loan_requests", gin.H{
 		"LoanRequests": requests,
 	}))
 }
@@ -187,7 +205,7 @@ func (s *Server) adminLoansPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-loans", pageData(c, "Active loans - Kopdes", "loans", "active_loans", "monitor_loans", gin.H{
+	renderPage(c, "admin-loans", pageData(c, "Active loans - KKSUK PD Dharma Jaya", "loans", "active_loans", "monitor_loans", gin.H{
 		"Loans": loans,
 	}))
 }
@@ -198,7 +216,7 @@ func (s *Server) adminRepaymentsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-repayments", pageData(c, "Repayments - Kopdes", "repayments", "repayments", "review_repayments", gin.H{
+	renderPage(c, "admin-repayments", pageData(c, "Repayments - KKSUK PD Dharma Jaya", "repayments", "repayments", "review_repayments", gin.H{
 		"Repayments": repayments,
 	}))
 }
@@ -232,7 +250,7 @@ func (s *Server) memberProfilePage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "member-profile", pageData(c, "Member profile - Kopdes", "profile", "member_profile", member.FullName, gin.H{
+	renderPage(c, "member-profile", pageData(c, "Member profile - KKSUK PD Dharma Jaya", "profile", "member_profile", member.FullName, gin.H{
 		"Member":     member,
 		"Summary":    summary,
 		"Savings":    savings,
@@ -252,7 +270,7 @@ func (s *Server) memberDashboardPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "member-dashboard", pageData(c, "Member dashboard - Kopdes", "dashboard", "dashboard", member.FullName, gin.H{
+	renderPage(c, "member-dashboard", pageData(c, "Member dashboard - KKSUK PD Dharma Jaya", "dashboard", "dashboard", member.FullName, gin.H{
 		"Member":     member,
 		"Dashboard":  dashboard,
 		"ShellClass": "member-dashboard-shell",
@@ -269,8 +287,30 @@ func (s *Server) memberLoanRequestsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "member-loan-requests", pageData(c, "Loan requests - Kopdes", "loan-requests", "loan_requests", "track_loan_requests", gin.H{
+	renderPage(c, "member-loan-requests", pageData(c, "Loan requests - KKSUK PD Dharma Jaya", "loan-requests", "loan_requests", "track_loan_requests", gin.H{
 		"LoanRequests": requests,
 		"ShellClass":   "member-loan-requests-shell",
+	}))
+}
+
+func (s *Server) memberWithdrawalRequestsPage(c *gin.Context) {
+	member, ok := s.profileMember(c)
+	if !ok {
+		return
+	}
+	requests, err := s.withdrawalRequestsByMember(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	summary, err := s.savingSummary(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	renderPage(c, "member-withdrawal-requests", pageData(c, "Penarikan - KKSUK PD Dharma Jaya", "withdrawal-requests", "withdrawal_requests", "request_sukarela_withdrawal", gin.H{
+		"WithdrawalRequests": requests,
+		"Summary":            summary,
+		"ShellClass":         "member-withdrawal-requests-shell",
 	}))
 }
