@@ -38,6 +38,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	})
 	router.GET("/static/app.css", server.staticCSS)
 	router.GET("/static/vendor/*file", server.staticVendorAsset)
+	router.GET("/static/images/*file", server.staticImageAsset)
 	router.GET("/login", server.loginPage)
 	router.POST("/language", server.setLanguage)
 	router.POST("/api/auth/login", server.login)

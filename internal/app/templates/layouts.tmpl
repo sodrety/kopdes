@@ -16,14 +16,33 @@
       </form>
 {{end}}
 
+{{define "brand-mark"}}
+      <div class="brand-mark sidebar-brand" aria-label="Kopdes">
+        <img class="brand-logo" src="/static/images/lambang-koperasi.png" alt="" width="96" height="93">
+        <span class="brand-text">
+          <span class="brand-name">Kopdes</span>
+          <span class="brand-subtitle">{{t .Lang "cooperative_system"}}</span>
+        </span>
+      </div>
+{{end}}
+
 {{define "admin-nav"}}
       <nav class="sidebar-nav">
-        <a class="sidebar-link {{if eq .Active "dashboard"}}active{{end}}" href="/admin/dashboard" title="{{t .Lang "dashboard"}}"><i class="sidebar-icon" data-lucide="layout-dashboard"></i><span class="sidebar-label">{{t .Lang "dashboard"}}</span></a>
-        <a class="sidebar-link {{if eq .Active "members"}}active{{end}}" href="/admin/members" title="{{t .Lang "members"}}"><i class="sidebar-icon" data-lucide="users"></i><span class="sidebar-label">{{t .Lang "members"}}</span></a>
-        <a class="sidebar-link {{if eq .Active "savings"}}active{{end}}" href="/admin/savings" title="{{t .Lang "savings"}}"><i class="sidebar-icon" data-lucide="piggy-bank"></i><span class="sidebar-label">{{t .Lang "savings"}}</span></a>
-        <a class="sidebar-link {{if eq .Active "loan-requests"}}active{{end}}" href="/admin/loan-requests" title="{{t .Lang "loan_requests"}}"><i class="sidebar-icon" data-lucide="file-clock"></i><span class="sidebar-label">{{t .Lang "loan_requests"}}</span></a>
-        <a class="sidebar-link {{if eq .Active "loans"}}active{{end}}" href="/admin/loans" title="{{t .Lang "loans"}}"><i class="sidebar-icon" data-lucide="landmark"></i><span class="sidebar-label">{{t .Lang "loans"}}</span></a>
-        <a class="sidebar-link {{if eq .Active "repayments"}}active{{end}}" href="/admin/repayments" title="{{t .Lang "repayments"}}"><i class="sidebar-icon" data-lucide="receipt"></i><span class="sidebar-label">{{t .Lang "repayments"}}</span></a>
+        <div class="sidebar-nav-group">
+          <span class="sidebar-group-label">{{t .Lang "nav_group_overview"}}</span>
+          <a class="sidebar-link {{if eq .Active "dashboard"}}active{{end}}" href="/admin/dashboard" title="{{t .Lang "dashboard"}}"><i class="sidebar-icon" data-lucide="layout-dashboard"></i><span class="sidebar-label">{{t .Lang "dashboard"}}</span></a>
+        </div>
+        <div class="sidebar-nav-group">
+          <span class="sidebar-group-label">{{t .Lang "nav_group_master_data"}}</span>
+          <a class="sidebar-link {{if eq .Active "members"}}active{{end}}" href="/admin/members" title="{{t .Lang "members"}}"><i class="sidebar-icon" data-lucide="users"></i><span class="sidebar-label">{{t .Lang "members"}}</span></a>
+        </div>
+        <div class="sidebar-nav-group">
+          <span class="sidebar-group-label">{{t .Lang "nav_group_operations"}}</span>
+          <a class="sidebar-link {{if eq .Active "savings"}}active{{end}}" href="/admin/savings" title="{{t .Lang "nav_simpanan"}}"><i class="sidebar-icon" data-lucide="piggy-bank"></i><span class="sidebar-label">{{t .Lang "nav_simpanan"}}</span></a>
+          <a class="sidebar-link {{if eq .Active "loan-requests"}}active{{end}}" href="/admin/loan-requests" title="{{t .Lang "nav_pinjaman_requests"}}"><i class="sidebar-icon" data-lucide="file-clock"></i><span class="sidebar-label">{{t .Lang "nav_pinjaman_requests"}}</span></a>
+          <a class="sidebar-link {{if eq .Active "loans"}}active{{end}}" href="/admin/loans" title="{{t .Lang "nav_pinjaman"}}"><i class="sidebar-icon" data-lucide="landmark"></i><span class="sidebar-label">{{t .Lang "nav_pinjaman"}}</span></a>
+          <a class="sidebar-link {{if eq .Active "repayments"}}active{{end}}" href="/admin/repayments" title="{{t .Lang "nav_angsuran"}}"><i class="sidebar-icon" data-lucide="receipt"></i><span class="sidebar-label">{{t .Lang "nav_angsuran"}}</span></a>
+        </div>
       </nav>
 {{end}}
 
@@ -39,7 +58,7 @@
 <body>
   <div class="admin-shell">
     <aside class="admin-sidebar" aria-label="{{t .Lang "admin_menu"}}">
-      <div class="sidebar-brand">Kopdes</div>
+{{template "brand-mark" .}}
 {{template "admin-nav" .}}
     </aside>
     <main class="page-shell">
@@ -84,7 +103,7 @@
 <body>
   <main class="member-shell {{.ShellClass}}">
     <header class="member-topbar">
-      <div class="sidebar-brand">Kopdes</div>
+{{template "brand-mark" .}}
 {{template "member-nav" .}}
       {{template "language-form" .}}
       <form class="logout-form" method="post" action="/logout">

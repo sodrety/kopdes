@@ -186,7 +186,7 @@ func TestBahasaRenderingForAuthenticatedAdminAndMemberPages(t *testing.T) {
 	if memberRec.Code != http.StatusOK {
 		t.Fatalf("expected localized member loan request page status 200, got %d: %s", memberRec.Code, memberRec.Body.String())
 	}
-	if body := memberRec.Body.String(); !strings.Contains(body, "Permintaan pinjaman") || !strings.Contains(body, "Ajukan permintaan pinjaman") || !strings.Contains(body, "Riwayat permintaan") || !strings.Contains(body, "menunggu") {
+	if body := memberRec.Body.String(); !strings.Contains(body, "Permintaan pinjaman") || !strings.Contains(body, "Ajukan permintaan pinjaman") || !strings.Contains(body, "Riwayat permintaan") || !strings.Contains(body, "Menunggu") {
 		t.Fatalf("expected Bahasa member loan request page, got %s", body)
 	}
 }
@@ -696,7 +696,7 @@ func TestStaticCSSIncludesMobileAdminResponsiveRules(t *testing.T) {
 		t.Fatalf("expected css status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	css := rec.Body.String()
-	for _, text := range []string{"@media (max-width: 760px)", ".admin-sidebar", "overflow-x: auto", ".page-shell", ".summary-grid", "grid-template-columns: repeat(2, minmax(0, 1fr))", ".inline-approval-form", ".inline-repayment-form", ".table-scroll td:last-child"} {
+	for _, text := range []string{"--primary: #16a34a", "--pinjaman: #0891b2", "--warning: #f59e0b", "--negative: #dc2626", ".brand-logo", ".sidebar-group-label", ".status-pending", "@media (max-width: 760px)", ".admin-sidebar", "overflow-x: auto", ".page-shell", ".summary-grid", "grid-template-columns: repeat(2, minmax(0, 1fr))", ".inline-approval-form", ".inline-repayment-form", ".table-scroll td:last-child"} {
 		if !strings.Contains(css, text) {
 			t.Fatalf("expected css to include %q, got %s", text, css)
 		}
@@ -715,7 +715,7 @@ func TestBrowserPagesUseLocalPinnedFrontendAssets(t *testing.T) {
 		t.Fatalf("expected login page status 200, got %d: %s", pageRec.Code, pageRec.Body.String())
 	}
 	body := pageRec.Body.String()
-	for _, text := range []string{`src="/static/vendor/htmx-2.0.10.min.js"`, `src="/static/vendor/lucide-0.468.0.min.js"`} {
+	for _, text := range []string{`src="/static/vendor/htmx-2.0.10.min.js"`, `src="/static/vendor/lucide-0.468.0.min.js"`, `src="/static/images/lambang-koperasi.png"`, `class="brand-logo"`} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected login page to reference %q, got %s", text, body)
 		}
@@ -739,6 +739,21 @@ func TestBrowserPagesUseLocalPinnedFrontendAssets(t *testing.T) {
 			t.Fatalf("expected %s to return asset content", path)
 		}
 	}
+
+	logoReq := httptest.NewRequest(http.MethodGet, "/static/images/lambang-koperasi.png", nil)
+	logoRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(logoRec, logoReq)
+
+	if logoRec.Code != http.StatusOK {
+		t.Fatalf("expected logo status 200, got %d: %s", logoRec.Code, logoRec.Body.String())
+	}
+	if contentType := logoRec.Header().Get("Content-Type"); !strings.Contains(contentType, "image/png") {
+		t.Fatalf("expected logo content type image/png, got %q", contentType)
+	}
+	if logoRec.Body.Len() == 0 {
+		t.Fatal("expected logo to return asset content")
+	}
 }
 
 func TestBrowserPagesRenderSharedLayoutsAndHtmxForms(t *testing.T) {
@@ -761,12 +776,13 @@ func TestBrowserPagesRenderSharedLayoutsAndHtmxForms(t *testing.T) {
 			cookie: adminCookie,
 			contains: []string{
 				`<aside class="admin-sidebar" aria-label="Admin menu">`,
+				`src="/static/images/lambang-koperasi.png"`,
 				`src="/static/vendor/htmx-2.0.10.min.js"`,
 				`src="/static/vendor/lucide-0.468.0.min.js"`,
 				`hx-post="/api/admin/members"`,
 				`hx-target="#member-form-error"`,
 				`id="member-form-error" class="form-error"`,
-				`<span class="status-badge">active</span>`,
+				`<span class="status-badge status-active">Aktif</span>`,
 				member.MemberNo,
 			},
 		},
@@ -776,6 +792,7 @@ func TestBrowserPagesRenderSharedLayoutsAndHtmxForms(t *testing.T) {
 			cookie: memberCookie,
 			contains: []string{
 				`class="member-shell member-loan-requests-shell"`,
+				`src="/static/images/lambang-koperasi.png"`,
 				`src="/static/vendor/htmx-2.0.10.min.js"`,
 				`hx-post="/api/member/loan-requests"`,
 				`hx-target="#loan-request-error"`,
@@ -1743,7 +1760,7 @@ func TestMemberLoanRequestPageRendersFormAndHistory(t *testing.T) {
 		t.Fatalf("expected loan request page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"member-loan-requests-shell", "Loan requests", "Submit loan request", `name="requested_amount"`, `name="duration_months"`, "table-scroll", "1500000", "pending"} {
+	for _, text := range []string{"member-loan-requests-shell", "Loan requests", "Submit loan request", `name="requested_amount"`, `name="duration_months"`, "table-scroll", "1500000", "Menunggu"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected loan request page to include %q, got %s", text, body)
 		}
@@ -1839,7 +1856,7 @@ func TestAdminLoanRequestReviewPageRendersPendingQueue(t *testing.T) {
 		t.Fatalf("expected admin loan request page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"Loan request review", "table-scroll", "Queue Member", "M-0021", "3200000", "12", "Test loan", "pending", "Approve", "Reject"} {
+	for _, text := range []string{"Loan request review", "table-scroll", "Queue Member", "M-0021", "3200000", "12", "Test loan", "Menunggu", "Approve", "Reject"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected admin loan request page to include %q, got %s", text, body)
 		}
@@ -2086,7 +2103,7 @@ func TestLoanApprovalPagesRenderReviewAndActiveLoanViews(t *testing.T) {
 		t.Fatalf("expected admin loans page status 200, got %d: %s", adminLoansRec.Code, adminLoansRec.Body.String())
 	}
 	adminLoansBody := adminLoansRec.Body.String()
-	for _, text := range []string{"Active loans", "table-scroll", member.FullName, member.MemberNo, "900000", "100000", "active"} {
+	for _, text := range []string{"Active loans", "table-scroll", member.FullName, member.MemberNo, "900000", "100000", "Aktif"} {
 		if !strings.Contains(adminLoansBody, text) {
 			t.Fatalf("expected admin loans page to include %q, got %s", text, adminLoansBody)
 		}

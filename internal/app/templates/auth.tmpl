@@ -9,7 +9,7 @@
 </head>
 <body class="auth-page">
   <main class="auth-card">
-    <h1>Kopdes</h1>
+{{template "brand-mark" .}}
     {{template "language-form" .}}
     <form method="post" action="/api/auth/login" hx-post="/api/auth/login" hx-target="#login-error" hx-swap="innerHTML">
       <label>{{t .Lang "email"}} <input name="email" type="email" autocomplete="username" required></label>

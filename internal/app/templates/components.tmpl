@@ -3,7 +3,7 @@
 {{end}}
 
 {{define "status-badge"}}
-<span class="status-badge">{{t .Lang .Status}}</span>
+<span class="status-badge status-{{.Status}}">{{t .Lang (printf "status_%s" .Status)}}</span>
 {{end}}
 
 {{define "empty-state"}}

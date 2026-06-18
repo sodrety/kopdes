@@ -8,18 +8,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed static/vendor/*.js
+//go:embed static/vendor/*.js static/images/*.png
 var staticAssetFS embed.FS
 
 const appCSS = `:root {
-  --primary: #9fe870;
-  --primary-pale: #e2f6d5;
-  --ink: #0e0f0c;
-  --body: #454745;
-  --mute: #868685;
+  --primary: #16a34a;
+  --primary-strong: #15803d;
+  --primary-pale: #dcfce7;
+  --pinjaman: #0891b2;
+  --pinjaman-pale: #cffafe;
+  --warning: #f59e0b;
+  --warning-pale: #fef3c7;
+  --negative: #dc2626;
+  --negative-pale: #fee2e2;
+  --ink: #102017;
+  --body: #425246;
+  --mute: #718073;
+  --line: #dce8df;
   --canvas: #ffffff;
-  --canvas-soft: #e8ebe6;
-  --negative: #d03238;
+  --canvas-soft: #f3f7f4;
+  --sidebar: #f8fbf8;
 }
 * { box-sizing: border-box; }
 body {
@@ -38,8 +46,10 @@ body {
 }
 .auth-card, .summary-card {
   background: var(--canvas);
-  border-radius: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
   padding: 24px;
+  box-shadow: 0 10px 24px rgba(16, 32, 23, 0.06);
 }
 .auth-card {
   width: min(100%, 420px);
@@ -63,19 +73,24 @@ label {
 }
 input, select {
 	width: 100%;
-	border: 1px solid var(--ink);
-	border-radius: 12px;
+	border: 1px solid var(--line);
+	border-radius: 10px;
 	padding: 12px 16px;
 	color: var(--ink);
 	font: inherit;
 	background: var(--canvas);
 }
+input:focus, select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.14);
+  outline: none;
+}
 button {
   border: 0;
-  border-radius: 24px;
+  border-radius: 9999px;
   padding: 12px 24px;
   background: var(--primary);
-  color: var(--ink);
+  color: var(--canvas);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -85,7 +100,9 @@ button:disabled {
   cursor: not-allowed;
 }
 .button-secondary {
-  background: var(--canvas-soft);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  color: var(--ink);
 }
 .form-error {
   min-height: 20px;
@@ -94,7 +111,7 @@ button:disabled {
 .form-section {
   display: grid;
   gap: 16px;
-  border-top: 1px solid var(--canvas-soft);
+  border-top: 1px solid var(--line);
   padding-top: 16px;
 }
 .form-section h3 {
@@ -108,6 +125,50 @@ button:disabled {
   align-items: center;
   padding: 12px 24px;
   background: var(--canvas);
+}
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--ink);
+}
+.brand-logo {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  object-fit: contain;
+}
+.brand-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.brand-name {
+  font-size: 24px;
+  line-height: 28px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.brand-subtitle {
+  color: var(--body);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.auth-card .brand-mark {
+  margin-bottom: 24px;
+}
+.auth-card .brand-logo {
+  width: 72px;
+  height: 72px;
+  flex-basis: 72px;
+}
+.auth-card .brand-name {
+  font-size: 32px;
+  line-height: 36px;
 }
 .admin-shell {
   min-height: 100vh;
@@ -126,23 +187,41 @@ button:disabled {
   flex-direction: column;
   gap: 32px;
   padding: 24px;
-  background: var(--ink);
-  color: var(--primary);
+  background: var(--sidebar);
+  border-right: 1px solid var(--line);
+  color: var(--ink);
   overflow: hidden;
 }
 .sidebar-brand {
-  font-size: 32px;
-  line-height: 34px;
-  font-weight: 900;
-  white-space: nowrap;
+  min-width: 0;
 }
 .sidebar-collapsed .sidebar-brand {
-  font-size: 18px;
-  line-height: 24px;
+  justify-content: center;
+}
+.sidebar-collapsed .brand-logo {
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
+}
+.sidebar-collapsed .brand-text {
+  display: none;
 }
 .sidebar-nav {
   display: grid;
+  gap: 18px;
+}
+.sidebar-nav-group {
+  display: grid;
   gap: 8px;
+}
+.sidebar-group-label {
+  color: var(--mute);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  padding: 0 16px;
 }
 .sidebar-link {
   display: flex;
@@ -150,12 +229,16 @@ button:disabled {
   gap: 12px;
   border-radius: 12px;
   padding: 12px 16px;
-  color: var(--canvas-soft);
+  color: var(--body);
   text-decoration: none;
   font-size: 14px;
   line-height: 20px;
   font-weight: 600;
   white-space: nowrap;
+}
+.sidebar-link:hover {
+  background: var(--primary-pale);
+  color: var(--primary-strong);
 }
 .sidebar-icon {
   width: 20px;
@@ -169,10 +252,10 @@ button:disabled {
 }
 .sidebar-link.active {
   background: var(--primary);
-  color: var(--ink);
+  color: var(--canvas);
 }
 .sidebar-link.disabled {
-  color: rgba(232, 235, 230, 0.48);
+  color: var(--mute);
   cursor: default;
 }
 .sidebar-collapsed .sidebar-link {
@@ -181,6 +264,15 @@ button:disabled {
   overflow: hidden;
 }
 .sidebar-collapsed .sidebar-label {
+  display: none;
+}
+.sidebar-collapsed .sidebar-nav {
+  gap: 12px;
+}
+.sidebar-collapsed .sidebar-nav-group {
+  gap: 6px;
+}
+.sidebar-collapsed .sidebar-group-label {
   display: none;
 }
 .admin-topbar {
@@ -198,7 +290,8 @@ button:disabled {
   border-radius: 9999px;
   padding: 0;
   background: var(--canvas);
-  border: 1px solid var(--canvas-soft);
+  border: 1px solid var(--line);
+  color: var(--ink);
 }
 .logout-form {
   display: block;
@@ -242,6 +335,7 @@ button:disabled {
   border-radius: 9999px;
   padding: 8px 12px;
   background: var(--canvas);
+  border: 1px solid var(--line);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -290,8 +384,10 @@ a {
 }
 .panel {
   background: var(--canvas);
-  border-radius: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
   padding: 24px;
+  box-shadow: 0 10px 24px rgba(16, 32, 23, 0.05);
 }
 .narrow-panel {
   max-width: 560px;
@@ -315,7 +411,7 @@ table {
 }
 th, td {
   padding: 12px 0;
-  border-bottom: 1px solid var(--canvas-soft);
+  border-bottom: 1px solid var(--line);
   text-align: left;
 }
 th {
@@ -396,9 +492,24 @@ th {
   border-radius: 9999px;
   padding: 4px 12px;
   background: var(--primary-pale);
-  color: var(--ink);
+  color: var(--primary-strong);
   font-size: 14px;
   font-weight: 600;
+}
+.status-pending {
+  background: var(--warning-pale);
+  color: #92400e;
+}
+.status-approved,
+.status-active {
+  background: var(--primary-pale);
+  color: var(--primary-strong);
+}
+.status-rejected,
+.status-inactive,
+.status-suspended {
+  background: var(--negative-pale);
+  color: var(--negative);
 }
 .empty-state {
   color: var(--mute);
@@ -435,12 +546,13 @@ th {
     overflow: hidden;
   }
   .admin-sidebar .sidebar-brand {
-    font-size: 24px;
-    line-height: 28px;
+    width: auto;
   }
   .sidebar-collapsed .sidebar-brand {
-    font-size: 24px;
-    line-height: 28px;
+    justify-content: flex-start;
+  }
+  .sidebar-collapsed .brand-text {
+    display: grid;
   }
   .sidebar-collapsed .sidebar-link {
     padding: 10px 12px;
@@ -457,6 +569,13 @@ th {
     overflow-x: auto;
     padding-bottom: 4px;
     -webkit-overflow-scrolling: touch;
+  }
+  .sidebar-nav-group {
+    display: flex;
+    gap: 8px;
+  }
+  .sidebar-group-label {
+    display: none;
   }
   .sidebar-link {
     flex: 0 0 auto;
@@ -621,6 +740,18 @@ th {
     width: 100%;
     text-align: center;
   }
+  .brand-logo {
+    width: 42px;
+    height: 42px;
+    flex-basis: 42px;
+  }
+  .brand-name {
+    font-size: 22px;
+    line-height: 26px;
+  }
+  .brand-subtitle {
+    white-space: normal;
+  }
   .table-scroll {
     margin-inline: -4px;
     padding-inline: 4px;
@@ -641,4 +772,13 @@ func (s *Server) staticVendorAsset(c *gin.Context) {
 		return
 	}
 	c.FileFromFS("static/vendor/"+name, http.FS(staticAssetFS))
+}
+
+func (s *Server) staticImageAsset(c *gin.Context) {
+	name := strings.TrimPrefix(c.Param("file"), "/")
+	if name == "" || strings.Contains(name, "..") || !strings.HasSuffix(name, ".png") {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.FileFromFS("static/images/"+name, http.FS(staticAssetFS))
 }
