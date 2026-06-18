@@ -210,16 +210,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 6 {
-		t.Fatalf("expected six tracked migrations, got %d", migrationCount)
+	if migrationCount != 7 {
+		t.Fatalf("expected seven tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 6`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 7`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "create_loan_repayments" {
-		t.Fatalf("expected latest migration name create_loan_repayments, got %q", latestName)
+	if latestName != "add_saving_record_categories" {
+		t.Fatalf("expected latest migration name add_saving_record_categories, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -398,6 +398,7 @@ func TestConcurrentWithdrawalsCannotOverdrawSavings(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{
 				"member_id":"`+member.ID+`",
 				"type":"withdrawal",
+				"category":"sukarela",
 				"amount":80000,
 				"record_date":"2026-06-17"
 			}`))
@@ -759,7 +760,7 @@ func TestBrowserPagesUseLocalPinnedFrontendAssets(t *testing.T) {
 func TestBrowserPagesRenderSharedLayoutsAndHtmxForms(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
-	member := fixture.createMember(t, adminToken, `{"member_no":"M-0100","full_name":"Render Member","join_date":"2026-06-16","status":"active","email":"render-member@coop.test","password":"member-password"}`)
+	fixture.createMember(t, adminToken, `{"member_no":"M-0100","full_name":"Render Member","join_date":"2026-06-16","status":"active","email":"render-member@coop.test","password":"member-password"}`)
 
 	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
 	memberCookie := fixture.browserLogin(t, "render-member@coop.test", "member-password")
@@ -771,8 +772,8 @@ func TestBrowserPagesRenderSharedLayoutsAndHtmxForms(t *testing.T) {
 		contains []string
 	}{
 		{
-			name:   "admin members page",
-			path:   "/admin/members",
+			name:   "admin member create page",
+			path:   "/admin/members/new",
 			cookie: adminCookie,
 			contains: []string{
 				`<aside class="admin-sidebar" aria-label="Admin menu">`,
@@ -782,8 +783,8 @@ func TestBrowserPagesRenderSharedLayoutsAndHtmxForms(t *testing.T) {
 				`hx-post="/api/admin/members"`,
 				`hx-target="#member-form-error"`,
 				`id="member-form-error" class="form-error"`,
-				`<span class="status-badge status-active">Aktif</span>`,
-				member.MemberNo,
+				`name="email"`,
+				`name="password"`,
 			},
 		},
 		{
@@ -1111,9 +1112,30 @@ func TestAdminMemberPagesRenderListCreateAndDetailFlows(t *testing.T) {
 		t.Fatalf("expected member page status 200, got %d: %s", listRec.Code, listRec.Body.String())
 	}
 	listBody := listRec.Body.String()
-	for _, text := range []string{`data-lucide="layout-dashboard"`, `data-lucide="users"`, `data-lucide="piggy-bank"`, "Admin menu", "Toggle sidebar", "Logout", "Dashboard", "Members", "Create member", "Member login", "table-scroll", `name="email"`, `name="password"`, "Agus Wijaya", "M-0006", "suspended"} {
+	for _, text := range []string{`data-lucide="layout-dashboard"`, `data-lucide="users"`, `data-lucide="piggy-bank"`, "Admin menu", "Toggle sidebar", "Logout", "Dashboard", "Members", `href="/admin/members/new"`, "Create member", "table-scroll", "Agus Wijaya", "M-0006", "Ditangguhkan"} {
 		if !strings.Contains(listBody, text) {
 			t.Fatalf("expected members page to include %q, got %s", text, listBody)
+		}
+	}
+	for _, text := range []string{`hx-post="/api/admin/members"`, `name="email"`, `name="password"`} {
+		if strings.Contains(listBody, text) {
+			t.Fatalf("expected members list page not to include create form marker %q, got %s", text, listBody)
+		}
+	}
+
+	createReq := httptest.NewRequest(http.MethodGet, "/admin/members/new", nil)
+	createReq.AddCookie(adminCookie)
+	createRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(createRec, createReq)
+
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected member create page status 200, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	createBody := createRec.Body.String()
+	for _, text := range []string{"Create member", "Member login", `hx-post="/api/admin/members"`, `name="email"`, `name="password"`} {
+		if !strings.Contains(createBody, text) {
+			t.Fatalf("expected member create page to include %q, got %s", text, createBody)
 		}
 	}
 
@@ -1291,6 +1313,7 @@ func TestAdminCanRecordDepositAndMemberCanSeeSavingHistoryAndSummary(t *testing.
 	depositReq := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{
 		"member_id":"`+member.ID+`",
 		"type":"deposit",
+		"category":"wajib",
 		"amount":500000,
 		"record_date":"2026-06-16",
 		"reference_no":"TRF-001",
@@ -1310,6 +1333,7 @@ func TestAdminCanRecordDepositAndMemberCanSeeSavingHistoryAndSummary(t *testing.
 		ID          string `json:"id"`
 		MemberID    string `json:"member_id"`
 		Type        string `json:"type"`
+		Category    string `json:"category"`
 		Amount      int    `json:"amount"`
 		RecordDate  string `json:"record_date"`
 		ReferenceNo string `json:"reference_no"`
@@ -1318,7 +1342,7 @@ func TestAdminCanRecordDepositAndMemberCanSeeSavingHistoryAndSummary(t *testing.
 	if err := json.Unmarshal(depositRec.Body.Bytes(), &deposit); err != nil {
 		t.Fatalf("decode deposit response: %v", err)
 	}
-	if deposit.ID == "" || deposit.MemberID != member.ID || deposit.Type != "deposit" || deposit.Amount != 500000 || deposit.RecordDate != "2026-06-16" || deposit.ReferenceNo != "TRF-001" || deposit.Note != "Initial saving" {
+	if deposit.ID == "" || deposit.MemberID != member.ID || deposit.Type != "deposit" || deposit.Category != "wajib" || deposit.Amount != 500000 || deposit.RecordDate != "2026-06-16" || deposit.ReferenceNo != "TRF-001" || deposit.Note != "Initial saving" {
 		t.Fatalf("unexpected deposit response: %+v", deposit)
 	}
 
@@ -1336,6 +1360,7 @@ func TestAdminCanRecordDepositAndMemberCanSeeSavingHistoryAndSummary(t *testing.
 		Savings []struct {
 			ID          string `json:"id"`
 			Type        string `json:"type"`
+			Category    string `json:"category"`
 			Amount      int    `json:"amount"`
 			RecordDate  string `json:"record_date"`
 			ReferenceNo string `json:"reference_no"`
@@ -1345,7 +1370,7 @@ func TestAdminCanRecordDepositAndMemberCanSeeSavingHistoryAndSummary(t *testing.
 	if err := json.Unmarshal(historyRec.Body.Bytes(), &history); err != nil {
 		t.Fatalf("decode saving history: %v", err)
 	}
-	if len(history.Savings) != 1 || history.Savings[0].ID != deposit.ID || history.Savings[0].Amount != 500000 || history.Savings[0].Type != "deposit" {
+	if len(history.Savings) != 1 || history.Savings[0].ID != deposit.ID || history.Savings[0].Amount != 500000 || history.Savings[0].Type != "deposit" || history.Savings[0].Category != "wajib" {
 		t.Fatalf("unexpected saving history: %+v", history)
 	}
 
@@ -1363,11 +1388,14 @@ func TestAdminCanRecordDepositAndMemberCanSeeSavingHistoryAndSummary(t *testing.
 		TotalDeposit    int `json:"total_deposit"`
 		TotalWithdrawal int `json:"total_withdrawal"`
 		CurrentBalance  int `json:"current_balance"`
+		PokokBalance    int `json:"pokok_balance"`
+		WajibBalance    int `json:"wajib_balance"`
+		SukarelaBalance int `json:"sukarela_balance"`
 	}
 	if err := json.Unmarshal(summaryRec.Body.Bytes(), &summary); err != nil {
 		t.Fatalf("decode saving summary: %v", err)
 	}
-	if summary.TotalDeposit != 500000 || summary.TotalWithdrawal != 0 || summary.CurrentBalance != 500000 {
+	if summary.TotalDeposit != 500000 || summary.TotalWithdrawal != 0 || summary.CurrentBalance != 500000 || summary.PokokBalance != 0 || summary.WajibBalance != 500000 || summary.SukarelaBalance != 0 {
 		t.Fatalf("unexpected saving summary: %+v", summary)
 	}
 
@@ -1397,7 +1425,7 @@ func TestRecordDepositValidatesPositiveAmountAndActiveMember(t *testing.T) {
 	inactive := fixture.createMember(t, adminToken, `{"member_no":"M-0013","full_name":"Inactive Saver","join_date":"2026-06-16","status":"inactive"}`)
 
 	t.Run("amount must be positive", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{"member_id":"`+inactive.ID+`","type":"deposit","amount":0,"record_date":"2026-06-16"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{"member_id":"`+inactive.ID+`","type":"deposit","category":"sukarela","amount":0,"record_date":"2026-06-16"}`))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+adminToken)
 		rec := httptest.NewRecorder()
@@ -1407,11 +1435,11 @@ func TestRecordDepositValidatesPositiveAmountAndActiveMember(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Member, deposit amount, and record date are required")
+		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Member, category, amount, and record date are required")
 	})
 
 	t.Run("member must be active", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{"member_id":"`+inactive.ID+`","type":"deposit","amount":100000,"record_date":"2026-06-16"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{"member_id":"`+inactive.ID+`","type":"deposit","category":"sukarela","amount":100000,"record_date":"2026-06-16"}`))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+adminToken)
 		rec := httptest.NewRecorder()
@@ -1444,7 +1472,7 @@ func TestHtmxAdminFormFailureReturnsHTMLFormError(t *testing.T) {
 	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
 		t.Fatalf("expected HTML content type, got %q", contentType)
 	}
-	if body := rec.Body.String(); body != `<span class="form-error-message">Member, deposit amount, and record date are required</span>` {
+	if body := rec.Body.String(); body != `<span class="form-error-message">Member, category, amount, and record date are required</span>` {
 		t.Fatalf("expected escaped HTML error fragment, got %s", body)
 	}
 }
@@ -1478,11 +1506,14 @@ func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) 
 		TotalDeposit    int `json:"total_deposit"`
 		TotalWithdrawal int `json:"total_withdrawal"`
 		CurrentBalance  int `json:"current_balance"`
+		PokokBalance    int `json:"pokok_balance"`
+		WajibBalance    int `json:"wajib_balance"`
+		SukarelaBalance int `json:"sukarela_balance"`
 	}
 	if err := json.Unmarshal(summaryRec.Body.Bytes(), &summary); err != nil {
 		t.Fatalf("decode summary: %v", err)
 	}
-	if summary.TotalDeposit != 300000 || summary.TotalWithdrawal != 125000 || summary.CurrentBalance != 175000 {
+	if summary.TotalDeposit != 300000 || summary.TotalWithdrawal != 125000 || summary.CurrentBalance != 175000 || summary.SukarelaBalance != 175000 {
 		t.Fatalf("unexpected summary after withdrawal: %+v", summary)
 	}
 
@@ -1497,10 +1528,11 @@ func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) 
 	}
 	var history struct {
 		Savings []struct {
-			ID     string `json:"id"`
-			Type   string `json:"type"`
-			Amount int    `json:"amount"`
-			Note   string `json:"note"`
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Category string `json:"category"`
+			Amount   int    `json:"amount"`
+			Note     string `json:"note"`
 		} `json:"savings"`
 	}
 	if err := json.Unmarshal(historyRec.Body.Bytes(), &history); err != nil {
@@ -1508,7 +1540,7 @@ func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) 
 	}
 	var sawWithdrawal bool
 	for _, record := range history.Savings {
-		if record.ID == withdrawalID && record.Type == "withdrawal" && record.Amount == 125000 && record.Note == "Cash withdrawal" {
+		if record.ID == withdrawalID && record.Type == "withdrawal" && record.Category == "sukarela" && record.Amount == 125000 && record.Note == "Cash withdrawal" {
 			sawWithdrawal = true
 		}
 	}
@@ -1519,6 +1551,7 @@ func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) 
 	overReq := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{
 		"member_id":"`+member.ID+`",
 		"type":"withdrawal",
+		"category":"sukarela",
 		"amount":200000,
 		"record_date":"2026-06-16",
 		"reference_no":"WD-OVER",
@@ -1548,11 +1581,14 @@ func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) 
 		TotalDeposit    int `json:"total_deposit"`
 		TotalWithdrawal int `json:"total_withdrawal"`
 		CurrentBalance  int `json:"current_balance"`
+		PokokBalance    int `json:"pokok_balance"`
+		WajibBalance    int `json:"wajib_balance"`
+		SukarelaBalance int `json:"sukarela_balance"`
 	}
 	if err := json.Unmarshal(summaryAfterRejectRec.Body.Bytes(), &summaryAfterReject); err != nil {
 		t.Fatalf("decode summary after reject: %v", err)
 	}
-	if summaryAfterReject.TotalDeposit != 300000 || summaryAfterReject.TotalWithdrawal != 125000 || summaryAfterReject.CurrentBalance != 175000 {
+	if summaryAfterReject.TotalDeposit != 300000 || summaryAfterReject.TotalWithdrawal != 125000 || summaryAfterReject.CurrentBalance != 175000 || summaryAfterReject.SukarelaBalance != 175000 {
 		t.Fatalf("expected rejected withdrawal to leave balance unchanged, got %+v", summaryAfterReject)
 	}
 }
@@ -1571,8 +1607,8 @@ func TestSavingPagesRenderDepositFormAndMemberBalance(t *testing.T) {
 	if emptyAdminPageRec.Code != http.StatusOK {
 		t.Fatalf("expected empty admin savings page status 200, got %d: %s", emptyAdminPageRec.Code, emptyAdminPageRec.Body.String())
 	}
-	if body := emptyAdminPageRec.Body.String(); !strings.Contains(body, "Create an active member before recording saving activity.") || strings.Contains(body, `name="member_id"`) {
-		t.Fatalf("expected savings page to show no-member empty state without selectable member form, got %s", body)
+	if body := emptyAdminPageRec.Body.String(); !strings.Contains(body, "Saving records") || !strings.Contains(body, `href="/admin/savings/new"`) || strings.Contains(body, `hx-post="/api/admin/savings"`) {
+		t.Fatalf("expected savings list page to show records and create link without insert form, got %s", body)
 	}
 
 	member := fixture.createMember(t, adminToken, `{
@@ -1597,9 +1633,30 @@ func TestSavingPagesRenderDepositFormAndMemberBalance(t *testing.T) {
 		t.Fatalf("expected admin savings page status 200, got %d: %s", adminPageRec.Code, adminPageRec.Body.String())
 	}
 	adminBody := adminPageRec.Body.String()
-	for _, text := range []string{"Record saving", "Saving Page Member", "deposit", "withdrawal", `name="amount"`, `name="record_date"`, `data-saving-submit`, `value="`} {
+	for _, text := range []string{"Saving records", `href="/admin/savings/new"`, "Saving Page Member", "Simpanan Sukarela", "TRF-PAGE", "deposit", "Apply filters"} {
 		if !strings.Contains(adminBody, text) {
 			t.Fatalf("expected admin savings page to include %q, got %s", text, adminBody)
+		}
+	}
+	for _, text := range []string{`hx-post="/api/admin/savings"`, `data-saving-submit`, `name="amount"`} {
+		if strings.Contains(adminBody, text) {
+			t.Fatalf("expected admin savings list page not to include insert form marker %q, got %s", text, adminBody)
+		}
+	}
+
+	newSavingReq := httptest.NewRequest(http.MethodGet, "/admin/savings/new", nil)
+	newSavingReq.AddCookie(adminCookie)
+	newSavingRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(newSavingRec, newSavingReq)
+
+	if newSavingRec.Code != http.StatusOK {
+		t.Fatalf("expected new saving page status 200, got %d: %s", newSavingRec.Code, newSavingRec.Body.String())
+	}
+	newSavingBody := newSavingRec.Body.String()
+	for _, text := range []string{"Record saving", "Saving Page Member", "Simpanan Pokok", "Simpanan Wajib", "Simpanan Sukarela", `hx-post="/api/admin/savings"`, `name="category"`, "deposit", "withdrawal", `name="amount"`, `name="record_date"`, `data-saving-submit`, `value="`} {
+		if !strings.Contains(newSavingBody, text) {
+			t.Fatalf("expected new saving page to include %q, got %s", text, newSavingBody)
 		}
 	}
 
@@ -1614,9 +1671,68 @@ func TestSavingPagesRenderDepositFormAndMemberBalance(t *testing.T) {
 		t.Fatalf("expected member profile page status 200, got %d: %s", profileRec.Code, profileRec.Body.String())
 	}
 	profileBody := profileRec.Body.String()
-	for _, text := range []string{"Saving balance", "750000", "Saving history", "table-scroll", "TRF-PAGE", "Page deposit"} {
+	for _, text := range []string{"Saving balance", "750000", "Simpanan Sukarela", "Saving history", "table-scroll", "TRF-PAGE", "Page deposit"} {
 		if !strings.Contains(profileBody, text) {
 			t.Fatalf("expected member profile page to include %q, got %s", text, profileBody)
+		}
+	}
+}
+
+func TestAdminCanFilterSimpananHistoryByCategory(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-FILTER-1","full_name":"Filter One","join_date":"2026-06-16","status":"active"}`)
+	other := fixture.createMember(t, adminToken, `{"member_no":"M-FILTER-2","full_name":"Filter Two","join_date":"2026-06-16","status":"active"}`)
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "wajib", 100000, "WJB-001", "Wajib saving")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 200000, "SUK-001", "Sukarela saving")
+	fixture.recordSavingInCategory(t, adminToken, other.ID, "deposit", "wajib", 300000, "WJB-OTHER", "Other wajib saving")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/savings?member_id="+member.ID+"&category=wajib", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected admin savings filter status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Savings []struct {
+			MemberID    string `json:"member_id"`
+			MemberNo    string `json:"member_no"`
+			FullName    string `json:"full_name"`
+			Type        string `json:"type"`
+			Category    string `json:"category"`
+			Amount      int    `json:"amount"`
+			ReferenceNo string `json:"reference_no"`
+		} `json:"savings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode admin savings filter: %v", err)
+	}
+	if len(response.Savings) != 1 || response.Savings[0].MemberID != member.ID || response.Savings[0].MemberNo != "M-FILTER-1" || response.Savings[0].FullName != "Filter One" || response.Savings[0].Type != "deposit" || response.Savings[0].Category != "wajib" || response.Savings[0].Amount != 100000 || response.Savings[0].ReferenceNo != "WJB-001" {
+		t.Fatalf("unexpected filtered savings: %+v", response.Savings)
+	}
+
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	pageReq := httptest.NewRequest(http.MethodGet, "/admin/savings?member_id="+member.ID+"&category=wajib", nil)
+	pageReq.AddCookie(adminCookie)
+	pageRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(pageRec, pageReq)
+
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("expected admin savings page status 200, got %d: %s", pageRec.Code, pageRec.Body.String())
+	}
+	pageBody := pageRec.Body.String()
+	for _, text := range []string{"Saving records", "Filter One", "M-FILTER-1", "Simpanan Wajib", "WJB-001", `option value="wajib" selected`} {
+		if !strings.Contains(pageBody, text) {
+			t.Fatalf("expected filtered admin savings page to include %q, got %s", text, pageBody)
+		}
+	}
+	for _, text := range []string{"SUK-001", "WJB-OTHER"} {
+		if strings.Contains(pageBody, text) {
+			t.Fatalf("expected filtered admin savings page not to include %q, got %s", text, pageBody)
 		}
 	}
 }
@@ -2814,9 +2930,15 @@ func (f testFixture) recordDeposit(t *testing.T, adminToken, memberID string, am
 
 func (f testFixture) recordSaving(t *testing.T, adminToken, memberID, recordType string, amount int, referenceNo, note string) string {
 	t.Helper()
+	return f.recordSavingInCategory(t, adminToken, memberID, recordType, "sukarela", amount, referenceNo, note)
+}
+
+func (f testFixture) recordSavingInCategory(t *testing.T, adminToken, memberID, recordType, category string, amount int, referenceNo, note string) string {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{
 		"member_id":"`+memberID+`",
 		"type":"`+recordType+`",
+		"category":"`+category+`",
 		"amount":`+strconv.Itoa(amount)+`,
 		"record_date":"2026-06-16",
 		"reference_no":"`+referenceNo+`",

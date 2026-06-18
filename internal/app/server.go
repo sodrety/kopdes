@@ -52,6 +52,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	admin.GET("/members/:id", server.getMember)
 	admin.POST("/members/:id/user", server.createMemberUser)
 	admin.POST("/savings", server.recordSaving)
+	admin.GET("/savings", server.adminSavings)
 	admin.GET("/loan-requests", server.adminLoanRequests)
 	admin.POST("/loan-requests/:id/approve", server.approveLoanRequest)
 	admin.POST("/loan-requests/:id/reject", server.rejectLoanRequest)
@@ -71,8 +72,10 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 
 	router.GET("/admin/dashboard", server.requireRole("admin"), server.adminDashboardPage)
 	router.GET("/admin/members", server.requireRole("admin"), server.adminMembersPage)
+	router.GET("/admin/members/new", server.requireRole("admin"), server.adminMemberNewPage)
 	router.GET("/admin/members/:id", server.requireRole("admin"), server.adminMemberDetailPage)
 	router.GET("/admin/savings", server.requireRole("admin"), server.adminSavingsPage)
+	router.GET("/admin/savings/new", server.requireRole("admin"), server.adminSavingNewPage)
 	router.GET("/admin/loan-requests", server.requireRole("admin"), server.adminLoanRequestsPage)
 	router.GET("/admin/loans", server.requireRole("admin"), server.adminLoansPage)
 	router.GET("/admin/repayments", server.requireRole("admin"), server.adminRepaymentsPage)

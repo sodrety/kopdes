@@ -80,9 +80,13 @@ func (s *Server) adminMembersPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-members", pageData(c, "Members - Kopdes", "members", "members", "create_and_inspect_members", gin.H{
+	renderPage(c, "admin-members", pageData(c, "Members - Kopdes", "members", "members", "member_list", gin.H{
 		"Members": members,
 	}))
+}
+
+func (s *Server) adminMemberNewPage(c *gin.Context) {
+	renderPage(c, "admin-member-new", pageData(c, "Create member - Kopdes", "members", "create_member", "create_and_inspect_members", nil))
 }
 
 func (s *Server) adminSavingsPage(c *gin.Context) {
@@ -91,7 +95,27 @@ func (s *Server) adminSavingsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-savings", pageData(c, "Savings - Kopdes", "savings", "record_saving", "record_saving_deposits", gin.H{
+	filters := savingFiltersFromQuery(c)
+	savings, err := s.savingsForAdmin(filters)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	renderPage(c, "admin-savings", pageData(c, "Savings - Kopdes", "savings", "saving_records", "record_saving_deposits", gin.H{
+		"Members":     members,
+		"Filters":     filters,
+		"Savings":     savings,
+		"CurrentDate": time.Now().Format("2006-01-02"),
+	}))
+}
+
+func (s *Server) adminSavingNewPage(c *gin.Context) {
+	members, err := s.allMembers()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	renderPage(c, "admin-saving-new", pageData(c, "Record saving - Kopdes", "savings", "record_saving", "record_saving_deposits", gin.H{
 		"Members":     members,
 		"CurrentDate": time.Now().Format("2006-01-02"),
 	}))

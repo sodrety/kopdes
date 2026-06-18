@@ -128,6 +128,14 @@ var migrations = []migration{
 			)`,
 		},
 	},
+	{
+		Version: 7,
+		Name:    "add_saving_record_categories",
+		Statements: []string{
+			`ALTER TABLE saving_records
+			 ADD COLUMN category TEXT NOT NULL DEFAULT 'sukarela' CHECK (category IN ('pokok', 'wajib', 'sukarela'))`,
+		},
+	},
 }
 
 func Migrate(db *sql.DB) error {

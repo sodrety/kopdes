@@ -13,32 +13,10 @@
 
 {{define "admin-members"}}
 {{template "admin-shell-start" .}}
-      <section class="two-column">
-        <article class="panel">
-          <h2>{{t .Lang "create_member"}}</h2>
-          <form method="post" action="/api/admin/members" hx-post="/api/admin/members" hx-target="#member-form-error" hx-swap="innerHTML">
-            <label>{{t .Lang "member_number"}} <input name="member_no" required></label>
-            <label>{{t .Lang "full_name"}} <input name="full_name" required></label>
-            <label>{{t .Lang "phone"}} <input name="phone"></label>
-            <label>{{t .Lang "address"}} <input name="address"></label>
-            <label>{{t .Lang "join_date"}} <input name="join_date" type="date" required></label>
-            <label>{{t .Lang "status"}}
-              <select name="status">
-                <option value="active">active</option>
-                <option value="inactive">inactive</option>
-                <option value="suspended">suspended</option>
-              </select>
-            </label>
-            <div class="form-section">
-              <h3>{{t .Lang "member_login"}}</h3>
-              <label>{{t .Lang "email"}} <input name="email" type="email" autocomplete="off"></label>
-              <label>{{t .Lang "password"}} <input name="password" type="password" autocomplete="new-password"></label>
-            </div>
-            <button type="submit">{{t .Lang "create_member"}}</button>
-          </form>
-{{template "form-error" (dict "ID" "member-form-error")}}
-        </article>
-        <article class="panel">
+      <section class="page-actions">
+        <a class="button-link" href="/admin/members/new">{{t .Lang "create_member"}}</a>
+      </section>
+      <section class="panel">
           <h2>{{t .Lang "member_list"}}</h2>
           {{if .Members}}
 {{template "table-open" .}}
@@ -62,12 +40,106 @@
           {{else}}
 {{template "empty-state" (t .Lang "no_members")}}
           {{end}}
-        </article>
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-member-new"}}
+{{template "admin-shell-start" .}}
+      <section class="panel narrow-panel">
+        <form method="post" action="/api/admin/members" hx-post="/api/admin/members" hx-target="#member-form-error" hx-swap="innerHTML">
+          <label>{{t .Lang "member_number"}} <input name="member_no" required></label>
+          <label>{{t .Lang "full_name"}} <input name="full_name" required></label>
+          <label>{{t .Lang "phone"}} <input name="phone"></label>
+          <label>{{t .Lang "address"}} <input name="address"></label>
+          <label>{{t .Lang "join_date"}} <input name="join_date" type="date" required></label>
+          <label>{{t .Lang "status"}}
+            <select name="status">
+              <option value="active">active</option>
+              <option value="inactive">inactive</option>
+              <option value="suspended">suspended</option>
+            </select>
+          </label>
+          <div class="form-section">
+            <h3>{{t .Lang "member_login"}}</h3>
+            <label>{{t .Lang "email"}} <input name="email" type="email" autocomplete="off"></label>
+            <label>{{t .Lang "password"}} <input name="password" type="password" autocomplete="new-password"></label>
+          </div>
+          <button type="submit">{{t .Lang "create_member"}}</button>
+        </form>
+{{template "form-error" (dict "ID" "member-form-error")}}
       </section>
 {{template "admin-shell-end" .}}
 {{end}}
 
 {{define "admin-savings"}}
+{{template "admin-shell-start" .}}
+      <section class="page-actions">
+        <a class="button-link" href="/admin/savings/new">{{t .Lang "record_saving"}}</a>
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "saving_records"}}</h2>
+        <form class="filter-form" method="get" action="/admin/savings">
+          <label>{{t .Lang "member"}}
+            <select name="member_id">
+              <option value="">{{t .Lang "all_members"}}</option>
+              {{range .Members}}
+              <option value="{{.ID}}" {{if eq $.Filters.MemberID .ID}}selected{{end}}>{{.FullName}} - {{.MemberNo}}</option>
+              {{end}}
+            </select>
+          </label>
+          <label>{{t .Lang "saving_category"}}
+            <select name="category">
+              <option value="">{{t .Lang "all_categories"}}</option>
+              <option value="pokok" {{if eq .Filters.Category "pokok"}}selected{{end}}>{{t .Lang "simpanan_pokok"}}</option>
+              <option value="wajib" {{if eq .Filters.Category "wajib"}}selected{{end}}>{{t .Lang "simpanan_wajib"}}</option>
+              <option value="sukarela" {{if eq .Filters.Category "sukarela"}}selected{{end}}>{{t .Lang "simpanan_sukarela"}}</option>
+            </select>
+          </label>
+          <label>{{t .Lang "type"}}
+            <select name="type">
+              <option value="">{{t .Lang "all_types"}}</option>
+              <option value="deposit" {{if eq .Filters.Type "deposit"}}selected{{end}}>{{t .Lang "deposit"}}</option>
+              <option value="withdrawal" {{if eq .Filters.Type "withdrawal"}}selected{{end}}>{{t .Lang "withdrawal"}}</option>
+            </select>
+          </label>
+          <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.Filters.DateFrom}}"></label>
+          <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.Filters.DateTo}}"></label>
+          <button type="submit">{{t .Lang "apply_filters"}}</button>
+        </form>
+        {{if .Savings}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "date"}}</th>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "saving_category"}}</th>
+              <th>{{t $.Lang "type"}}</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "reference"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Savings}}
+            <tr>
+              <td>{{.RecordDate}}</td>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{t $.Lang (printf "simpanan_%s" .Category)}}</td>
+              <td>{{t $.Lang .Type}}</td>
+              <td>{{.Amount}}</td>
+              <td>{{.ReferenceNo}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_saving_records")}}
+        {{end}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-saving-new"}}
 {{template "admin-shell-start" .}}
       <section class="panel narrow-panel">
         {{if .Members}}
@@ -83,6 +155,13 @@
             <select name="type" onchange="this.form.querySelector('[data-saving-submit]').textContent = this.value === 'withdrawal' ? this.dataset.withdrawalText : this.dataset.depositText" data-deposit-text="{{t .Lang "record_deposit"}}" data-withdrawal-text="{{t .Lang "record_withdrawal"}}">
               <option value="deposit">deposit</option>
               <option value="withdrawal">withdrawal</option>
+            </select>
+          </label>
+          <label>{{t .Lang "saving_category"}}
+            <select name="category" required>
+              <option value="pokok">{{t .Lang "simpanan_pokok"}}</option>
+              <option value="wajib">{{t .Lang "simpanan_wajib"}}</option>
+              <option value="sukarela">{{t .Lang "simpanan_sukarela"}}</option>
             </select>
           </label>
           <label>{{t .Lang "amount"}} <input name="amount" type="number" min="1" required></label>
@@ -103,6 +182,9 @@
 {{template "admin-shell-start" .}}
       <section class="summary-grid">
 {{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" .Summary.CurrentBalance)}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_pokok") "Value" .Summary.PokokBalance)}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" .Summary.WajibBalance)}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" .Summary.SukarelaBalance)}}
 {{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" .Summary.TotalDeposit)}}
 {{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" .Summary.TotalWithdrawal)}}
       </section>
@@ -121,6 +203,7 @@
           <thead>
             <tr>
               <th>{{t $.Lang "date"}}</th>
+              <th>{{t $.Lang "saving_category"}}</th>
               <th>{{t $.Lang "type"}}</th>
               <th>{{t $.Lang "amount"}}</th>
               <th>{{t $.Lang "reference"}}</th>
@@ -131,6 +214,7 @@
             {{range .Savings}}
             <tr>
               <td>{{.RecordDate}}</td>
+              <td>{{t $.Lang (printf "simpanan_%s" .Category)}}</td>
               <td>{{t $.Lang .Type}}</td>
               <td>{{.Amount}}</td>
               <td>{{.ReferenceNo}}</td>

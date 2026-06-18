@@ -95,6 +95,17 @@ button {
   font-weight: 600;
   cursor: pointer;
 }
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  padding: 12px 24px;
+  background: var(--primary);
+  color: var(--canvas);
+  font-weight: 700;
+  text-decoration: none;
+}
 button:disabled {
   opacity: 0.48;
   cursor: not-allowed;
@@ -118,6 +129,15 @@ button:disabled {
   margin: 0;
   font-size: 16px;
   line-height: 24px;
+}
+.filter-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.filter-form button {
+  align-self: end;
 }
 .nav-bar {
   display: flex;
@@ -349,6 +369,11 @@ button:disabled {
 }
 .page-header p {
   color: var(--body);
+}
+.page-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
 }
 .page-shell > section + section,
 .member-shell > section + section {
@@ -618,7 +643,8 @@ th {
   }
   .inline-approval-form,
   .inline-rejection-form,
-  .inline-repayment-form {
+  .inline-repayment-form,
+  .filter-form {
     min-width: 0;
   }
   .review-cell {
@@ -628,7 +654,8 @@ th {
   .inline-repayment-form {
     grid-template-columns: 1fr;
   }
-  .inline-rejection-form {
+  .inline-rejection-form,
+  .filter-form {
     grid-template-columns: 1fr;
   }
   .inline-approval-form input,

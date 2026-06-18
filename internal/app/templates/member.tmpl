@@ -45,6 +45,7 @@
         <thead>
           <tr>
             <th>{{t $.Lang "date"}}</th>
+            <th>{{t $.Lang "saving_category"}}</th>
             <th>{{t $.Lang "type"}}</th>
             <th>{{t $.Lang "amount"}}</th>
             <th>{{t $.Lang "reference"}}</th>
@@ -54,6 +55,7 @@
           {{range .Dashboard.LatestSavings}}
           <tr>
             <td>{{.RecordDate}}</td>
+            <td>{{t $.Lang (printf "simpanan_%s" .Category)}}</td>
             <td>{{t $.Lang .Type}}</td>
             <td>{{.Amount}}</td>
             <td>{{.ReferenceNo}}</td>
@@ -97,6 +99,9 @@
 {{template "member-shell-start" .}}
     <section class="summary-grid">
 {{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" .Summary.CurrentBalance)}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_pokok") "Value" .Summary.PokokBalance)}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" .Summary.WajibBalance)}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" .Summary.SukarelaBalance)}}
 {{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" .Summary.TotalDeposit)}}
 {{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" .Summary.TotalWithdrawal)}}
     </section>
@@ -127,6 +132,7 @@
         <thead>
           <tr>
             <th>{{t $.Lang "date"}}</th>
+            <th>{{t $.Lang "saving_category"}}</th>
             <th>{{t $.Lang "type"}}</th>
             <th>{{t $.Lang "amount"}}</th>
             <th>{{t $.Lang "reference"}}</th>
@@ -137,6 +143,7 @@
           {{range .Savings}}
           <tr>
             <td>{{.RecordDate}}</td>
+            <td>{{t $.Lang (printf "simpanan_%s" .Category)}}</td>
             <td>{{t $.Lang .Type}}</td>
             <td>{{.Amount}}</td>
             <td>{{.ReferenceNo}}</td>
