@@ -709,7 +709,7 @@ func TestStaticCSSIncludesMobileAdminResponsiveRules(t *testing.T) {
 	}
 }
 
-func TestPublicHomePageRendersKopkarlytaStyleLandingSections(t *testing.T) {
+func TestRootRedirectsToLoginWithoutSessionAndDashboardWithSession(t *testing.T) {
 	fixture := newTestFixture(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -717,14 +717,25 @@ func TestPublicHomePageRendersKopkarlytaStyleLandingSections(t *testing.T) {
 
 	fixture.server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected home page status 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected root without session to redirect, got %d: %s", rec.Code, rec.Body.String())
 	}
-	body := rec.Body.String()
-	for _, text := range []string{"KOPKARLYTA", "Koperasi Karyawan", "Layanan Kami untuk", "Tentang Kami", "Visi &", "Unit Usaha", "Galeri", "Bergabunglah", `href="/login"`, `class="public-hero"`} {
-		if !strings.Contains(body, text) {
-			t.Fatalf("expected home page to include %q, got %s", text, body)
-		}
+	if location := rec.Header().Get("Location"); location != "/login" {
+		t.Fatalf("expected root without session to redirect to /login, got %q", location)
+	}
+
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	authReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	authReq.AddCookie(adminCookie)
+	authRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(authRec, authReq)
+
+	if authRec.Code != http.StatusSeeOther {
+		t.Fatalf("expected root with admin session to redirect, got %d: %s", authRec.Code, authRec.Body.String())
+	}
+	if location := authRec.Header().Get("Location"); location != "/admin/dashboard" {
+		t.Fatalf("expected root with admin session to redirect to dashboard, got %q", location)
 	}
 }
 

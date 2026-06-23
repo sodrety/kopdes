@@ -64,7 +64,36 @@ func (s *Server) loginPage(c *gin.Context) {
 }
 
 func (s *Server) homePage(c *gin.Context) {
-	renderPage(c, "home", pageData(c, "KOPKARLYTA", "", "", "", nil))
+	tokenValue := ""
+	if cookie, err := c.Cookie("auth_token"); err == nil {
+		tokenValue = cookie
+	}
+	if tokenValue == "" {
+		c.Redirect(http.StatusSeeOther, "/login")
+		return
+	}
+	tokenUser, err := ParseToken(s.cfg.JWTSecret, tokenValue)
+	if err != nil {
+		s.clearAuthCookie(c)
+		c.Redirect(http.StatusSeeOther, "/login")
+		return
+	}
+	user, err := s.validateSessionUser(tokenUser)
+	if err != nil {
+		s.clearAuthCookie(c)
+		c.Redirect(http.StatusSeeOther, "/login")
+		return
+	}
+	if user.Role == "member" {
+		if err := s.validateMemberSession(tokenUser, user); err != nil {
+			s.clearAuthCookie(c)
+			c.Redirect(http.StatusSeeOther, "/login")
+			return
+		}
+		c.Redirect(http.StatusSeeOther, "/member/dashboard")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/admin/dashboard")
 }
 
 func (s *Server) adminDashboardPage(c *gin.Context) {
