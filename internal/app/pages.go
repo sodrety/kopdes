@@ -60,7 +60,11 @@ func pageData(c *gin.Context, title, active, heading, description string, values
 }
 
 func (s *Server) loginPage(c *gin.Context) {
-	renderPage(c, "login", pageData(c, "KKSUK PD Dharma Jaya Login", "", "", "", nil))
+	renderPage(c, "login", pageData(c, "KOPKARLYTA Login", "", "", "", nil))
+}
+
+func (s *Server) homePage(c *gin.Context) {
+	renderPage(c, "home", pageData(c, "KOPKARLYTA", "", "", "", nil))
 }
 
 func (s *Server) adminDashboardPage(c *gin.Context) {

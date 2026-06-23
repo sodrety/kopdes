@@ -59,6 +59,43 @@ type AdminOperationalReports struct {
 	Repayments            []AdminLoanRepayment
 }
 
+type BalanceReport struct {
+	TotalSavings         int
+	TotalOutstandingLoan int
+	PendingWithdrawals   int
+	OperationalBalance   int
+	TotalAssets          int
+	TotalLiabilities     int
+	TotalEquity          int
+	LiabilityRatio       int
+	HealthStatus         string
+	CashAsset            int
+	LoanReceivable       int
+	PrintedAt            string
+	Rows                 []BalanceReportRow
+}
+
+type BalanceReportRow struct {
+	GroupKey string
+	LabelKey string
+	Amount   int
+	Class    string
+}
+
+type ProfitLossReport struct {
+	TotalIncome        int
+	TotalCost          int
+	NetProfit          int
+	IncomePercent      int
+	CostPercent        int
+	MarginPercent      int
+	IncomeTransactions int
+	CostTransactions   int
+	MonthlyAverage     int
+	PeriodStart        string
+	PeriodEnd          string
+}
+
 type SavingsReportRow struct {
 	MemberNo string `json:"member_no"`
 	FullName string `json:"full_name"`
@@ -94,6 +131,28 @@ func (s *Server) adminReportsPage(c *gin.Context) {
 	}
 	renderPage(c, "admin-reports", pageData(c, "Reports - KKSUK PD Dharma Jaya", "reports", "reports", "operational_reports", gin.H{
 		"Reports": reports,
+	}))
+}
+
+func (s *Server) adminBalanceReportPage(c *gin.Context) {
+	report, err := s.balanceReport()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	renderPage(c, "admin-balance-report", pageData(c, "Balance Report - KOPKARLYTA", "reports", "balance_report", "balance_report_description", gin.H{
+		"Report": report,
+	}))
+}
+
+func (s *Server) adminProfitLossReportPage(c *gin.Context) {
+	report, err := s.profitLossReport()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	renderPage(c, "admin-profit-loss-report", pageData(c, "Profit/Loss Report - KOPKARLYTA", "profit-loss", "profit_loss_report", "profit_loss_report_description", gin.H{
+		"Report": report,
 	}))
 }
 
@@ -143,6 +202,107 @@ func (s *Server) adminOperationalReports() (AdminOperationalReports, error) {
 		WithdrawalsByMember:   withdrawalsByMember,
 		Loans:                 loans,
 		Repayments:            repayments,
+	}, nil
+}
+
+func (s *Server) balanceReport() (BalanceReport, error) {
+	savings, err := s.savingsCategoryChart()
+	if err != nil {
+		return BalanceReport{}, err
+	}
+	loanExposure, err := s.loanExposureChart()
+	if err != nil {
+		return BalanceReport{}, err
+	}
+	pendingWithdrawals, err := s.pendingWithdrawalAmount()
+	if err != nil {
+		return BalanceReport{}, err
+	}
+	totalSavings := sumChartValues(savings)
+	totalOutstandingLoan := chartValueByLabel(loanExposure, "remaining_balance")
+	cashAsset := totalSavings - pendingWithdrawals
+	totalAssets := cashAsset + totalOutstandingLoan
+	totalLiabilities := totalSavings
+	totalEquity := totalAssets - totalLiabilities
+	liabilityRatio := 0
+	if totalAssets > 0 {
+		liabilityRatio = totalLiabilities * 100 / totalAssets
+	}
+	healthStatus := "Baik"
+	if liabilityRatio >= 80 {
+		healthStatus = "Perlu Perhatian"
+	} else if liabilityRatio >= 50 {
+		healthStatus = "Cukup"
+	}
+	report := BalanceReport{
+		TotalSavings:         totalSavings,
+		TotalOutstandingLoan: totalOutstandingLoan,
+		PendingWithdrawals:   pendingWithdrawals,
+		OperationalBalance:   totalSavings - totalOutstandingLoan - pendingWithdrawals,
+		TotalAssets:          totalAssets,
+		TotalLiabilities:     totalLiabilities,
+		TotalEquity:          totalEquity,
+		LiabilityRatio:       liabilityRatio,
+		HealthStatus:         healthStatus,
+		CashAsset:            cashAsset,
+		LoanReceivable:       totalOutstandingLoan,
+		PrintedAt:            time.Now().Format("02 January 2006 15:04:05"),
+		Rows: []BalanceReportRow{
+			{GroupKey: "balance_group_savings", LabelKey: "simpanan_pokok", Amount: chartValueByLabel(savings, "simpanan_pokok"), Class: "balance-positive"},
+			{GroupKey: "balance_group_savings", LabelKey: "simpanan_wajib", Amount: chartValueByLabel(savings, "simpanan_wajib"), Class: "balance-positive"},
+			{GroupKey: "balance_group_savings", LabelKey: "simpanan_sukarela", Amount: chartValueByLabel(savings, "simpanan_sukarela"), Class: "balance-positive"},
+			{GroupKey: "balance_group_loans", LabelKey: "remaining_loan", Amount: -totalOutstandingLoan, Class: "balance-negative"},
+			{GroupKey: "balance_group_withdrawals", LabelKey: "pending_withdrawals", Amount: -pendingWithdrawals, Class: "balance-warning"},
+		},
+	}
+	return report, nil
+}
+
+func (s *Server) pendingWithdrawalAmount() (int, error) {
+	var amount int
+	err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0) FROM withdrawal_requests WHERE status = 'pending'`).Scan(&amount)
+	return amount, err
+}
+
+func (s *Server) profitLossReport() (ProfitLossReport, error) {
+	var savingDeposits, loanRepayments, savingWithdrawals int
+	var depositCount, repaymentCount, withdrawalCount int
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM saving_records WHERE type = 'deposit'`).Scan(&savingDeposits, &depositCount); err != nil {
+		return ProfitLossReport{}, err
+	}
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM loan_repayments`).Scan(&loanRepayments, &repaymentCount); err != nil {
+		return ProfitLossReport{}, err
+	}
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM saving_records WHERE type = 'withdrawal'`).Scan(&savingWithdrawals, &withdrawalCount); err != nil {
+		return ProfitLossReport{}, err
+	}
+	totalIncome := savingDeposits + loanRepayments
+	totalCost := savingWithdrawals
+	totalActivity := totalIncome + totalCost
+	incomePercent := 0
+	costPercent := 0
+	if totalActivity > 0 {
+		incomePercent = totalIncome * 100 / totalActivity
+		costPercent = totalCost * 100 / totalActivity
+	}
+	netProfit := totalIncome - totalCost
+	marginPercent := 0
+	if totalIncome > 0 {
+		marginPercent = netProfit * 100 / totalIncome
+	}
+	now := time.Now()
+	return ProfitLossReport{
+		TotalIncome:        totalIncome,
+		TotalCost:          totalCost,
+		NetProfit:          netProfit,
+		IncomePercent:      incomePercent,
+		CostPercent:        costPercent,
+		MarginPercent:      marginPercent,
+		IncomeTransactions: depositCount + repaymentCount,
+		CostTransactions:   withdrawalCount,
+		MonthlyAverage:     netProfit / 6,
+		PeriodStart:        now.AddDate(0, -3, 0).Format("02/01/2006"),
+		PeriodEnd:          now.Format("02/01/2006"),
 	}, nil
 }
 

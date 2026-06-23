@@ -17,10 +17,10 @@
 {{end}}
 
 {{define "brand-mark"}}
-      <div class="brand-mark sidebar-brand" aria-label="KKSUK PD Dharma Jaya">
+      <div class="brand-mark sidebar-brand" aria-label="KOPKARLYTA">
         <img class="brand-logo" src="/static/images/lambang-koperasi.png" alt="" width="96" height="93">
         <span class="brand-text">
-          <span class="brand-name">KKSUK PD Dharma Jaya</span>
+          <span class="brand-name">KOPKARLYTA</span>
           <span class="brand-subtitle">{{t .Lang "cooperative_system"}}</span>
         </span>
       </div>
@@ -31,7 +31,6 @@
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_overview"}}</span>
           <a class="sidebar-link {{if eq .Active "dashboard"}}active{{end}}" href="/admin/dashboard" title="{{t .Lang "dashboard"}}"><i class="sidebar-icon" data-lucide="layout-dashboard"></i><span class="sidebar-label">{{t .Lang "dashboard"}}</span></a>
-          <a class="sidebar-link {{if eq .Active "reports"}}active{{end}}" href="/admin/reports" title="{{t .Lang "reports"}}"><i class="sidebar-icon" data-lucide="chart-column"></i><span class="sidebar-label">{{t .Lang "reports"}}</span></a>
         </div>
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_master_data"}}</span>
@@ -44,6 +43,11 @@
           <a class="sidebar-link {{if eq .Active "loan-requests"}}active{{end}}" href="/admin/loan-requests" title="{{t .Lang "nav_pinjaman_requests"}}"><i class="sidebar-icon" data-lucide="file-clock"></i><span class="sidebar-label">{{t .Lang "nav_pinjaman_requests"}}</span></a>
           <a class="sidebar-link {{if eq .Active "loans"}}active{{end}}" href="/admin/loans" title="{{t .Lang "nav_pinjaman"}}"><i class="sidebar-icon" data-lucide="landmark"></i><span class="sidebar-label">{{t .Lang "nav_pinjaman"}}</span></a>
           <a class="sidebar-link {{if eq .Active "repayments"}}active{{end}}" href="/admin/repayments" title="{{t .Lang "nav_angsuran"}}"><i class="sidebar-icon" data-lucide="receipt"></i><span class="sidebar-label">{{t .Lang "nav_angsuran"}}</span></a>
+        </div>
+        <div class="sidebar-nav-group">
+          <span class="sidebar-group-label">{{t .Lang "nav_group_reports"}}</span>
+          <a class="sidebar-link {{if eq .Active "reports"}}active{{end}}" href="/admin/reports/balance" title="{{t .Lang "balance_report"}}"><i class="sidebar-icon" data-lucide="scale"></i><span class="sidebar-label">{{t .Lang "balance_report"}}</span></a>
+          <a class="sidebar-link {{if eq .Active "profit-loss"}}active{{end}}" href="/admin/reports/profit-loss" title="{{t .Lang "profit_loss_report"}}"><i class="sidebar-icon" data-lucide="chart-column"></i><span class="sidebar-label">{{t .Lang "profit_loss_report"}}</span></a>
         </div>
       </nav>
 {{end}}

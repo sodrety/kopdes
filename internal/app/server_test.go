@@ -619,7 +619,7 @@ func TestAdminCanUseBrowserLoginAndSeeDashboardPage(t *testing.T) {
 		t.Fatalf("expected dashboard page status 200, got %d: %s", dashboardRec.Code, dashboardRec.Body.String())
 	}
 	body := dashboardRec.Body.String()
-	for _, text := range []string{`data-lucide="layout-dashboard"`, `data-lucide="users"`, `data-lucide="piggy-bank"`, "Admin menu", "Toggle sidebar", "Logout", "Dashboard", "Members", "Total members", "Pending requests"} {
+	for _, text := range []string{`data-lucide="layout-dashboard"`, `data-lucide="users"`, `data-lucide="piggy-bank"`, "Admin menu", "Toggle sidebar", "Logout", "Dashboard", "Members", "Total members", "Pending requests", "Aktivitas Terkini", "Aksi Cepat", "Laporan Neraca"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected dashboard page to include %q, got %s", text, body)
 		}
@@ -697,9 +697,33 @@ func TestStaticCSSIncludesMobileAdminResponsiveRules(t *testing.T) {
 		t.Fatalf("expected css status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	css := rec.Body.String()
-	for _, text := range []string{"--primary: #16a34a", "--pinjaman: #0891b2", "--warning: #f59e0b", "--negative: #dc2626", ".brand-logo", ".sidebar-group-label", ".status-pending", "@media (max-width: 760px)", ".admin-sidebar", "overflow-x: auto", ".page-shell", ".summary-grid", "grid-template-columns: repeat(2, minmax(0, 1fr))", ".inline-approval-form", ".inline-repayment-form", ".table-scroll td:last-child"} {
+	for _, text := range []string{"--primary: #0056b3", "--warning: #ffc107", "--negative: #dc2626", ".public-header", ".public-hero", ".public-feature-card", ".auth-visual", "linear-gradient(180deg, #4e73df", ".admin-topbar", ".summary-card", ".dashboard-home-grid", ".dashboard-quick-list", ".brand-logo", ".sidebar-group-label", ".status-pending", "@media (max-width: 760px)", ".admin-sidebar", "overflow-x: auto", ".page-shell", ".summary-grid", "grid-template-columns: repeat(2, minmax(0, 1fr))", ".inline-approval-form", ".inline-repayment-form", ".table-scroll td:last-child"} {
 		if !strings.Contains(css, text) {
 			t.Fatalf("expected css to include %q, got %s", text, css)
+		}
+	}
+	for _, text := range []string{".balance-report-card-header {\n  min-height: 60px;", ".balance-report-card-header h2 {\n  color: var(--primary);", ".profit-card-header,\n.profit-insights-header {\n  min-height: 52px;", ".profit-tabs-header {\n  display: flex;", ".profit-tabs-header span.active {\n  background: var(--primary-pale);"} {
+		if !strings.Contains(css, text) {
+			t.Fatalf("expected normalized report component css to include %q, got %s", text, css)
+		}
+	}
+}
+
+func TestPublicHomePageRendersKopkarlytaStyleLandingSections(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected home page status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, text := range []string{"KOPKARLYTA", "Koperasi Karyawan", "Layanan Kami untuk", "Tentang Kami", "Visi &", "Unit Usaha", "Galeri", "Bergabunglah", `href="/login"`, `class="public-hero"`} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected home page to include %q, got %s", text, body)
 		}
 	}
 }
@@ -716,7 +740,7 @@ func TestBrowserPagesUseLocalPinnedFrontendAssets(t *testing.T) {
 		t.Fatalf("expected login page status 200, got %d: %s", pageRec.Code, pageRec.Body.String())
 	}
 	body := pageRec.Body.String()
-	for _, text := range []string{`src="/static/vendor/htmx-2.0.10.min.js"`, `src="/static/vendor/lucide-0.468.0.min.js"`, `src="/static/images/lambang-koperasi.png"`, `class="brand-logo"`} {
+	for _, text := range []string{`src="/static/vendor/htmx-2.0.10.min.js"`, `src="/static/vendor/lucide-0.468.0.min.js"`, `src="/static/images/lambang-koperasi.png"`, `class="brand-logo"`, `class="auth-visual"`} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected login page to reference %q, got %s", text, body)
 		}
@@ -1919,6 +1943,65 @@ func TestAdminReportsRenderOperationalChartsAndEmptyStates(t *testing.T) {
 	}
 	if dashboardBody := dashboardRec.Body.String(); !strings.Contains(dashboardBody, "Perbandingan Simpanan &amp; Pinjaman") || !strings.Contains(dashboardBody, "Neraca Trend (6 Months)") || !strings.Contains(dashboardBody, `class="line-chart-path chart-line-simpanan"`) {
 		t.Fatalf("expected dashboard page to include operational charts, got %s", dashboardBody)
+	}
+}
+
+func TestAdminBalanceReportRendersOperationalBalance(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-BAL","full_name":"Balance Member","join_date":"2026-06-16","status":"active","email":"balance-member@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "balance-member@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "pokok", 100000, "BAL-POK", "Pokok")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "wajib", 200000, "BAL-WAJ", "Wajib")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 300000, "BAL-SUK", "Sukarela")
+	fixture.createWithdrawalRequest(t, memberToken, 50000, "Pending balance withdrawal")
+	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 240000, 6), 240000, 6)
+	fixture.recordRepayment(t, adminToken, loan.ID, 40000)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/reports/balance", nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected balance report status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, text := range []string{`<h1>Balance report</h1>`, `href="/admin/reports/balance" title="Balance report"`, `<span class="sidebar-group-label">Reports</span>`, "Laporan Neraca Keuangan", "Export Excel", "Export PDF", "Filter Laporan", "Tanggal Mulai", "Tanggal Akhir", "Semua Kategori", "Indikator Kesehatan Keuangan", "Rasio Kewajiban terhadap Aset", "Total Aset", "Total Kewajiban", "Total Ekuitas", "Detail Neraca", "ASET", "Kas (Masuk - Keluar)", "Piutang Pinjaman", "KEWAJIBAN", "Simpanan Anggota", "EKUITAS", "TOTAL ASET = TOTAL KEWAJIBAN + EKUITAS", "Informasi", "Komposisi", "Rp 750000", "Rp 600000", "Rp 200000", "Rp 150000"} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected balance report to include %q, got %s", text, body)
+		}
+	}
+}
+
+func TestAdminProfitLossReportMimicsKopkarlytaReport(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-PL","full_name":"Profit Loss Member","join_date":"2026-06-16","status":"active","email":"profit-loss-member@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "profit-loss-member@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "pokok", 100000, "PL-POK", "Pendapatan simpanan")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 300000, "PL-SUK", "Pendapatan sukarela")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "withdrawal", "sukarela", 75000, "PL-COST", "Biaya penarikan")
+	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 240000, 6), 240000, 6)
+	fixture.recordRepayment(t, adminToken, loan.ID, 40000)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/reports/profit-loss", nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected profit/loss report status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, text := range []string{`href="/admin/reports/profit-loss" title="Profit/loss report"`, `<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, "Total Pendapatan", "Total Biaya", "Laba Bersih", "Filter dan Ekspor Data", "Terapkan Filter", "Reset Filter", "Ekspor Data", "Cetak Laporan", "Detail Pendapatan", "Detail Biaya", "Breakdown Per Bulan", "Rincian Pendapatan", "Rincian Biaya", "Insights & Analisis", "Komposisi Keuangan", "Performa Bulanan", "Rp 440000", "Rp 75000", "Rp 365000"} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected profit/loss report to include %q, got %s", text, body)
+		}
 	}
 }
 

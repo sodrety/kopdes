@@ -39,6 +39,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.GET("/static/app.css", server.staticCSS)
 	router.GET("/static/vendor/*file", server.staticVendorAsset)
 	router.GET("/static/images/*file", server.staticImageAsset)
+	router.GET("/", server.homePage)
 	router.GET("/login", server.loginPage)
 	router.POST("/language", server.setLanguage)
 	router.POST("/api/auth/login", server.login)
@@ -82,6 +83,8 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 
 	router.GET("/admin/dashboard", server.requireRole("admin"), server.adminDashboardPage)
 	router.GET("/admin/reports", server.requireRole("admin"), server.adminReportsPage)
+	router.GET("/admin/reports/balance", server.requireRole("admin"), server.adminBalanceReportPage)
+	router.GET("/admin/reports/profit-loss", server.requireRole("admin"), server.adminProfitLossReportPage)
 	router.GET("/admin/members", server.requireRole("admin"), server.adminMembersPage)
 	router.GET("/admin/members/new", server.requireRole("admin"), server.adminMemberNewPage)
 	router.GET("/admin/members/:id", server.requireRole("admin"), server.adminMemberDetailPage)

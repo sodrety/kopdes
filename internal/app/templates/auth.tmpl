@@ -9,14 +9,27 @@
 </head>
 <body class="auth-page">
   <main class="auth-card">
+    <section class="auth-visual" aria-label="Koperasi Karyawan PT. Chandra Asri PP Site">
+      <img src="/static/images/lambang-koperasi.png" alt="" width="150" height="146">
+      <div>
+        <span>KOPKARLYTA</span>
+        <strong>Koperasi Karyawan PT. Chandra Asri PP Site</strong>
+      </div>
+    </section>
+    <section class="auth-form-panel">
 {{template "brand-mark" .}}
-    {{template "language-form" .}}
-    <form method="post" action="/api/auth/login" hx-post="/api/auth/login" hx-target="#login-error" hx-swap="innerHTML">
-      <label>{{t .Lang "email"}} <input name="email" type="email" autocomplete="username" required></label>
-      <label>{{t .Lang "password"}} <input name="password" type="password" autocomplete="current-password" required></label>
-      <button type="submit">{{t .Lang "log_in"}}</button>
-    </form>
-    <p id="login-error" class="form-error"></p>
+      {{template "language-form" .}}
+      <form method="post" action="/api/auth/login" hx-post="/api/auth/login" hx-target="#login-error" hx-swap="innerHTML">
+        <label>{{t .Lang "email"}} <input name="email" type="email" autocomplete="username" placeholder="E-Mail Address" required></label>
+        <label>{{t .Lang "password"}} <input name="password" type="password" autocomplete="current-password" placeholder="{{t .Lang "password"}}" required></label>
+        <label class="remember-field"><input name="remember" type="checkbox"> Remember Me</label>
+        <button type="submit">{{t .Lang "log_in"}}</button>
+      </form>
+      <p id="login-error" class="form-error"></p>
+      <hr>
+      <a class="auth-small-link" href="/">← Kembali ke Beranda</a>
+      <p class="auth-copyright">© 2025 Koperasi Karyawan PT. Chandra Asri PP Site. All rights reserved.</p>
+    </section>
   </main>
 </body>
 </html>
