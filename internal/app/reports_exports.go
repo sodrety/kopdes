@@ -140,7 +140,7 @@ func (s *Server) adminBalanceReportPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-balance-report", pageData(c, "Balance Report - KOPKARLYTA", "reports", "balance_report", "balance_report_description", gin.H{
+	renderPage(c, "admin-balance-report", pageData(c, "Balance Report - KKSUK PD Dharma Jaya", "reports", "balance_report", "balance_report_description", gin.H{
 		"Report": report,
 	}))
 }
@@ -151,7 +151,7 @@ func (s *Server) adminProfitLossReportPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-profit-loss-report", pageData(c, "Profit/Loss Report - KOPKARLYTA", "profit-loss", "profit_loss_report", "profit_loss_report_description", gin.H{
+	renderPage(c, "admin-profit-loss-report", pageData(c, "Profit/Loss Report - KKSUK PD Dharma Jaya", "profit-loss", "profit_loss_report", "profit_loss_report_description", gin.H{
 		"Report": report,
 	}))
 }
