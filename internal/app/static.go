@@ -889,6 +889,7 @@ button:disabled {
   width: min(1120px, 100%);
   margin: 0 auto;
   padding: 30px 24px 44px;
+  color: var(--ink);
 }
 .member-topbar {
   display: flex;
@@ -900,6 +901,24 @@ button:disabled {
   flex-wrap: wrap;
   background: #fff;
   box-shadow: 0 2px 10px rgba(58, 59, 69, 0.12);
+}
+.member-topbar .sidebar-brand {
+  min-height: 0;
+  border-bottom: 0;
+}
+.member-topbar .brand-logo {
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
+}
+.member-topbar .brand-name {
+  color: #5a5c69;
+  font-size: 17px;
+  line-height: 22px;
+  letter-spacing: 0;
+}
+.member-topbar .brand-subtitle {
+  color: #858796;
 }
 .member-nav {
   display: flex;
@@ -914,7 +933,57 @@ button:disabled {
   border: 1px solid #d1d3e2;
   color: var(--primary);
   text-decoration: none;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 700;
   white-space: nowrap;
+}
+.member-nav a:hover {
+  border-color: #c7d4f6;
+  background: var(--primary-pale);
+  color: var(--primary-strong);
+}
+.member-dashboard-shell .member-nav a[href="/member/dashboard"],
+.member-profile-shell .member-nav a[href="/member/profile"],
+.member-withdrawal-requests-shell .member-nav a[href="/member/withdrawal-requests"],
+.member-loan-requests-shell .member-nav a[href="/member/loan-requests"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 5px 15px rgba(0, 86, 179, 0.20);
+}
+.member-shell .language-form select {
+  border-color: #d1d3e2;
+}
+.member-shell .button-secondary {
+  border-color: #d1d3e2;
+  background: #fff;
+  color: var(--primary);
+}
+.member-shell .button-secondary:hover {
+  border-color: var(--primary);
+  background: var(--primary-pale);
+  color: var(--primary-strong);
+}
+.member-shell .page-header h1 {
+  color: #5a5c69;
+}
+.member-shell .page-header p {
+  color: #858796;
+}
+.member-shell .panel,
+.member-shell .summary-card {
+  border-color: #e3e6f0;
+  border-radius: 6px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.10), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+.member-shell .panel > h2 {
+  color: var(--primary);
+  background: #fff;
+}
+.member-shell th,
+.member-shell tbody tr:hover {
+  background: #f8f9fc;
 }
 .page-shell {
   width: 100%;
@@ -2226,7 +2295,6 @@ td:nth-child(n+2):not(.review-cell) {
 	  .member-profile-shell .panel,
 	  .member-loan-requests-shell .panel {
 	    border-radius: var(--radius-lg);
-	    padding: 14px;
 	  }
   .member-profile-shell .summary-card {
     gap: 8px;
@@ -2301,7 +2369,7 @@ td:nth-child(n+2):not(.review-cell) {
     padding-inline: 4px;
   }
   .member-loan-requests-shell .panel {
-    padding: 16px;
+    border-radius: var(--radius-lg);
   }
 }`
 
