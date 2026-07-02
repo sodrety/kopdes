@@ -224,28 +224,11 @@
         <header class="balance-report-card-header">
           <h2>Laporan Neraca Keuangan</h2>
           <div class="balance-export-actions">
-            <a class="button-link button-link-secondary" href="/admin/reports/balance?export=excel">Export Excel</a>
+            <a class="button-link button-link-secondary" href="/admin/reports/balance?export=csv">Export CSV</a>
             <a class="button-link button-link-secondary" href="/admin/reports/balance?export=pdf">Export PDF</a>
           </div>
         </header>
         <div class="balance-report-card-body">
-          <section class="balance-filter-card">
-            <h3>Filter Laporan</h3>
-            <form class="balance-filter-form" method="get" action="/admin/reports/balance">
-              <label>Tanggal Mulai <input name="date_from" type="date"></label>
-              <label>Tanggal Akhir <input name="date_to" type="date"></label>
-              <label>Kategori
-                <select name="category">
-                  <option value="">Semua Kategori</option>
-                  <option value="cash_in">Kas Masuk</option>
-                  <option value="cash_out">Kas Keluar</option>
-                </select>
-              </label>
-              <button type="submit">Terapkan</button>
-              <a class="button-link button-link-secondary" href="/admin/reports/balance">Reset</a>
-            </form>
-          </section>
-
           <section class="balance-health-alert">
             <div>
               <span>Indikator Kesehatan Keuangan</span>
@@ -354,25 +337,13 @@
       </section>
 
       <section class="profit-card">
-        <header class="profit-card-header"><h2><i data-lucide="filter"></i> Filter dan Ekspor Data</h2></header>
+        <header class="profit-card-header"><h2><i data-lucide="download"></i> Ekspor Data</h2></header>
         <div class="profit-card-body">
-          <form class="profit-filter-form" method="get" action="/admin/reports/profit-loss">
-            <label>Tanggal Mulai <input name="date_from" type="date"></label>
-            <label>Tanggal Akhir <input name="date_to" type="date"></label>
-            <label>Kategori Transaksi
-              <select name="category">
-                <option value="">Semua Kategori</option>
-                <option value="cash_in">Kas Masuk</option>
-                <option value="cash_out">Kas Keluar</option>
-              </select>
-            </label>
-            <div class="profit-action-row">
-              <button type="submit">Terapkan Filter</button>
-              <a class="button-link button-link-secondary" href="/admin/reports/profit-loss">Reset Filter</a>
-              <a class="button-link profit-export-button" href="/admin/reports/profit-loss?export=pdf">Ekspor Data</a>
-              <button class="profit-print-button" type="button" onclick="window.print()">Cetak Laporan</button>
-            </div>
-          </form>
+          <div class="profit-action-row">
+            <a class="button-link profit-export-button" href="/admin/reports/profit-loss?export=csv">Ekspor CSV</a>
+            <a class="button-link profit-export-button" href="/admin/reports/profit-loss?export=pdf">Ekspor PDF</a>
+            <button class="profit-print-button" type="button" onclick="window.print()">Cetak Laporan</button>
+          </div>
         </div>
       </section>
 

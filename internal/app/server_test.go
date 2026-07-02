@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sodrety/kopdes/internal/app"
 	"golang.org/x/crypto/bcrypt"
@@ -1980,10 +1981,13 @@ func TestAdminBalanceReportRendersOperationalBalance(t *testing.T) {
 		t.Fatalf("expected balance report status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{`<h1>Balance report</h1>`, `href="/admin/reports/balance" title="Balance report"`, `<span class="sidebar-group-label">Reports</span>`, "Laporan Neraca Keuangan", "Export Excel", "Export PDF", "Filter Laporan", "Tanggal Mulai", "Tanggal Akhir", "Semua Kategori", "Indikator Kesehatan Keuangan", "Rasio Kewajiban terhadap Aset", "Total Aset", "Total Kewajiban", "Total Ekuitas", "Detail Neraca", "ASET", "Kas (Masuk - Keluar)", "Piutang Pinjaman", "KEWAJIBAN", "Simpanan Anggota", "EKUITAS", "TOTAL ASET = TOTAL KEWAJIBAN + EKUITAS", "Informasi", "Komposisi", "Rp 750000", "Rp 600000", "Rp 200000", "Rp 150000"} {
+	for _, text := range []string{`<h1>Balance report</h1>`, `href="/admin/reports/balance" title="Balance report"`, `<span class="sidebar-group-label">Reports</span>`, "Laporan Neraca Keuangan", "Export CSV", "Export PDF", "Indikator Kesehatan Keuangan", "Rasio Kewajiban terhadap Aset", "Total Aset", "Total Kewajiban", "Total Ekuitas", "Detail Neraca", "ASET", "Kas (Masuk - Keluar)", "Piutang Pinjaman", "KEWAJIBAN", "Simpanan Anggota", "EKUITAS", "TOTAL ASET = TOTAL KEWAJIBAN + EKUITAS", "Informasi", "Komposisi", "Rp 750000", "Rp 600000", "Rp 200000", "Rp 150000"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected balance report to include %q, got %s", text, body)
 		}
+	}
+	if strings.Contains(body, `name="date_from"`) {
+		t.Fatal("balance report must not render a filter that is not applied to its calculations")
 	}
 }
 
@@ -2009,9 +2013,88 @@ func TestAdminProfitLossReportMimicsKopkarlytaReport(t *testing.T) {
 		t.Fatalf("expected profit/loss report status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{`href="/admin/reports/profit-loss" title="Profit/loss report"`, `<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, "Total Pendapatan", "Total Biaya", "Laba Bersih", "Filter dan Ekspor Data", "Terapkan Filter", "Reset Filter", "Ekspor Data", "Cetak Laporan", "Detail Pendapatan", "Detail Biaya", "Breakdown Per Bulan", "Rincian Pendapatan", "Rincian Biaya", "Insights & Analisis", "Komposisi Keuangan", "Performa Bulanan", "Rp 440000", "Rp 75000", "Rp 365000"} {
+	for _, text := range []string{`href="/admin/reports/profit-loss" title="Profit/loss report"`, `<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, "Total Pendapatan", "Total Biaya", "Laba Bersih", "Ekspor Data", "Ekspor CSV", "Ekspor PDF", "Cetak Laporan", "Detail Pendapatan", "Detail Biaya", "Breakdown Per Bulan", "Rincian Pendapatan", "Rincian Biaya", "Insights & Analisis", "Komposisi Keuangan", "Performa Bulanan", "Rp 440000", "Rp 75000", "Rp 365000"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected profit/loss report to include %q, got %s", text, body)
+		}
+	}
+	if strings.Contains(body, `name="date_from"`) {
+		t.Fatal("profit/loss report must not render a filter that is not applied to its calculations")
+	}
+}
+
+func TestAdminReportExportsReturnRealDownloadFormats(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+
+	tests := []struct {
+		path        string
+		contentType string
+		filename    string
+		prefix      string
+		contains    string
+	}{
+		{path: "/admin/reports/balance?export=csv", contentType: "text/csv; charset=utf-8", filename: `filename="balance-report.csv"`, contains: "metric,amount"},
+		{path: "/admin/reports/balance?export=pdf", contentType: "application/pdf", filename: `filename="balance-report.pdf"`, prefix: "%PDF-1.4"},
+		{path: "/admin/reports/profit-loss?export=csv", contentType: "text/csv; charset=utf-8", filename: `filename="profit-loss-report.csv"`, contains: "period_start,period_end,total_income"},
+		{path: "/admin/reports/profit-loss?export=pdf", contentType: "application/pdf", filename: `filename="profit-loss-report.pdf"`, prefix: "%PDF-1.4"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			req.AddCookie(adminCookie)
+			rec := httptest.NewRecorder()
+			fixture.server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Content-Type"); got != tt.contentType {
+				t.Fatalf("expected content type %q, got %q", tt.contentType, got)
+			}
+			if disposition := rec.Header().Get("Content-Disposition"); !strings.Contains(disposition, tt.filename) {
+				t.Fatalf("expected download filename %q, got %q", tt.filename, disposition)
+			}
+			body := rec.Body.String()
+			if tt.prefix != "" && !strings.HasPrefix(body, tt.prefix) {
+				t.Fatalf("expected body prefix %q, got %q", tt.prefix, body[:min(len(body), 20)])
+			}
+			if tt.contains != "" && !strings.Contains(body, tt.contains) {
+				t.Fatalf("expected body to contain %q, got %q", tt.contains, body)
+			}
+		})
+	}
+}
+
+func TestProfitLossPeriodMatchesAllIncludedActivity(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-PERIOD","full_name":"Period Member","join_date":"2025-01-01","status":"active"}`)
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "pokok", 120000, "PERIOD-OLD", "Historical activity")
+	if _, err := fixture.db.Exec(`UPDATE saving_records SET record_date = '2025-01-15' WHERE reference_no = 'PERIOD-OLD'`); err != nil {
+		t.Fatalf("move saving into historical period: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/reports/profit-loss", nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected report status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	now := time.Now()
+	months := (now.Year()-2025)*12 + int(now.Month()-time.January) + 1
+	body := rec.Body.String()
+	for _, expected := range []string{
+		"Periode: 15/01/2025 - " + now.Format("02/01/2006"),
+		"Rata-rata Bulanan:",
+		"Rp " + strconv.Itoa(120000/months),
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected period-aware report to include %q, got %s", expected, body)
 		}
 	}
 }
