@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -140,6 +142,23 @@ func (s *Server) adminBalanceReportPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	if export := c.Query("export"); export == "csv" {
+		writeBalanceReportCSV(c, report)
+		return
+	} else if export == "pdf" {
+		writeReportPDF(c, "balance-report.pdf", "KKSUK PD Dharma Jaya - Balance Report", []string{
+			fmt.Sprintf("Printed at: %s", report.PrintedAt),
+			fmt.Sprintf("Total assets: Rp %d", report.TotalAssets),
+			fmt.Sprintf("Total liabilities: Rp %d", report.TotalLiabilities),
+			fmt.Sprintf("Total equity: Rp %d", report.TotalEquity),
+			fmt.Sprintf("Cash asset: Rp %d", report.CashAsset),
+			fmt.Sprintf("Loan receivable: Rp %d", report.LoanReceivable),
+			fmt.Sprintf("Pending withdrawals: Rp %d", report.PendingWithdrawals),
+			fmt.Sprintf("Liability ratio: %d%%", report.LiabilityRatio),
+			fmt.Sprintf("Health status: %s", report.HealthStatus),
+		})
+		return
+	}
 	renderPage(c, "admin-balance-report", pageData(c, "Balance Report - KKSUK PD Dharma Jaya", "reports", "balance_report", "balance_report_description", gin.H{
 		"Report": report,
 	}))
@@ -151,9 +170,91 @@ func (s *Server) adminProfitLossReportPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	if export := c.Query("export"); export == "csv" {
+		writeProfitLossReportCSV(c, report)
+		return
+	} else if export == "pdf" {
+		writeReportPDF(c, "profit-loss-report.pdf", "KKSUK PD Dharma Jaya - Profit/Loss Report", []string{
+			fmt.Sprintf("Period: %s to %s", report.PeriodStart, report.PeriodEnd),
+			fmt.Sprintf("Total income: Rp %d", report.TotalIncome),
+			fmt.Sprintf("Total cost: Rp %d", report.TotalCost),
+			fmt.Sprintf("Net profit: Rp %d", report.NetProfit),
+			fmt.Sprintf("Income transactions: %d", report.IncomeTransactions),
+			fmt.Sprintf("Cost transactions: %d", report.CostTransactions),
+			fmt.Sprintf("Profit margin: %d%%", report.MarginPercent),
+			fmt.Sprintf("Monthly average: Rp %d", report.MonthlyAverage),
+		})
+		return
+	}
 	renderPage(c, "admin-profit-loss-report", pageData(c, "Profit/Loss Report - KKSUK PD Dharma Jaya", "profit-loss", "profit_loss_report", "profit_loss_report_description", gin.H{
 		"Report": report,
 	}))
+}
+
+func writeBalanceReportCSV(c *gin.Context, report BalanceReport) {
+	c.Header("Content-Disposition", `attachment; filename="balance-report.csv"`)
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	writer := csv.NewWriter(c.Writer)
+	_ = writer.Write([]string{"metric", "amount"})
+	_ = writer.Write([]string{"total_assets", strconv.Itoa(report.TotalAssets)})
+	_ = writer.Write([]string{"total_liabilities", strconv.Itoa(report.TotalLiabilities)})
+	_ = writer.Write([]string{"total_equity", strconv.Itoa(report.TotalEquity)})
+	_ = writer.Write([]string{"cash_asset", strconv.Itoa(report.CashAsset)})
+	_ = writer.Write([]string{"loan_receivable", strconv.Itoa(report.LoanReceivable)})
+	_ = writer.Write([]string{"pending_withdrawals", strconv.Itoa(report.PendingWithdrawals)})
+	writer.Flush()
+}
+
+func writeProfitLossReportCSV(c *gin.Context, report ProfitLossReport) {
+	c.Header("Content-Disposition", `attachment; filename="profit-loss-report.csv"`)
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	writer := csv.NewWriter(c.Writer)
+	_ = writer.Write([]string{"period_start", "period_end", "total_income", "total_cost", "net_profit", "income_transactions", "cost_transactions", "margin_percent"})
+	_ = writer.Write([]string{report.PeriodStart, report.PeriodEnd, strconv.Itoa(report.TotalIncome), strconv.Itoa(report.TotalCost), strconv.Itoa(report.NetProfit), strconv.Itoa(report.IncomeTransactions), strconv.Itoa(report.CostTransactions), strconv.Itoa(report.MarginPercent)})
+	writer.Flush()
+}
+
+func writeReportPDF(c *gin.Context, filename, title string, lines []string) {
+	content := strings.Builder{}
+	content.WriteString("BT /F1 16 Tf 50 790 Td (")
+	content.WriteString(escapePDFText(title))
+	content.WriteString(") Tj /F1 11 Tf 0 -28 Td ")
+	for _, line := range lines {
+		content.WriteString("(")
+		content.WriteString(escapePDFText(line))
+		content.WriteString(") Tj 0 -18 Td ")
+	}
+	content.WriteString("ET")
+
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", content.Len(), content.String()),
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+	}
+	var pdf bytes.Buffer
+	pdf.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objects)+1)
+	for i, object := range objects {
+		offsets[i+1] = pdf.Len()
+		fmt.Fprintf(&pdf, "%d 0 obj\n%s\nendobj\n", i+1, object)
+	}
+	xrefOffset := pdf.Len()
+	fmt.Fprintf(&pdf, "xref\n0 %d\n0000000000 65535 f \n", len(objects)+1)
+	for i := 1; i <= len(objects); i++ {
+		fmt.Fprintf(&pdf, "%010d 00000 n \n", offsets[i])
+	}
+	fmt.Fprintf(&pdf, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xrefOffset)
+
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Data(http.StatusOK, "application/pdf", pdf.Bytes())
+}
+
+func escapePDFText(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `(`, `\(`)
+	return strings.ReplaceAll(value, `)`, `\)`)
 }
 
 func (s *Server) adminOperationalReports() (AdminOperationalReports, error) {
@@ -291,6 +392,23 @@ func (s *Server) profitLossReport() (ProfitLossReport, error) {
 		marginPercent = netProfit * 100 / totalIncome
 	}
 	now := time.Now()
+	periodStart := now
+	var earliestActivity string
+	if err := s.db.QueryRow(`SELECT COALESCE(MIN(activity_date), '') FROM (
+		SELECT record_date AS activity_date FROM saving_records
+		UNION ALL
+		SELECT record_date AS activity_date FROM loan_repayments
+	) activity`).Scan(&earliestActivity); err != nil {
+		return ProfitLossReport{}, err
+	}
+	if earliestActivity != "" {
+		parsed, err := time.Parse("2006-01-02", earliestActivity)
+		if err != nil {
+			return ProfitLossReport{}, err
+		}
+		periodStart = parsed
+	}
+	monthCount := monthsInclusive(periodStart, now)
 	return ProfitLossReport{
 		TotalIncome:        totalIncome,
 		TotalCost:          totalCost,
@@ -300,10 +418,18 @@ func (s *Server) profitLossReport() (ProfitLossReport, error) {
 		MarginPercent:      marginPercent,
 		IncomeTransactions: depositCount + repaymentCount,
 		CostTransactions:   withdrawalCount,
-		MonthlyAverage:     netProfit / 6,
-		PeriodStart:        now.AddDate(0, -3, 0).Format("02/01/2006"),
+		MonthlyAverage:     netProfit / monthCount,
+		PeriodStart:        periodStart.Format("02/01/2006"),
 		PeriodEnd:          now.Format("02/01/2006"),
 	}, nil
+}
+
+func monthsInclusive(start, end time.Time) int {
+	months := (end.Year()-start.Year())*12 + int(end.Month()-start.Month()) + 1
+	if months < 1 {
+		return 1
+	}
+	return months
 }
 
 func (s *Server) savingsCategoryChart() (ChartSegments, error) {
