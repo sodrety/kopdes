@@ -98,6 +98,11 @@ type ProfitLossReport struct {
 	PeriodEnd          string
 }
 
+type ProfitLossPeriod struct {
+	DateFrom string
+	DateTo   string
+}
+
 type SavingsReportRow struct {
 	MemberNo string `json:"member_no"`
 	FullName string `json:"full_name"`
@@ -165,11 +170,18 @@ func (s *Server) adminBalanceReportPage(c *gin.Context) {
 }
 
 func (s *Server) adminProfitLossReportPage(c *gin.Context) {
-	report, err := s.profitLossReport()
+	period, err := s.profitLossPeriodFromQuery(c)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid report period")
+		return
+	}
+	report, err := s.profitLossReport(period)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	exportCSVURL := profitLossExportURL(period, "csv")
+	exportPDFURL := profitLossExportURL(period, "pdf")
 	if export := c.Query("export"); export == "csv" {
 		writeProfitLossReportCSV(c, report)
 		return
@@ -187,7 +199,10 @@ func (s *Server) adminProfitLossReportPage(c *gin.Context) {
 		return
 	}
 	renderPage(c, "admin-profit-loss-report", pageData(c, "Profit/Loss Report - KKSUK PD Dharma Jaya", "profit-loss", "profit_loss_report", "profit_loss_report_description", gin.H{
-		"Report": report,
+		"Report":       report,
+		"Period":       period,
+		"ExportCSVURL": exportCSVURL,
+		"ExportPDFURL": exportPDFURL,
 	}))
 }
 
@@ -365,16 +380,74 @@ func (s *Server) pendingWithdrawalAmount() (int, error) {
 	return amount, err
 }
 
-func (s *Server) profitLossReport() (ProfitLossReport, error) {
+func (s *Server) profitLossPeriodFromQuery(c *gin.Context) (ProfitLossPeriod, error) {
+	period := ProfitLossPeriod{
+		DateFrom: strings.TrimSpace(c.Query("date_from")),
+		DateTo:   strings.TrimSpace(c.Query("date_to")),
+	}
+	var from, to time.Time
+	var err error
+	if period.DateFrom != "" {
+		from, err = time.Parse("2006-01-02", period.DateFrom)
+		if err != nil {
+			return ProfitLossPeriod{}, err
+		}
+	}
+	if period.DateTo != "" {
+		to, err = time.Parse("2006-01-02", period.DateTo)
+		if err != nil {
+			return ProfitLossPeriod{}, err
+		}
+	}
+	if period.DateFrom != "" && period.DateTo != "" && to.Before(from) {
+		return ProfitLossPeriod{}, fmt.Errorf("date_to before date_from")
+	}
+	return period, nil
+}
+
+func profitLossExportURL(period ProfitLossPeriod, format string) string {
+	values := url.Values{}
+	if period.DateFrom != "" {
+		values.Set("date_from", period.DateFrom)
+	}
+	if period.DateTo != "" {
+		values.Set("date_to", period.DateTo)
+	}
+	values.Set("export", format)
+	return "/admin/reports/profit-loss?" + values.Encode()
+}
+
+func (s *Server) profitLossReport(period ProfitLossPeriod) (ProfitLossReport, error) {
+	dateFrom := period.DateFrom
+	dateTo := period.DateTo
+	if dateTo == "" {
+		dateTo = time.Now().Format("2006-01-02")
+	}
+	if dateFrom == "" {
+		var earliestActivity string
+		if err := s.db.QueryRow(`SELECT COALESCE(MIN(activity_date), '') FROM (
+			SELECT record_date AS activity_date FROM saving_records
+			UNION ALL
+			SELECT record_date AS activity_date FROM loan_repayments
+		) activity`).Scan(&earliestActivity); err != nil {
+			return ProfitLossReport{}, err
+		}
+		if earliestActivity != "" {
+			dateFrom = earliestActivity
+		} else {
+			dateFrom = dateTo
+		}
+	}
+
 	var savingDeposits, loanRepayments, savingWithdrawals int
 	var depositCount, repaymentCount, withdrawalCount int
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM saving_records WHERE type = 'deposit'`).Scan(&savingDeposits, &depositCount); err != nil {
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM saving_records WHERE type = 'deposit' AND record_date >= $1 AND record_date <= $2`, dateFrom, dateTo).Scan(&savingDeposits, &depositCount); err != nil {
 		return ProfitLossReport{}, err
 	}
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM loan_repayments`).Scan(&loanRepayments, &repaymentCount); err != nil {
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM loan_repayments WHERE record_date >= $1 AND record_date <= $2`, dateFrom, dateTo).Scan(&loanRepayments, &repaymentCount); err != nil {
 		return ProfitLossReport{}, err
 	}
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM saving_records WHERE type = 'withdrawal'`).Scan(&savingWithdrawals, &withdrawalCount); err != nil {
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM saving_records WHERE type = 'withdrawal' AND record_date >= $1 AND record_date <= $2`, dateFrom, dateTo).Scan(&savingWithdrawals, &withdrawalCount); err != nil {
 		return ProfitLossReport{}, err
 	}
 	totalIncome := savingDeposits + loanRepayments
@@ -391,24 +464,15 @@ func (s *Server) profitLossReport() (ProfitLossReport, error) {
 	if totalIncome > 0 {
 		marginPercent = netProfit * 100 / totalIncome
 	}
-	now := time.Now()
-	periodStart := now
-	var earliestActivity string
-	if err := s.db.QueryRow(`SELECT COALESCE(MIN(activity_date), '') FROM (
-		SELECT record_date AS activity_date FROM saving_records
-		UNION ALL
-		SELECT record_date AS activity_date FROM loan_repayments
-	) activity`).Scan(&earliestActivity); err != nil {
+	periodStart, err := time.Parse("2006-01-02", dateFrom)
+	if err != nil {
 		return ProfitLossReport{}, err
 	}
-	if earliestActivity != "" {
-		parsed, err := time.Parse("2006-01-02", earliestActivity)
-		if err != nil {
-			return ProfitLossReport{}, err
-		}
-		periodStart = parsed
+	periodEnd, err := time.Parse("2006-01-02", dateTo)
+	if err != nil {
+		return ProfitLossReport{}, err
 	}
-	monthCount := monthsInclusive(periodStart, now)
+	monthCount := monthsInclusive(periodStart, periodEnd)
 	return ProfitLossReport{
 		TotalIncome:        totalIncome,
 		TotalCost:          totalCost,
@@ -420,7 +484,7 @@ func (s *Server) profitLossReport() (ProfitLossReport, error) {
 		CostTransactions:   withdrawalCount,
 		MonthlyAverage:     netProfit / monthCount,
 		PeriodStart:        periodStart.Format("02/01/2006"),
-		PeriodEnd:          now.Format("02/01/2006"),
+		PeriodEnd:          periodEnd.Format("02/01/2006"),
 	}, nil
 }
 

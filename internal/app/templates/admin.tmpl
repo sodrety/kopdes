@@ -3,9 +3,9 @@
       <section class="summary-grid">
 {{template "summary-card" (dict "Label" (t .Lang "total_members") "Value" .Summary.TotalMembers)}}
 {{template "summary-card" (dict "Label" (t .Lang "active_members") "Value" .Summary.ActiveMembers)}}
-{{template "summary-card" (dict "Label" (t .Lang "total_savings") "Value" .Summary.TotalSavings)}}
+{{template "summary-card" (dict "Label" (t .Lang "total_savings") "Value" (nominal .Summary.TotalSavings))}}
 {{template "summary-card" (dict "Label" (t .Lang "active_loans") "Value" .Summary.ActiveLoans)}}
-{{template "summary-card" (dict "Label" (t .Lang "outstanding_loan") "Value" .Summary.TotalOutstandingLoan)}}
+{{template "summary-card" (dict "Label" (t .Lang "outstanding_loan") "Value" (nominal .Summary.TotalOutstandingLoan))}}
 {{template "summary-card" (dict "Label" (t .Lang "pending_requests") "Value" .Summary.PendingLoanRequests)}}
       </section>
       <section class="dashboard-line-grid">
@@ -33,7 +33,7 @@
                 <td>{{.RecordDate}}</td>
                 <td>Angsuran</td>
                 <td>{{.FullName}} - {{.ReferenceNo}}</td>
-                <td>{{.Amount}}</td>
+                <td>{{nominal .Amount}}</td>
               </tr>
               {{end}}
             </tbody>
@@ -54,7 +54,7 @@
                 <td>{{.CreatedAt}}</td>
                 <td>Pinjaman</td>
                 <td>{{.FullName}}</td>
-                <td>{{.ApprovedAmount}}</td>
+                <td>{{nominal .ApprovedAmount}}</td>
               </tr>
               {{end}}
             </tbody>
@@ -118,10 +118,10 @@
             {{range .Reports.SavingsByMember}}
             <tr>
               <td>{{template "member-table-cell" .}}</td>
-              <td>{{.Pokok}}</td>
-              <td>{{.Wajib}}</td>
-              <td>{{.Sukarela}}</td>
-              <td>{{.Total}}</td>
+              <td>{{nominal .Pokok}}</td>
+              <td>{{nominal .Wajib}}</td>
+              <td>{{nominal .Sukarela}}</td>
+              <td>{{nominal .Total}}</td>
             </tr>
             {{end}}
           </tbody>
@@ -150,7 +150,7 @@
               <td>{{.Pending}}</td>
               <td>{{.Approved}}</td>
               <td>{{.Rejected}}</td>
-              <td>{{.Total}}</td>
+              <td>{{nominal .Total}}</td>
             </tr>
             {{end}}
           </tbody>
@@ -176,9 +176,9 @@
             {{range .Reports.Loans}}
             <tr>
               <td>{{template "member-table-cell" .}}</td>
-              <td>{{.ApprovedAmount}}</td>
-              <td>{{.MonthlyInstallment}}</td>
-              <td>{{.RemainingBalance}}</td>
+              <td>{{nominal .ApprovedAmount}}</td>
+              <td>{{nominal .MonthlyInstallment}}</td>
+              <td>{{nominal .RemainingBalance}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
             </tr>
             {{end}}
@@ -205,7 +205,7 @@
             <tr>
               <td>{{.RecordDate}}</td>
               <td>{{template "member-table-cell" .}}</td>
-              <td>{{.Amount}}</td>
+              <td>{{nominal .Amount}}</td>
               <td>{{.ReferenceNo}}</td>
             </tr>
             {{end}}
@@ -240,17 +240,17 @@
           <section class="balance-kpi-grid">
             <article class="balance-kpi-card balance-kpi-primary">
               <span>Total Aset</span>
-              <strong>Rp {{.Report.TotalAssets}}</strong>
+              <strong>Rp {{nominal .Report.TotalAssets}}</strong>
               <small>Kas + Piutang Pinjaman</small>
             </article>
             <article class="balance-kpi-card balance-kpi-warning">
               <span>Total Kewajiban</span>
-              <strong>Rp {{.Report.TotalLiabilities}}</strong>
+              <strong>Rp {{nominal .Report.TotalLiabilities}}</strong>
               <small>Simpanan Anggota</small>
             </article>
             <article class="balance-kpi-card balance-kpi-success">
               <span>Total Ekuitas</span>
-              <strong>Rp {{.Report.TotalEquity}}</strong>
+              <strong>Rp {{nominal .Report.TotalEquity}}</strong>
               <small>Aset - Kewajiban</small>
             </article>
           </section>
@@ -267,31 +267,31 @@
           <tbody>
             <tr class="balance-section-row">
               <td>ASET</td>
-              <td>Rp {{.Report.TotalAssets}}</td>
+              <td>Rp {{nominal .Report.TotalAssets}}</td>
             </tr>
             <tr>
               <td><span class="balance-row-icon balance-positive-dot"></span>Kas (Masuk - Keluar)</td>
-              <td>Rp {{.Report.CashAsset}}</td>
+              <td>Rp {{nominal .Report.CashAsset}}</td>
             </tr>
             <tr>
               <td><span class="balance-row-icon balance-negative-dot"></span>Piutang Pinjaman</td>
-              <td>Rp {{.Report.LoanReceivable}}</td>
+              <td>Rp {{nominal .Report.LoanReceivable}}</td>
             </tr>
             <tr class="balance-section-row">
               <td>KEWAJIBAN</td>
-              <td>Rp {{.Report.TotalLiabilities}}</td>
+              <td>Rp {{nominal .Report.TotalLiabilities}}</td>
             </tr>
             <tr>
               <td><span class="balance-row-icon balance-warning-dot"></span>Simpanan Anggota</td>
-              <td>Rp {{.Report.TotalSavings}}</td>
+              <td>Rp {{nominal .Report.TotalSavings}}</td>
             </tr>
             <tr class="balance-section-row">
               <td>EKUITAS</td>
-              <td>Rp {{.Report.TotalEquity}}</td>
+              <td>Rp {{nominal .Report.TotalEquity}}</td>
             </tr>
             <tr class="balance-total-row">
               <td>TOTAL ASET = TOTAL KEWAJIBAN + EKUITAS</td>
-              <td>Rp {{.Report.TotalAssets}} = Rp {{.Report.TotalAssets}}</td>
+              <td>Rp {{nominal .Report.TotalAssets}} = Rp {{nominal .Report.TotalAssets}}</td>
             </tr>
           </tbody>
 {{template "table-close" .}}
@@ -305,8 +305,8 @@
             </article>
             <article class="balance-meta-card balance-meta-secondary">
               <h3>Komposisi</h3>
-              <p>Kas: {{.Report.CashAsset}}</p>
-              <p>Piutang: {{.Report.LoanReceivable}}</p>
+              <p>Kas: {{nominal .Report.CashAsset}}</p>
+              <p>Piutang: {{nominal .Report.LoanReceivable}}</p>
             </article>
           </section>
         </div>
@@ -316,22 +316,36 @@
 
 {{define "admin-profit-loss-report"}}
 {{template "admin-shell-start" .}}
-      <section class="profit-period-badge"><i data-lucide="calendar-days"></i> Periode: {{.Report.PeriodStart}} - {{.Report.PeriodEnd}}</section>
+      <section class="profit-period-toolbar">
+        <div class="profit-period-badge"><i data-lucide="calendar-days"></i> Periode: {{.Report.PeriodStart}} - {{.Report.PeriodEnd}}</div>
+        <form class="profit-period-form" method="get" action="/admin/reports/profit-loss">
+          <label>
+            <span>Dari</span>
+            <input type="date" name="date_from" value="{{.Period.DateFrom}}">
+          </label>
+          <label>
+            <span>Sampai</span>
+            <input type="date" name="date_to" value="{{.Period.DateTo}}">
+          </label>
+          <button class="button-link profit-filter-button" type="submit">Terapkan</button>
+          <a class="button-link button-link-secondary profit-reset-button" href="/admin/reports/profit-loss">Reset</a>
+        </form>
+      </section>
 
       <section class="profit-kpi-grid">
         <article class="profit-kpi-card profit-kpi-income">
           <span>Total Pendapatan</span>
-          <strong>Rp {{.Report.TotalIncome}}</strong>
+          <strong>Rp {{nominal .Report.TotalIncome}}</strong>
           <small>{{.Report.IncomePercent}}%</small>
         </article>
         <article class="profit-kpi-card profit-kpi-cost">
           <span>Total Biaya</span>
-          <strong>Rp {{.Report.TotalCost}}</strong>
+          <strong>Rp {{nominal .Report.TotalCost}}</strong>
           <small>{{.Report.CostPercent}}%</small>
         </article>
         <article class="profit-kpi-card profit-kpi-net">
           <span>Laba Bersih</span>
-          <strong>+ Rp {{.Report.NetProfit}}</strong>
+          <strong>+ Rp {{nominal .Report.NetProfit}}</strong>
           <small>Margin: {{.Report.MarginPercent}}%</small>
         </article>
       </section>
@@ -340,8 +354,8 @@
         <header class="profit-card-header"><h2><i data-lucide="download"></i> Ekspor Data</h2></header>
         <div class="profit-card-body">
           <div class="profit-action-row">
-            <a class="button-link profit-export-button" href="/admin/reports/profit-loss?export=csv">Ekspor CSV</a>
-            <a class="button-link profit-export-button" href="/admin/reports/profit-loss?export=pdf">Ekspor PDF</a>
+            <a class="button-link profit-export-button" href="{{.ExportCSVURL}}">Ekspor CSV</a>
+            <a class="button-link profit-export-button" href="{{.ExportPDFURL}}">Ekspor PDF</a>
             <button class="profit-print-button" type="button" onclick="window.print()">Cetak Laporan</button>
           </div>
         </div>
@@ -358,7 +372,7 @@
             <h2><i data-lucide="list"></i> Rincian Pendapatan</h2>
             <p>Total {{.Report.IncomeTransactions}} transaksi pendapatan</p>
             {{if .Report.IncomeTransactions}}
-            <div class="profit-total-line"><span>Kas Masuk Terverifikasi</span><strong>Rp {{.Report.TotalIncome}}</strong></div>
+            <div class="profit-total-line"><span>Kas Masuk Terverifikasi</span><strong>Rp {{nominal .Report.TotalIncome}}</strong></div>
             {{else}}
             <p class="profit-empty">Tidak ada data pendapatan pada periode ini</p>
             {{end}}
@@ -367,7 +381,7 @@
             <h2><i data-lucide="receipt"></i> Rincian Biaya</h2>
             <p>Total {{.Report.CostTransactions}} transaksi biaya</p>
             {{if .Report.CostTransactions}}
-            <div class="profit-total-line"><span>Kas Keluar Terverifikasi</span><strong>Rp {{.Report.TotalCost}}</strong></div>
+            <div class="profit-total-line"><span>Kas Keluar Terverifikasi</span><strong>Rp {{nominal .Report.TotalCost}}</strong></div>
             {{else}}
             <p class="profit-empty">Tidak ada data biaya pada periode ini</p>
             {{end}}
@@ -388,7 +402,7 @@
           <article class="profit-insight-box profit-insight-primary">
             <h3>Performa Bulanan</h3>
             <p>Rata-rata Bulanan:</p>
-            <strong>Rp {{.Report.MonthlyAverage}}</strong>
+            <strong>Rp {{nominal .Report.MonthlyAverage}}</strong>
           </article>
         </div>
       </section>
@@ -511,7 +525,7 @@
               <td>{{template "member-table-cell" .}}</td>
               <td>{{t $.Lang (printf "simpanan_%s" .Category)}}</td>
               <td>{{t $.Lang .Type}}</td>
-              <td>{{.Amount}}</td>
+              <td>{{nominal .Amount}}</td>
               <td>{{.ReferenceNo}}</td>
             </tr>
             {{end}}
@@ -566,12 +580,12 @@
 {{define "admin-member-detail"}}
 {{template "admin-shell-start" .}}
       <section class="summary-grid">
-{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" .Summary.CurrentBalance)}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_pokok") "Value" .Summary.PokokBalance)}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" .Summary.WajibBalance)}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" .Summary.SukarelaBalance)}}
-{{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" .Summary.TotalDeposit)}}
-{{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" .Summary.TotalWithdrawal)}}
+{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_pokok") "Value" (nominal .Summary.PokokBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" (nominal .Summary.WajibBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" (nominal .Summary.SukarelaBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" (nominal .Summary.TotalDeposit))}}
+{{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" (nominal .Summary.TotalWithdrawal))}}
       </section>
       <section class="panel detail-grid">
         <div><span>{{t .Lang "member_no"}}</span><strong>{{.Member.MemberNo}}</strong></div>
@@ -601,7 +615,7 @@
               <td>{{.RecordDate}}</td>
               <td>{{t $.Lang (printf "simpanan_%s" .Category)}}</td>
               <td>{{t $.Lang .Type}}</td>
-              <td>{{.Amount}}</td>
+              <td>{{nominal .Amount}}</td>
               <td>{{.ReferenceNo}}</td>
               <td>{{.Note}}</td>
             </tr>
@@ -628,7 +642,7 @@
           <tbody>
             {{range .LoanRequests}}
             <tr>
-              <td>{{.RequestedAmount}}</td>
+              <td>{{nominal .RequestedAmount}}</td>
               <td>{{.DurationMonths}} months</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>{{.Purpose}}</td>
@@ -645,9 +659,9 @@
         <h2>{{t .Lang "active_loan"}}</h2>
         {{if .ActiveLoan}}
         <div class="detail-grid">
-          <div><span>{{t .Lang "approved_amount"}}</span><strong>{{.ActiveLoan.ApprovedAmount}}</strong></div>
-          <div><span>{{t .Lang "monthly_installment"}}</span><strong>{{.ActiveLoan.MonthlyInstallment}}</strong></div>
-          <div><span>{{t .Lang "remaining_balance"}}</span><strong>{{.ActiveLoan.RemainingBalance}}</strong></div>
+          <div><span>{{t .Lang "approved_amount"}}</span><strong>{{nominal .ActiveLoan.ApprovedAmount}}</strong></div>
+          <div><span>{{t .Lang "monthly_installment"}}</span><strong>{{nominal .ActiveLoan.MonthlyInstallment}}</strong></div>
+          <div><span>{{t .Lang "remaining_balance"}}</span><strong>{{nominal .ActiveLoan.RemainingBalance}}</strong></div>
           <div><span>{{t .Lang "duration"}}</span><strong>{{.ActiveLoan.DurationMonths}} months</strong></div>
           <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .ActiveLoan.Status}}</strong></div>
         </div>
@@ -671,7 +685,7 @@
             {{range .Repayments}}
             <tr>
               <td>{{.RecordDate}}</td>
-              <td>{{.Amount}}</td>
+              <td>{{nominal .Amount}}</td>
               <td>{{.ReferenceNo}}</td>
               <td>{{.Note}}</td>
             </tr>
@@ -706,7 +720,7 @@
             {{range .WithdrawalRequests}}
             <tr>
               <td>{{template "member-table-cell" .}}</td>
-              <td>{{.Amount}}</td>
+              <td>{{nominal .Amount}}</td>
               <td>{{.Note}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td class="review-cell">
@@ -752,7 +766,7 @@
             {{range .LoanRequests}}
             <tr>
               <td>{{template "member-table-cell" .}}</td>
-              <td>{{.RequestedAmount}}</td>
+              <td>{{nominal .RequestedAmount}}</td>
               <td>{{.DurationMonths}} months</td>
               <td>{{.Purpose}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
@@ -805,9 +819,9 @@
             {{range .Loans}}
             <tr>
               <td>{{template "member-table-cell" .}}</td>
-              <td>{{.ApprovedAmount}}</td>
-              <td>{{.MonthlyInstallment}}</td>
-              <td>{{.RemainingBalance}}</td>
+              <td>{{nominal .ApprovedAmount}}</td>
+              <td>{{nominal .MonthlyInstallment}}</td>
+              <td>{{nominal .RemainingBalance}}</td>
               <td>{{.DurationMonths}} months</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>
@@ -853,7 +867,7 @@
             <tr>
               <td>{{.RecordDate}}</td>
               <td>{{template "member-table-cell" .}}</td>
-              <td>{{.Amount}}</td>
+              <td>{{nominal .Amount}}</td>
               <td>{{.ReferenceNo}}</td>
               <td>{{.Note}}</td>
             </tr>

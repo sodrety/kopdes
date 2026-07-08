@@ -1761,12 +1761,19 @@ td:nth-child(n+2):not(.review-cell) {
 .balance-meta-secondary {
   border-left-color: #858796;
 }
+.profit-period-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: -4px 0 18px;
+}
 .profit-period-badge {
-  justify-self: end;
   display: inline-flex;
   align-items: center;
+  gap: 8px;
   border-radius: 4px;
-  margin: -4px 0 8px auto;
   padding: 9px 14px;
   background: #4e73df;
   color: #fff;
@@ -1777,6 +1784,38 @@ td:nth-child(n+2):not(.review-cell) {
 .profit-period-badge svg {
   width: 15px;
   height: 15px;
+}
+.profit-period-form {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.profit-period-form label {
+  display: grid;
+  gap: 4px;
+  color: #5a5c69;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 800;
+}
+.profit-period-form input {
+  min-height: 36px;
+  min-width: 150px;
+  border-color: #d1d3e2;
+  border-radius: 4px;
+  padding: 7px 10px;
+}
+.profit-period-form .button-link {
+  min-height: 36px;
+  border-radius: 4px;
+  padding: 8px 13px;
+  box-shadow: none;
+  font-size: 13px;
+}
+.profit-reset-button {
+  background: #fff;
 }
 .profit-kpi-grid {
   display: grid;
@@ -1900,7 +1939,7 @@ td:nth-child(n+2):not(.review-cell) {
   grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
-  gap: 0;
+  gap: 10px;
 }
 .profit-action-row button,
 .profit-action-row .button-link {
@@ -2099,10 +2138,18 @@ td:nth-child(n+2):not(.review-cell) {
   .profit-action-row .button-link {
     width: 100%;
   }
+  .profit-period-toolbar,
+  .profit-period-form {
+    width: 100%;
+  }
   .profit-period-badge {
-    justify-self: stretch;
     width: 100%;
     justify-content: center;
+  }
+  .profit-period-form label,
+  .profit-period-form input,
+  .profit-period-form .button-link {
+    width: 100%;
   }
   .profit-tabs-header {
     align-items: stretch;

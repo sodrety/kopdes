@@ -1707,7 +1707,7 @@ func TestSavingPagesRenderDepositFormAndMemberBalance(t *testing.T) {
 		t.Fatalf("expected member profile page status 200, got %d: %s", profileRec.Code, profileRec.Body.String())
 	}
 	profileBody := profileRec.Body.String()
-	for _, text := range []string{"Saving balance", "750000", "Simpanan Sukarela", "Saving history", "table-scroll", "TRF-PAGE", "Page deposit"} {
+	for _, text := range []string{"Saving balance", "750.000", "Simpanan Sukarela", "Saving history", "table-scroll", "TRF-PAGE", "Page deposit"} {
 		if !strings.Contains(profileBody, text) {
 			t.Fatalf("expected member profile page to include %q, got %s", text, profileBody)
 		}
@@ -1938,7 +1938,7 @@ func TestAdminReportsRenderOperationalChartsAndEmptyStates(t *testing.T) {
 		t.Fatalf("expected reports page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"Simpanan by category", "Penarikan by status", "Pinjaman exposure", "Angsuran progress", "Simpanan report", "Penarikan report", "Pinjaman report", "Angsuran report", "Chart Member", "M-CHART", "Simpanan Pokok", "50000", "Simpanan Wajib", "150000", "Simpanan Sukarela", "300000", "Menunggu", "Approved principal", "600000", "Remaining balance", "400000", "Actual repayment", "200000"} {
+	for _, text := range []string{"Simpanan by category", "Penarikan by status", "Pinjaman exposure", "Angsuran progress", "Simpanan report", "Penarikan report", "Pinjaman report", "Angsuran report", "Chart Member", "M-CHART", "Simpanan Pokok", "50.000", "Simpanan Wajib", "150.000", "Simpanan Sukarela", "300.000", "Menunggu", "Approved principal", "600.000", "Remaining balance", "400.000", "Actual repayment", "200.000"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected reports page to include %q, got %s", text, body)
 		}
@@ -1981,7 +1981,7 @@ func TestAdminBalanceReportRendersOperationalBalance(t *testing.T) {
 		t.Fatalf("expected balance report status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{`<h1>Balance report</h1>`, `href="/admin/reports/balance" title="Balance report"`, `<span class="sidebar-group-label">Reports</span>`, "Laporan Neraca Keuangan", "Export CSV", "Export PDF", "Indikator Kesehatan Keuangan", "Rasio Kewajiban terhadap Aset", "Total Aset", "Total Kewajiban", "Total Ekuitas", "Detail Neraca", "ASET", "Kas (Masuk - Keluar)", "Piutang Pinjaman", "KEWAJIBAN", "Simpanan Anggota", "EKUITAS", "TOTAL ASET = TOTAL KEWAJIBAN + EKUITAS", "Informasi", "Komposisi", "Rp 750000", "Rp 600000", "Rp 200000", "Rp 150000"} {
+	for _, text := range []string{`<h1>Balance report</h1>`, `href="/admin/reports/balance" title="Balance report"`, `<span class="sidebar-group-label">Reports</span>`, "Laporan Neraca Keuangan", "Export CSV", "Export PDF", "Indikator Kesehatan Keuangan", "Rasio Kewajiban terhadap Aset", "Total Aset", "Total Kewajiban", "Total Ekuitas", "Detail Neraca", "ASET", "Kas (Masuk - Keluar)", "Piutang Pinjaman", "KEWAJIBAN", "Simpanan Anggota", "EKUITAS", "TOTAL ASET = TOTAL KEWAJIBAN + EKUITAS", "Informasi", "Komposisi", "Rp 750.000", "Rp 600.000", "Rp 200.000", "Rp 150.000"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected balance report to include %q, got %s", text, body)
 		}
@@ -2013,13 +2013,10 @@ func TestAdminProfitLossReportMimicsKopkarlytaReport(t *testing.T) {
 		t.Fatalf("expected profit/loss report status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{`href="/admin/reports/profit-loss" title="Profit/loss report"`, `<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, "Total Pendapatan", "Total Biaya", "Laba Bersih", "Ekspor Data", "Ekspor CSV", "Ekspor PDF", "Cetak Laporan", "Detail Pendapatan", "Detail Biaya", "Breakdown Per Bulan", "Rincian Pendapatan", "Rincian Biaya", "Insights & Analisis", "Komposisi Keuangan", "Performa Bulanan", "Rp 440000", "Rp 75000", "Rp 365000"} {
+	for _, text := range []string{`href="/admin/reports/profit-loss" title="Profit/loss report"`, `<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, `name="date_from"`, `name="date_to"`, "Terapkan", "Reset", "Total Pendapatan", "Total Biaya", "Laba Bersih", "Ekspor Data", "Ekspor CSV", "Ekspor PDF", "Cetak Laporan", "Detail Pendapatan", "Detail Biaya", "Breakdown Per Bulan", "Rincian Pendapatan", "Rincian Biaya", "Insights & Analisis", "Komposisi Keuangan", "Performa Bulanan", "Rp 440.000", "Rp 75.000", "Rp 365.000"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected profit/loss report to include %q, got %s", text, body)
 		}
-	}
-	if strings.Contains(body, `name="date_from"`) {
-		t.Fatal("profit/loss report must not render a filter that is not applied to its calculations")
 	}
 }
 
@@ -2091,11 +2088,70 @@ func TestProfitLossPeriodMatchesAllIncludedActivity(t *testing.T) {
 	for _, expected := range []string{
 		"Periode: 15/01/2025 - " + now.Format("02/01/2006"),
 		"Rata-rata Bulanan:",
-		"Rp " + strconv.Itoa(120000/months),
+		"Rp " + dottedTestNominal(120000/months),
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected period-aware report to include %q, got %s", expected, body)
 		}
+	}
+}
+
+func TestProfitLossPeriodFilterChangesTotalsAndExports(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-PL-FILTER","full_name":"Profit Filter Member","join_date":"2026-01-01","status":"active","email":"profit-filter@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "profit-filter@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "pokok", 100000, "PLF-OLD", "Old income")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 250000, "PLF-NEW", "Filtered income")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "withdrawal", "sukarela", 50000, "PLF-COST", "Filtered cost")
+	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 300000, 6), 300000, 6)
+	fixture.recordRepayment(t, adminToken, loan.ID, 75000)
+	if _, err := fixture.db.Exec(`UPDATE saving_records SET record_date = '2026-01-10' WHERE reference_no = 'PLF-OLD'`); err != nil {
+		t.Fatalf("move old saving out of selected period: %v", err)
+	}
+	if _, err := fixture.db.Exec(`UPDATE saving_records SET record_date = '2026-02-10' WHERE reference_no IN ('PLF-NEW', 'PLF-COST')`); err != nil {
+		t.Fatalf("move saving records into selected period: %v", err)
+	}
+	if _, err := fixture.db.Exec(`UPDATE loan_repayments SET record_date = '2026-02-11' WHERE loan_id = $1`, loan.ID); err != nil {
+		t.Fatalf("move repayment into selected period: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/reports/profit-loss?date_from=2026-02-01&date_to=2026-02-28", nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected filtered report status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	for _, expected := range []string{
+		"Periode: 01/02/2026 - 28/02/2026",
+		`value="2026-02-01"`,
+		`value="2026-02-28"`,
+		`href="/admin/reports/profit-loss?date_from=2026-02-01&amp;date_to=2026-02-28&amp;export=csv"`,
+		"Rp 325.000",
+		"Rp 50.000",
+		"Rp 275.000",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected filtered profit/loss report to include %q, got %s", expected, body)
+		}
+	}
+	if strings.Contains(body, "Rp 425.000") {
+		t.Fatalf("expected filtered report to exclude old income, got %s", body)
+	}
+
+	csvReq := httptest.NewRequest(http.MethodGet, "/admin/reports/profit-loss?date_from=2026-02-01&date_to=2026-02-28&export=csv", nil)
+	csvReq.AddCookie(adminCookie)
+	csvRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(csvRec, csvReq)
+	if csvRec.Code != http.StatusOK {
+		t.Fatalf("expected filtered csv status 200, got %d: %s", csvRec.Code, csvRec.Body.String())
+	}
+	if body := csvRec.Body.String(); !strings.Contains(body, "01/02/2026,28/02/2026,325000,50000,275000") {
+		t.Fatalf("expected filtered CSV to include selected totals, got %s", body)
 	}
 }
 
@@ -2369,7 +2425,7 @@ func TestPenarikanPagesRenderMemberAndAdminFlows(t *testing.T) {
 		t.Fatalf("expected admin withdrawal page status 200, got %d: %s", adminRec.Code, adminRec.Body.String())
 	}
 	adminBody := adminRec.Body.String()
-	for _, text := range []string{"Penarikan review", "Withdrawal Page", "M-WD-PAGE", "100000", "Page withdrawal", "/api/admin/withdrawal-requests/" + requestID + "/approve", "/api/admin/withdrawal-requests/" + requestID + "/reject", "/api/admin/exports/withdrawal-requests.csv?status=pending", "Menunggu"} {
+	for _, text := range []string{"Penarikan review", "Withdrawal Page", "M-WD-PAGE", "100.000", "Page withdrawal", "/api/admin/withdrawal-requests/" + requestID + "/approve", "/api/admin/withdrawal-requests/" + requestID + "/reject", "/api/admin/exports/withdrawal-requests.csv?status=pending", "Menunggu"} {
 		if !strings.Contains(adminBody, text) {
 			t.Fatalf("expected admin withdrawal page to include %q, got %s", text, adminBody)
 		}
@@ -2515,7 +2571,7 @@ func TestMemberLoanRequestPageRendersFormAndHistory(t *testing.T) {
 		t.Fatalf("expected loan request page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"member-loan-requests-shell", "Loan requests", "Submit loan request", `name="requested_amount"`, `name="duration_months"`, "table-scroll", "1500000", "Menunggu"} {
+	for _, text := range []string{"member-loan-requests-shell", "Loan requests", "Submit loan request", `name="requested_amount"`, `name="duration_months"`, "table-scroll", "1.500.000", "Menunggu"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected loan request page to include %q, got %s", text, body)
 		}
@@ -2611,7 +2667,7 @@ func TestAdminLoanRequestReviewPageRendersPendingQueue(t *testing.T) {
 		t.Fatalf("expected admin loan request page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"Loan request review", "table-scroll", "Queue Member", "M-0021", "3200000", "12", "Test loan", "Menunggu", "Approve", "Reject"} {
+	for _, text := range []string{"Loan request review", "table-scroll", "Queue Member", "M-0021", "3.200.000", "12", "Test loan", "Menunggu", "Approve", "Reject"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected admin loan request page to include %q, got %s", text, body)
 		}
@@ -2842,7 +2898,7 @@ func TestLoanApprovalPagesRenderReviewAndActiveLoanViews(t *testing.T) {
 		t.Fatalf("expected member profile status 200, got %d: %s", profileRec.Code, profileRec.Body.String())
 	}
 	profileBody := profileRec.Body.String()
-	for _, text := range []string{"Active loan", "900000", "100000", "active"} {
+	for _, text := range []string{"Active loan", "900.000", "100.000", "active"} {
 		if !strings.Contains(profileBody, text) {
 			t.Fatalf("expected member profile to include %q, got %s", text, profileBody)
 		}
@@ -2858,7 +2914,7 @@ func TestLoanApprovalPagesRenderReviewAndActiveLoanViews(t *testing.T) {
 		t.Fatalf("expected admin loans page status 200, got %d: %s", adminLoansRec.Code, adminLoansRec.Body.String())
 	}
 	adminLoansBody := adminLoansRec.Body.String()
-	for _, text := range []string{"Active loans", "table-scroll", member.FullName, member.MemberNo, "900000", "100000", "Aktif"} {
+	for _, text := range []string{"Active loans", "table-scroll", member.FullName, member.MemberNo, "900.000", "100.000", "Aktif"} {
 		if !strings.Contains(adminLoansBody, text) {
 			t.Fatalf("expected admin loans page to include %q, got %s", text, adminLoansBody)
 		}
@@ -3190,7 +3246,7 @@ func TestRepaymentHistoryIsMemberIsolatedAndPagesRender(t *testing.T) {
 		t.Fatalf("expected member profile status 200, got %d: %s", profileRec.Code, profileRec.Body.String())
 	}
 	profileBody := profileRec.Body.String()
-	for _, text := range []string{"Repayment history", "200000", "RPY-TEST", "Test repayment", "600000"} {
+	for _, text := range []string{"Repayment history", "200.000", "RPY-TEST", "Test repayment", "600.000"} {
 		if !strings.Contains(profileBody, text) {
 			t.Fatalf("expected member profile to include %q, got %s", text, profileBody)
 		}
@@ -3206,7 +3262,7 @@ func TestRepaymentHistoryIsMemberIsolatedAndPagesRender(t *testing.T) {
 		t.Fatalf("expected admin member detail status 200, got %d: %s", adminMemberDetailRec.Code, adminMemberDetailRec.Body.String())
 	}
 	detailBody := adminMemberDetailRec.Body.String()
-	for _, text := range []string{"Saving balance", "350000", "Saving records", "DETAIL-SAVE", "Loan requests", "800000", "Active loan", "600000", "Repayment records", "RPY-TEST"} {
+	for _, text := range []string{"Saving balance", "350.000", "Saving records", "DETAIL-SAVE", "Loan requests", "800.000", "Active loan", "600.000", "Repayment records", "RPY-TEST"} {
 		if !strings.Contains(detailBody, text) {
 			t.Fatalf("expected admin member detail to include %q, got %s", text, detailBody)
 		}
@@ -3248,7 +3304,7 @@ func TestAdminRepaymentsMenuLinksToActiveRepaymentsPage(t *testing.T) {
 		t.Fatalf("expected repayments page status 200, got %d: %s", repaymentsRec.Code, repaymentsRec.Body.String())
 	}
 	repaymentsBody := repaymentsRec.Body.String()
-	for _, text := range []string{`class="sidebar-link active" href="/admin/repayments"`, "table-scroll", "Repayment Menu", "M-0037", "100000", "RPY-TEST"} {
+	for _, text := range []string{`class="sidebar-link active" href="/admin/repayments"`, "table-scroll", "Repayment Menu", "M-0037", "100.000", "RPY-TEST"} {
 		if !strings.Contains(repaymentsBody, text) {
 			t.Fatalf("expected repayments page to include %q, got %s", text, repaymentsBody)
 		}
@@ -3360,7 +3416,7 @@ func TestMemberDashboardIsIsolatedAndIncludesLatestActivity(t *testing.T) {
 		t.Fatalf("expected member dashboard page status 200, got %d: %s", dashboardPageRec.Code, dashboardPageRec.Body.String())
 	}
 	pageBody := dashboardPageRec.Body.String()
-	for _, text := range []string{"member-dashboard-shell", "Saving balance", "700000", "Remaining loan", "400000", "Loan request status", "FIRST-DEP", "Latest repayment records", "100000"} {
+	for _, text := range []string{"member-dashboard-shell", "Saving balance", "700.000", "Remaining loan", "400.000", "Loan request status", "FIRST-DEP", "Latest repayment records", "100.000"} {
 		if !strings.Contains(pageBody, text) {
 			t.Fatalf("expected member dashboard page to include %q, got %s", text, pageBody)
 		}
@@ -3404,7 +3460,7 @@ func TestDashboardPagesRenderRealAndEmptyStates(t *testing.T) {
 	if pageRec.Code != http.StatusOK {
 		t.Fatalf("expected dashboard page status 200, got %d: %s", pageRec.Code, pageRec.Body.String())
 	}
-	for _, text := range []string{"Dashboard", "400000", "Pending requests", ">1</strong>"} {
+	for _, text := range []string{"Dashboard", "400.000", "Pending requests", ">1</strong>"} {
 		if !strings.Contains(pageRec.Body.String(), text) {
 			t.Fatalf("expected dashboard page to include %q, got %s", text, pageRec.Body.String())
 		}
@@ -3833,4 +3889,27 @@ func assertError(t *testing.T, data []byte, code, message string) {
 	if response.Error.Code != code || response.Error.Message != message {
 		t.Fatalf("expected error %s %q, got %+v", code, message, response.Error)
 	}
+}
+
+func dottedTestNominal(value int) string {
+	raw := strconv.Itoa(value)
+	if len(raw) <= 3 {
+		return raw
+	}
+	sign := ""
+	if raw[0] == '-' {
+		sign = "-"
+		raw = raw[1:]
+	}
+	result := make([]byte, 0, len(raw)+(len(raw)-1)/3)
+	firstGroup := len(raw) % 3
+	if firstGroup == 0 {
+		firstGroup = 3
+	}
+	result = append(result, raw[:firstGroup]...)
+	for i := firstGroup; i < len(raw); i += 3 {
+		result = append(result, '.')
+		result = append(result, raw[i:i+3]...)
+	}
+	return sign + string(result)
 }

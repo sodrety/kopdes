@@ -23,7 +23,7 @@ Required:
 
 ```sh
 DATABASE_DRIVER=pgx
-DATABASE_URL=postgres://postgres:password@localhost:5432/saving_loan_coop?sslmode=disable
+DATABASE_URL=postgres://postgres:<database-password>@db.mdnuzqzohiewvbbtspko.supabase.co:5432/postgres?sslmode=require
 JWT_SECRET=change_this_secret
 ```
 
@@ -48,16 +48,16 @@ go run ./cmd/api
 
 Open `http://localhost:8080/login`.
 
-For quick local development without PostgreSQL, use SQLite explicitly:
+For local development against Supabase, create a private env file from the template:
 
 ```sh
-DATABASE_DRIVER=sqlite \
-DATABASE_URL=file:kopdes-dev.db \
-JWT_SECRET=dev-secret \
-ADMIN_EMAIL=admin@coop.test \
-ADMIN_PASSWORD=password \
-go run ./cmd/api
+cp .env.supabase.example .env.supabase
+$EDITOR .env.supabase
+./scripts/run-supabase-local.sh
 ```
+
+Use the Supabase database password from the project settings. If the password contains special characters, URL-encode it in `DATABASE_URL`.
+The app runs migrations on startup and records applied versions in `schema_migrations`.
 
 ## Test
 

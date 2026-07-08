@@ -16,8 +16,9 @@ import (
 var pageTemplateFS embed.FS
 
 var pageTemplates = template.Must(template.New("").Funcs(template.FuncMap{
-	"dict": templateDict,
-	"t":    translateTemplate,
+	"dict":    templateDict,
+	"nominal": formatNominal,
+	"t":       translateTemplate,
 }).ParseFS(pageTemplateFS, "templates/*.tmpl"))
 
 func templateDict(values ...any) (map[string]any, error) {
@@ -33,6 +34,53 @@ func templateDict(values ...any) (map[string]any, error) {
 		result[key] = values[i+1]
 	}
 	return result, nil
+}
+
+func formatNominal(value any) string {
+	var raw string
+	switch v := value.(type) {
+	case int:
+		raw = fmt.Sprintf("%d", v)
+	case int8:
+		raw = fmt.Sprintf("%d", v)
+	case int16:
+		raw = fmt.Sprintf("%d", v)
+	case int32:
+		raw = fmt.Sprintf("%d", v)
+	case int64:
+		raw = fmt.Sprintf("%d", v)
+	case uint:
+		raw = fmt.Sprintf("%d", v)
+	case uint8:
+		raw = fmt.Sprintf("%d", v)
+	case uint16:
+		raw = fmt.Sprintf("%d", v)
+	case uint32:
+		raw = fmt.Sprintf("%d", v)
+	case uint64:
+		raw = fmt.Sprintf("%d", v)
+	default:
+		return fmt.Sprint(value)
+	}
+	if len(raw) <= 3 {
+		return raw
+	}
+	sign := ""
+	if raw[0] == '-' {
+		sign = "-"
+		raw = raw[1:]
+	}
+	result := make([]byte, 0, len(raw)+(len(raw)-1)/3)
+	firstGroup := len(raw) % 3
+	if firstGroup == 0 {
+		firstGroup = 3
+	}
+	result = append(result, raw[:firstGroup]...)
+	for i := firstGroup; i < len(raw); i += 3 {
+		result = append(result, '.')
+		result = append(result, raw[i:i+3]...)
+	}
+	return sign + string(result)
 }
 
 func renderPage(c *gin.Context, name string, data gin.H) {
