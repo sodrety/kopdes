@@ -292,13 +292,15 @@ func (s *Server) adminLoansPage(c *gin.Context) {
 }
 
 func (s *Server) adminRepaymentsPage(c *gin.Context) {
-	repayments, err := s.repaymentsForAdmin()
+	filters := repaymentFiltersFromQuery(c)
+	repayments, err := s.repaymentsForAdmin(filters)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
 	renderPage(c, "admin-repayments", pageData(c, "Repayments - KKSUK PD Dharma Jaya", "repayments", "repayments", "review_repayments", gin.H{
 		"Repayments": repayments,
+		"Filters":    filters,
 	}))
 }
 

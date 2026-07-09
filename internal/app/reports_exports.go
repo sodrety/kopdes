@@ -303,7 +303,7 @@ func (s *Server) adminOperationalReports() (AdminOperationalReports, error) {
 	if err != nil {
 		return AdminOperationalReports{}, err
 	}
-	repayments, err := s.repaymentsForAdmin()
+	repayments, err := s.repaymentsForAdmin(RepaymentFilters{})
 	if err != nil {
 		return AdminOperationalReports{}, err
 	}
@@ -882,7 +882,7 @@ func (s *Server) exportLoansCSV(c *gin.Context) {
 }
 
 func (s *Server) exportRepaymentsCSV(c *gin.Context) {
-	repayments, err := s.repaymentsForAdmin()
+	repayments, err := s.repaymentsForAdmin(RepaymentFilters{})
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return

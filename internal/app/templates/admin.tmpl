@@ -851,6 +851,10 @@
         <a class="button-link button-link-secondary" href="/api/admin/exports/repayments.csv">{{t .Lang "export_csv"}}</a>
       </section>
       <section class="panel">
+        <form class="filter-form" method="get" action="/admin/repayments">
+          <label>{{t .Lang "search_member"}} <input name="search" value="{{.Filters.Search}}" placeholder="{{t .Lang "member"}}"></label>
+          <button type="submit">{{t .Lang "search"}}</button>
+        </form>
         {{if .Repayments}}
 {{template "table-open" .}}
           <thead>

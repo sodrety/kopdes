@@ -42,6 +42,10 @@ type repaymentInput struct {
 	Note        string `json:"note" form:"note"`
 }
 
+type RepaymentFilters struct {
+	Search string `form:"search"`
+}
+
 var (
 	errInvalidRepayment     = errors.New("invalid repayment")
 	errRepaymentOverBalance = errors.New("repayment over balance")
@@ -237,13 +241,21 @@ func (s *Server) repaymentsByMember(memberID string) ([]LoanRepayment, error) {
 	return repayments, rows.Err()
 }
 
-func (s *Server) repaymentsForAdmin() ([]AdminLoanRepayment, error) {
-	rows, err := s.db.Query(
-		`SELECT lr.id, lr.loan_id, lr.member_id, m.member_no, m.full_name, lr.amount, lr.record_date, lr.reference_no, lr.note, lr.created_at
+func (s *Server) repaymentsForAdmin(filters RepaymentFilters) ([]AdminLoanRepayment, error) {
+	search := strings.TrimSpace(filters.Search)
+	query := `SELECT lr.id, lr.loan_id, lr.member_id, m.member_no, m.full_name, lr.amount, lr.record_date, lr.reference_no, lr.note, lr.created_at
 		FROM loan_repayments lr
-		INNER JOIN members m ON m.id = lr.member_id
-		ORDER BY lr.record_date DESC, lr.created_at DESC`,
-	)
+		INNER JOIN members m ON m.id = lr.member_id`
+	args := []any{}
+	if search != "" {
+		args = append(args, "%"+strings.ToLower(search)+"%")
+		query += `
+		WHERE LOWER(m.full_name) LIKE $1 OR LOWER(m.member_no) LIKE $1`
+	}
+	query += `
+		ORDER BY lr.record_date DESC, lr.created_at DESC`
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +270,12 @@ func (s *Server) repaymentsForAdmin() ([]AdminLoanRepayment, error) {
 		repayments = append(repayments, repayment)
 	}
 	return repayments, rows.Err()
+}
+
+func repaymentFiltersFromQuery(c *gin.Context) RepaymentFilters {
+	return RepaymentFilters{
+		Search: strings.TrimSpace(c.Query("search")),
+	}
 }
 
 func (s *Server) latestRepaymentsByMember(memberID string, limit int) ([]LoanRepayment, error) {

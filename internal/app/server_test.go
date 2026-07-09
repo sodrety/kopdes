@@ -3279,6 +3279,10 @@ func TestAdminRepaymentsMenuLinksToActiveRepaymentsPage(t *testing.T) {
 	memberToken := fixture.login(t, "repayment-menu@coop.test", "member-password")
 	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 500000, 5), 500000, 5)
 	fixture.recordRepayment(t, adminToken, loan.ID, 100000)
+	fixture.createMember(t, adminToken, `{"member_no":"M-0038","full_name":"Hidden Repayment","join_date":"2026-06-16","status":"active","email":"hidden-repayment@coop.test","password":"member-password"}`)
+	hiddenToken := fixture.login(t, "hidden-repayment@coop.test", "member-password")
+	hiddenLoan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, hiddenToken, 400000, 4), 400000, 4)
+	fixture.recordRepayment(t, adminToken, hiddenLoan.ID, 50000)
 	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
 
 	loansReq := httptest.NewRequest(http.MethodGet, "/admin/loans", nil)
@@ -3304,10 +3308,29 @@ func TestAdminRepaymentsMenuLinksToActiveRepaymentsPage(t *testing.T) {
 		t.Fatalf("expected repayments page status 200, got %d: %s", repaymentsRec.Code, repaymentsRec.Body.String())
 	}
 	repaymentsBody := repaymentsRec.Body.String()
-	for _, text := range []string{`class="sidebar-link active" href="/admin/repayments"`, "table-scroll", "Repayment Menu", "M-0037", "100.000", "RPY-TEST"} {
+	for _, text := range []string{`class="sidebar-link active" href="/admin/repayments"`, "table-scroll", `data-enhanced-table`, `data-page-label="Page"`, "table-pagination", "table-sort-button", "Repayment Menu", "M-0037", "100.000", "RPY-TEST"} {
 		if !strings.Contains(repaymentsBody, text) {
 			t.Fatalf("expected repayments page to include %q, got %s", text, repaymentsBody)
 		}
+	}
+
+	searchReq := httptest.NewRequest(http.MethodGet, "/admin/repayments?search=Repayment+Menu", nil)
+	searchReq.AddCookie(adminCookie)
+	searchRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(searchRec, searchReq)
+
+	if searchRec.Code != http.StatusOK {
+		t.Fatalf("expected searched repayments page status 200, got %d: %s", searchRec.Code, searchRec.Body.String())
+	}
+	searchBody := searchRec.Body.String()
+	for _, text := range []string{`name="search" value="Repayment Menu"`, "Repayment Menu", "M-0037", "100.000"} {
+		if !strings.Contains(searchBody, text) {
+			t.Fatalf("expected searched repayments page to include %q, got %s", text, searchBody)
+		}
+	}
+	if strings.Contains(searchBody, "Hidden Repayment") || strings.Contains(searchBody, "M-0038") {
+		t.Fatalf("expected searched repayments page to exclude other members, got %s", searchBody)
 	}
 }
 

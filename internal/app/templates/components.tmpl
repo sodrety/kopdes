@@ -20,7 +20,7 @@
 
 {{define "table-open"}}
         <div class="table-scroll">
-        <table>
+        <table data-enhanced-table data-page-label="{{t .Lang "table_page_status"}}" data-previous-label="{{t .Lang "previous_page"}}" data-next-label="{{t .Lang "next_page"}}">
 {{end}}
 
 {{define "table-close"}}

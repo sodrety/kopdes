@@ -1449,6 +1449,51 @@ th {
   font-weight: 800;
   text-transform: uppercase;
 }
+.table-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.table-sort-button::after {
+  content: "-";
+  color: var(--mute);
+  font-size: 11px;
+  line-height: 1;
+}
+.table-sort-button[aria-sort="ascending"]::after {
+  content: "^";
+  color: var(--primary);
+}
+.table-sort-button[aria-sort="descending"]::after {
+  content: "v";
+  color: var(--primary);
+}
+.table-pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 20px 20px;
+  color: var(--body);
+  font-size: 13px;
+  font-weight: 700;
+}
+.table-pagination button {
+  padding: 7px 10px;
+}
+.table-pagination button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 tbody tr:hover {
   background: #f8f9fc;
 }

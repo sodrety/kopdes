@@ -101,6 +101,109 @@
   </script>
 {{end}}
 
+{{define "table-script"}}
+  <script>
+  (function () {
+    var pageSize = 10;
+    function cellValue(row, index) {
+      var cell = row.cells[index];
+      return cell ? (cell.textContent || "").trim() : "";
+    }
+    function comparable(value) {
+      var normalized = value.replace(/\s+/g, " ");
+      var numeric = normalized.replace(/[^\d,-]/g, "").replace(/\./g, "").replace(",", ".");
+      if (/^-?\d+(\.\d+)?$/.test(numeric)) {
+        return Number(numeric);
+      }
+      var date = Date.parse(normalized);
+      if (!Number.isNaN(date) && /\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}/.test(normalized)) {
+        return date;
+      }
+      return normalized.toLocaleLowerCase();
+    }
+    function enhanceTable(table) {
+      var tbody = table.tBodies[0];
+      if (!tbody) {
+        return;
+      }
+      var rows = Array.prototype.slice.call(tbody.rows);
+      if (!rows.length) {
+        return;
+      }
+      var page = 1;
+      var sortIndex = -1;
+      var sortDirection = 1;
+      var pager = document.createElement("div");
+      pager.className = "table-pagination";
+      var previous = document.createElement("button");
+      previous.type = "button";
+      previous.textContent = table.dataset.previousLabel || "<";
+      var status = document.createElement("span");
+      var next = document.createElement("button");
+      next.type = "button";
+      next.textContent = table.dataset.nextLabel || ">";
+      pager.appendChild(previous);
+      pager.appendChild(status);
+      pager.appendChild(next);
+      table.parentNode.insertAdjacentElement("afterend", pager);
+      function render() {
+        var pages = Math.max(1, Math.ceil(rows.length / pageSize));
+        page = Math.min(page, pages);
+        rows.forEach(function (row, index) {
+          row.hidden = index < (page - 1) * pageSize || index >= page * pageSize;
+        });
+        status.textContent = (table.dataset.pageLabel || "Page") + " " + page + " / " + pages;
+        previous.disabled = page <= 1;
+        next.disabled = page >= pages;
+        pager.hidden = pages <= 1;
+      }
+      Array.prototype.forEach.call(table.tHead ? table.tHead.rows[0].cells : [], function (header, index) {
+        var label = (header.textContent || "").trim();
+        if (!label) {
+          return;
+        }
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "table-sort-button";
+        button.textContent = label;
+        header.textContent = "";
+        header.appendChild(button);
+        button.addEventListener("click", function () {
+          sortDirection = sortIndex === index ? sortDirection * -1 : 1;
+          sortIndex = index;
+          rows.sort(function (a, b) {
+            var left = comparable(cellValue(a, index));
+            var right = comparable(cellValue(b, index));
+            if (left < right) return -1 * sortDirection;
+            if (left > right) return 1 * sortDirection;
+            return 0;
+          });
+          rows.forEach(function (row) { tbody.appendChild(row); });
+          Array.prototype.forEach.call(table.querySelectorAll(".table-sort-button"), function (control) {
+            control.removeAttribute("aria-sort");
+          });
+          button.setAttribute("aria-sort", sortDirection === 1 ? "ascending" : "descending");
+          page = 1;
+          render();
+        });
+      });
+      previous.addEventListener("click", function () {
+        page -= 1;
+        render();
+      });
+      next.addEventListener("click", function () {
+        page += 1;
+        render();
+      });
+      render();
+    }
+    document.addEventListener("DOMContentLoaded", function () {
+      Array.prototype.forEach.call(document.querySelectorAll("table[data-enhanced-table]"), enhanceTable);
+    });
+  }());
+  </script>
+{{end}}
+
 {{define "admin-nav"}}
       <nav class="sidebar-nav">
         <div class="sidebar-nav-group">
@@ -161,6 +264,7 @@
     </main>
   </div>
 {{template "toast-script" .}}
+{{template "table-script" .}}
   <script>if (window.lucide) { lucide.createIcons(); }</script>
 </body>
 </html>
@@ -204,6 +308,7 @@
 {{define "member-shell-end"}}
   </main>
 {{template "toast-script" .}}
+{{template "table-script" .}}
   <script>if (window.lucide) { lucide.createIcons(); }</script>
 </body>
 </html>
