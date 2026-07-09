@@ -8,6 +8,7 @@
 {{template "asset-head" .}}
 </head>
 <body class="auth-page">
+{{template "toast-root" .}}
   <main class="auth-card">
     <section class="auth-visual" aria-label="KKSUK PD Dharma Jaya">
       <img src="/static/images/lambang-koperasi.png" alt="" width="150" height="146">
@@ -20,15 +21,16 @@
 {{template "brand-mark" .}}
       {{template "language-form" .}}
       <form method="post" action="/api/auth/login" hx-post="/api/auth/login" hx-target="#login-error" hx-swap="innerHTML">
-        <label>{{t .Lang "email"}} <input name="email" type="email" autocomplete="username" placeholder="E-Mail Address" required></label>
+        <label>{{t .Lang "email"}} <input name="email" type="email" autocomplete="username" placeholder="{{t .Lang "email_placeholder"}}" required></label>
         <label>{{t .Lang "password"}} <input name="password" type="password" autocomplete="current-password" placeholder="{{t .Lang "password"}}" required></label>
-        <label class="remember-field"><input name="remember" type="checkbox"> Remember Me</label>
+        <label class="remember-field"><input name="remember" type="checkbox"> {{t .Lang "remember_me"}}</label>
         <button type="submit">{{t .Lang "log_in"}}</button>
       </form>
       <p id="login-error" class="form-error"></p>
-      <p class="auth-copyright">© 2025 KKSUK PD Dharma Jaya. All rights reserved.</p>
+      <p class="auth-copyright">© 2025 KKSUK PD Dharma Jaya. {{t .Lang "copyright_all_rights_reserved"}}</p>
     </section>
   </main>
+{{template "toast-script" .}}
 </body>
 </html>
 {{end}}

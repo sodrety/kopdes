@@ -26,7 +26,7 @@
           {{range .Dashboard.LoanRequests}}
           <tr>
             <td>{{nominal .RequestedAmount}}</td>
-            <td>{{.DurationMonths}} months</td>
+            <td>{{.DurationMonths}} {{t $.Lang "months"}}</td>
             <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
             <td>{{.Purpose}}</td>
             <td>{{.RejectionReason}}</td>
@@ -112,7 +112,7 @@
         <div><span>{{t .Lang "approved_amount"}}</span><strong>{{nominal .ActiveLoan.ApprovedAmount}}</strong></div>
         <div><span>{{t .Lang "monthly_installment"}}</span><strong>{{nominal .ActiveLoan.MonthlyInstallment}}</strong></div>
         <div><span>{{t .Lang "remaining_balance"}}</span><strong>{{nominal .ActiveLoan.RemainingBalance}}</strong></div>
-        <div><span>{{t .Lang "duration"}}</span><strong>{{.ActiveLoan.DurationMonths}} months</strong></div>
+        <div><span>{{t .Lang "duration"}}</span><strong>{{.ActiveLoan.DurationMonths}} {{t .Lang "months"}}</strong></div>
         <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .ActiveLoan.Status}}</strong></div>
       </div>
     </section>

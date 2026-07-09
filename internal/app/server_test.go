@@ -620,7 +620,7 @@ func TestAdminCanUseBrowserLoginAndSeeDashboardPage(t *testing.T) {
 		t.Fatalf("expected dashboard page status 200, got %d: %s", dashboardRec.Code, dashboardRec.Body.String())
 	}
 	body := dashboardRec.Body.String()
-	for _, text := range []string{`data-lucide="layout-dashboard"`, `data-lucide="users"`, `data-lucide="piggy-bank"`, "Admin menu", "Toggle sidebar", "Logout", "Dashboard", "Members", "Total members", "Pending requests", "Aktivitas Terkini", "Aksi Cepat", "Laporan Neraca"} {
+	for _, text := range []string{`data-lucide="layout-dashboard"`, `data-lucide="users"`, `data-lucide="piggy-bank"`, "Admin menu", "Toggle sidebar", "Logout", "Dashboard", "Members", "Total members", "Pending requests", "Recent activity", "Quick actions", "Balance report"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected dashboard page to include %q, got %s", text, body)
 		}
@@ -1981,7 +1981,7 @@ func TestAdminBalanceReportRendersOperationalBalance(t *testing.T) {
 		t.Fatalf("expected balance report status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{`<h1>Balance report</h1>`, `href="/admin/reports/balance" title="Balance report"`, `<span class="sidebar-group-label">Reports</span>`, "Laporan Neraca Keuangan", "Export CSV", "Export PDF", "Indikator Kesehatan Keuangan", "Rasio Kewajiban terhadap Aset", "Total Aset", "Total Kewajiban", "Total Ekuitas", "Detail Neraca", "ASET", "Kas (Masuk - Keluar)", "Piutang Pinjaman", "KEWAJIBAN", "Simpanan Anggota", "EKUITAS", "TOTAL ASET = TOTAL KEWAJIBAN + EKUITAS", "Informasi", "Komposisi", "Rp 750.000", "Rp 600.000", "Rp 200.000", "Rp 150.000"} {
+	for _, text := range []string{`<h1>Balance report</h1>`, `href="/admin/reports/balance" title="Balance report"`, `<span class="sidebar-group-label">Reports</span>`, "Financial balance report", "Export CSV", "Export PDF", "Financial health indicator", "Liability to asset ratio", "Total assets", "Total liabilities", "Total equity", "Balance detail", "Assets", "Cash (in - out)", "Loan receivable", "Liabilities", "Member savings", "Equity", "TOTAL ASSETS = TOTAL LIABILITIES &#43; EQUITY", "Information", "Composition", "Rp 750.000", "Rp 600.000", "Rp 200.000", "Rp 150.000"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected balance report to include %q, got %s", text, body)
 		}
@@ -2013,7 +2013,7 @@ func TestAdminProfitLossReportMimicsKopkarlytaReport(t *testing.T) {
 		t.Fatalf("expected profit/loss report status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{`href="/admin/reports/profit-loss" title="Profit/loss report"`, `<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, `name="date_from"`, `name="date_to"`, "Terapkan", "Reset", "Total Pendapatan", "Total Biaya", "Laba Bersih", "Ekspor Data", "Ekspor CSV", "Ekspor PDF", "Cetak Laporan", "Detail Pendapatan", "Detail Biaya", "Breakdown Per Bulan", "Rincian Pendapatan", "Rincian Biaya", "Insights & Analisis", "Komposisi Keuangan", "Performa Bulanan", "Rp 440.000", "Rp 75.000", "Rp 365.000"} {
+	for _, text := range []string{`href="/admin/reports/profit-loss" title="Profit/loss report"`, `<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, `name="date_from"`, `name="date_to"`, "Apply filters", "Reset", "Total income", "Total cost", "Net profit", "Data export", "Export CSV", "Export PDF", "Print report", "Income detail", "Cost detail", "Monthly breakdown", "Income breakdown", "Cost breakdown", "Insights &amp; analysis", "Financial composition", "Monthly performance", "Rp 440.000", "Rp 75.000", "Rp 365.000"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected profit/loss report to include %q, got %s", text, body)
 		}
@@ -2086,8 +2086,8 @@ func TestProfitLossPeriodMatchesAllIncludedActivity(t *testing.T) {
 	months := (now.Year()-2025)*12 + int(now.Month()-time.January) + 1
 	body := rec.Body.String()
 	for _, expected := range []string{
-		"Periode: 15/01/2025 - " + now.Format("02/01/2006"),
-		"Rata-rata Bulanan:",
+		"Period: 15/01/2025 - " + now.Format("02/01/2006"),
+		"Monthly average:",
 		"Rp " + dottedTestNominal(120000/months),
 	} {
 		if !strings.Contains(body, expected) {
@@ -2127,7 +2127,7 @@ func TestProfitLossPeriodFilterChangesTotalsAndExports(t *testing.T) {
 
 	body := rec.Body.String()
 	for _, expected := range []string{
-		"Periode: 01/02/2026 - 28/02/2026",
+		"Period: 01/02/2026 - 28/02/2026",
 		`value="2026-02-01"`,
 		`value="2026-02-28"`,
 		`href="/admin/reports/profit-loss?date_from=2026-02-01&amp;date_to=2026-02-28&amp;export=csv"`,

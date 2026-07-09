@@ -151,16 +151,17 @@ func (s *Server) adminBalanceReportPage(c *gin.Context) {
 		writeBalanceReportCSV(c, report)
 		return
 	} else if export == "pdf" {
-		writeReportPDF(c, "balance-report.pdf", "KKSUK PD Dharma Jaya - Balance Report", []string{
-			fmt.Sprintf("Printed at: %s", report.PrintedAt),
-			fmt.Sprintf("Total assets: Rp %d", report.TotalAssets),
-			fmt.Sprintf("Total liabilities: Rp %d", report.TotalLiabilities),
-			fmt.Sprintf("Total equity: Rp %d", report.TotalEquity),
-			fmt.Sprintf("Cash asset: Rp %d", report.CashAsset),
-			fmt.Sprintf("Loan receivable: Rp %d", report.LoanReceivable),
-			fmt.Sprintf("Pending withdrawals: Rp %d", report.PendingWithdrawals),
-			fmt.Sprintf("Liability ratio: %d%%", report.LiabilityRatio),
-			fmt.Sprintf("Health status: %s", report.HealthStatus),
+		lang := languageFromRequest(c)
+		writeReportPDF(c, "balance-report.pdf", "KKSUK PD Dharma Jaya - "+translate(lang, "balance_report"), []string{
+			fmt.Sprintf("%s %s", translate(lang, "printed_at"), report.PrintedAt),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "total_assets"), report.TotalAssets),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "total_liabilities"), report.TotalLiabilities),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "total_equity"), report.TotalEquity),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "cash_asset"), report.CashAsset),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "loan_receivable"), report.LoanReceivable),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "pending_withdrawals"), report.PendingWithdrawals),
+			fmt.Sprintf("%s %d%%", translate(lang, "liability_asset_ratio"), report.LiabilityRatio),
+			fmt.Sprintf("%s: %s", translate(lang, "health_status"), translate(lang, fmt.Sprintf("health_%s", report.HealthStatus))),
 		})
 		return
 	}
@@ -186,15 +187,16 @@ func (s *Server) adminProfitLossReportPage(c *gin.Context) {
 		writeProfitLossReportCSV(c, report)
 		return
 	} else if export == "pdf" {
-		writeReportPDF(c, "profit-loss-report.pdf", "KKSUK PD Dharma Jaya - Profit/Loss Report", []string{
-			fmt.Sprintf("Period: %s to %s", report.PeriodStart, report.PeriodEnd),
-			fmt.Sprintf("Total income: Rp %d", report.TotalIncome),
-			fmt.Sprintf("Total cost: Rp %d", report.TotalCost),
-			fmt.Sprintf("Net profit: Rp %d", report.NetProfit),
-			fmt.Sprintf("Income transactions: %d", report.IncomeTransactions),
-			fmt.Sprintf("Cost transactions: %d", report.CostTransactions),
-			fmt.Sprintf("Profit margin: %d%%", report.MarginPercent),
-			fmt.Sprintf("Monthly average: Rp %d", report.MonthlyAverage),
+		lang := languageFromRequest(c)
+		writeReportPDF(c, "profit-loss-report.pdf", "KKSUK PD Dharma Jaya - "+translate(lang, "profit_loss_report"), []string{
+			fmt.Sprintf("%s %s %s %s", translate(lang, "period"), report.PeriodStart, translate(lang, "to"), report.PeriodEnd),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "total_income"), report.TotalIncome),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "total_cost"), report.TotalCost),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "net_profit"), report.NetProfit),
+			fmt.Sprintf("%s: %d", translate(lang, "income_transactions"), report.IncomeTransactions),
+			fmt.Sprintf("%s: %d", translate(lang, "cost_transactions"), report.CostTransactions),
+			fmt.Sprintf("%s %d%%", translate(lang, "profit_margin"), report.MarginPercent),
+			fmt.Sprintf("%s Rp %d", translate(lang, "monthly_average"), report.MonthlyAverage),
 		})
 		return
 	}

@@ -26,6 +26,81 @@
       </div>
 {{end}}
 
+{{define "toast-root"}}
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true" data-default-error="{{t .Lang "toast_operation_failed"}}"></div>
+{{end}}
+
+{{define "toast-script"}}
+  <script>
+  (function () {
+    var storeKey = "kopdes:toast";
+    function region() {
+      return document.getElementById("toast-region");
+    }
+    function textFromHTML(html) {
+      var node = document.createElement("div");
+      node.innerHTML = html || "";
+      return (node.textContent || "").trim();
+    }
+    function showToast(detail) {
+      var target = region();
+      if (!target || !detail || !detail.message) {
+        return;
+      }
+      var toast = document.createElement("div");
+      var kind = detail.type === "success" ? "success" : "error";
+      toast.className = "toast toast-" + kind;
+      toast.setAttribute("role", kind === "error" ? "alert" : "status");
+      toast.textContent = detail.message;
+      target.appendChild(toast);
+      window.setTimeout(function () {
+        toast.classList.add("toast-exit");
+        window.setTimeout(function () { toast.remove(); }, 180);
+      }, 4200);
+    }
+    function persistToast(detail) {
+      if (detail && detail.persist) {
+        sessionStorage.setItem(storeKey, JSON.stringify(detail));
+        return true;
+      }
+      return false;
+    }
+    window.addEventListener("kopdes:toast", function (event) {
+      if (!persistToast(event.detail)) {
+        showToast(event.detail);
+      }
+    });
+    document.addEventListener("htmx:beforeOnLoad", function (event) {
+      var xhr = event.detail && event.detail.xhr;
+      var header = xhr && xhr.getResponseHeader("HX-Trigger");
+      if (!header || header.charAt(0) !== "{") {
+        return;
+      }
+      try {
+        persistToast(JSON.parse(header)["kopdes:toast"]);
+      } catch (err) {
+      }
+    });
+    document.addEventListener("htmx:responseError", function (event) {
+      var xhr = event.detail && event.detail.xhr;
+      var message = textFromHTML(xhr && xhr.responseText) || (region() && region().dataset.defaultError);
+      showToast({ type: "error", message: message });
+    });
+    document.addEventListener("DOMContentLoaded", function () {
+      var saved = sessionStorage.getItem(storeKey);
+      if (!saved) {
+        return;
+      }
+      sessionStorage.removeItem(storeKey);
+      try {
+        showToast(JSON.parse(saved));
+      } catch (err) {
+      }
+    });
+  }());
+  </script>
+{{end}}
+
 {{define "admin-nav"}}
       <nav class="sidebar-nav">
         <div class="sidebar-nav-group">
@@ -62,6 +137,7 @@
 {{template "asset-head" .}}
 </head>
 <body>
+{{template "toast-root" .}}
   <div class="admin-shell">
     <aside class="admin-sidebar" aria-label="{{t .Lang "admin_menu"}}">
 {{template "brand-mark" .}}
@@ -84,6 +160,7 @@
 {{define "admin-shell-end"}}
     </main>
   </div>
+{{template "toast-script" .}}
   <script>if (window.lucide) { lucide.createIcons(); }</script>
 </body>
 </html>
@@ -108,6 +185,7 @@
 {{template "asset-head" .}}
 </head>
 <body>
+{{template "toast-root" .}}
   <main class="member-shell {{.ShellClass}}">
     <header class="member-topbar">
 {{template "brand-mark" .}}
@@ -125,6 +203,7 @@
 
 {{define "member-shell-end"}}
   </main>
+{{template "toast-script" .}}
   <script>if (window.lucide) { lucide.createIcons(); }</script>
 </body>
 </html>

@@ -15,23 +15,23 @@
       <section class="dashboard-home-grid">
         <article class="panel dashboard-activity-card">
           <header class="panel-header">
-            <h2>Aktivitas Terkini</h2>
+            <h2>{{t .Lang "recent_activity"}}</h2>
           </header>
           {{if .Reports.Repayments}}
 {{template "table-open" .}}
             <thead>
               <tr>
-                <th>Tanggal</th>
-                <th>Kategori</th>
-                <th>Deskripsi</th>
-                <th>Jumlah</th>
+                <th>{{t $.Lang "date"}}</th>
+                <th>{{t $.Lang "category"}}</th>
+                <th>{{t $.Lang "description"}}</th>
+                <th>{{t $.Lang "amount"}}</th>
               </tr>
             </thead>
             <tbody>
               {{range .Reports.Repayments}}
               <tr>
                 <td>{{.RecordDate}}</td>
-                <td>Angsuran</td>
+                <td>{{t $.Lang "repayment"}}</td>
                 <td>{{.FullName}} - {{.ReferenceNo}}</td>
                 <td>{{nominal .Amount}}</td>
               </tr>
@@ -42,17 +42,17 @@
 {{template "table-open" .}}
             <thead>
               <tr>
-                <th>Tanggal</th>
-                <th>Kategori</th>
-                <th>Deskripsi</th>
-                <th>Jumlah</th>
+                <th>{{t $.Lang "date"}}</th>
+                <th>{{t $.Lang "category"}}</th>
+                <th>{{t $.Lang "description"}}</th>
+                <th>{{t $.Lang "amount"}}</th>
               </tr>
             </thead>
             <tbody>
               {{range .Reports.Loans}}
               <tr>
                 <td>{{.CreatedAt}}</td>
-                <td>Pinjaman</td>
+                <td>{{t $.Lang "pinjaman"}}</td>
                 <td>{{.FullName}}</td>
                 <td>{{nominal .ApprovedAmount}}</td>
               </tr>
@@ -65,13 +65,13 @@
         </article>
         <article class="panel dashboard-quick-card">
           <header class="panel-header">
-            <h2>Aksi Cepat</h2>
+            <h2>{{t .Lang "quick_actions"}}</h2>
           </header>
           <div class="dashboard-quick-list">
-            <a href="/admin/members/new"><i data-lucide="user-plus"></i><span>Tambah Anggota</span></a>
-            <a href="/admin/savings/new"><i data-lucide="piggy-bank"></i><span>Catat Simpanan</span></a>
-            <a href="/admin/loan-requests"><i data-lucide="file-clock"></i><span>Permintaan Pinjaman</span></a>
-            <a href="/admin/reports/balance"><i data-lucide="scale"></i><span>Laporan Neraca</span></a>
+            <a href="/admin/members/new"><i data-lucide="user-plus"></i><span>{{t .Lang "create_member"}}</span></a>
+            <a href="/admin/savings/new"><i data-lucide="piggy-bank"></i><span>{{t .Lang "record_saving"}}</span></a>
+            <a href="/admin/loan-requests"><i data-lucide="file-clock"></i><span>{{t .Lang "loan_requests"}}</span></a>
+            <a href="/admin/reports/balance"><i data-lucide="scale"></i><span>{{t .Lang "balance_report"}}</span></a>
           </div>
         </article>
       </section>
@@ -222,75 +222,75 @@
 {{template "admin-shell-start" .}}
       <section class="balance-report-card">
         <header class="balance-report-card-header">
-          <h2>Laporan Neraca Keuangan</h2>
+          <h2>{{t .Lang "financial_balance_report"}}</h2>
           <div class="balance-export-actions">
-            <a class="button-link button-link-secondary" href="/admin/reports/balance?export=csv">Export CSV</a>
-            <a class="button-link button-link-secondary" href="/admin/reports/balance?export=pdf">Export PDF</a>
+            <a class="button-link button-link-secondary" href="/admin/reports/balance?export=csv">{{t .Lang "export_csv"}}</a>
+            <a class="button-link button-link-secondary" href="/admin/reports/balance?export=pdf">{{t .Lang "export_pdf"}}</a>
           </div>
         </header>
         <div class="balance-report-card-body">
           <section class="balance-health-alert">
             <div>
-              <span>Indikator Kesehatan Keuangan</span>
-              <p>Rasio Kewajiban terhadap Aset: <strong>{{.Report.LiabilityRatio}}%</strong> - Status: <strong>{{.Report.HealthStatus}}</strong></p>
+              <span>{{t .Lang "financial_health_indicator"}}</span>
+              <p>{{t .Lang "liability_asset_ratio"}} <strong>{{.Report.LiabilityRatio}}%</strong> - {{t .Lang "status"}}: <strong>{{t .Lang (printf "health_%s" .Report.HealthStatus)}}</strong></p>
             </div>
             <i data-lucide="triangle-alert"></i>
           </section>
 
           <section class="balance-kpi-grid">
             <article class="balance-kpi-card balance-kpi-primary">
-              <span>Total Aset</span>
+              <span>{{t .Lang "total_assets"}}</span>
               <strong>Rp {{nominal .Report.TotalAssets}}</strong>
-              <small>Kas + Piutang Pinjaman</small>
+              <small>{{t .Lang "cash_plus_loan_receivable"}}</small>
             </article>
             <article class="balance-kpi-card balance-kpi-warning">
-              <span>Total Kewajiban</span>
+              <span>{{t .Lang "total_liabilities"}}</span>
               <strong>Rp {{nominal .Report.TotalLiabilities}}</strong>
-              <small>Simpanan Anggota</small>
+              <small>{{t .Lang "member_savings"}}</small>
             </article>
             <article class="balance-kpi-card balance-kpi-success">
-              <span>Total Ekuitas</span>
+              <span>{{t .Lang "total_equity"}}</span>
               <strong>Rp {{nominal .Report.TotalEquity}}</strong>
-              <small>Aset - Kewajiban</small>
+              <small>{{t .Lang "assets_minus_liabilities"}}</small>
             </article>
           </section>
 
           <section class="balance-detail-card">
-            <h3><i data-lucide="scale"></i> Detail Neraca</h3>
+            <h3><i data-lucide="scale"></i> {{t .Lang "balance_detail"}}</h3>
 {{template "table-open" .}}
           <thead>
             <tr>
-              <th>Kategori</th>
-              <th>Jumlah (Rp)</th>
+              <th>{{t $.Lang "category"}}</th>
+              <th>{{t $.Lang "amount_rp"}}</th>
             </tr>
           </thead>
           <tbody>
             <tr class="balance-section-row">
-              <td>ASET</td>
+              <td>{{t $.Lang "assets"}}</td>
               <td>Rp {{nominal .Report.TotalAssets}}</td>
             </tr>
             <tr>
-              <td><span class="balance-row-icon balance-positive-dot"></span>Kas (Masuk - Keluar)</td>
+              <td><span class="balance-row-icon balance-positive-dot"></span>{{t $.Lang "cash_in_out"}}</td>
               <td>Rp {{nominal .Report.CashAsset}}</td>
             </tr>
             <tr>
-              <td><span class="balance-row-icon balance-negative-dot"></span>Piutang Pinjaman</td>
+              <td><span class="balance-row-icon balance-negative-dot"></span>{{t $.Lang "loan_receivable"}}</td>
               <td>Rp {{nominal .Report.LoanReceivable}}</td>
             </tr>
             <tr class="balance-section-row">
-              <td>KEWAJIBAN</td>
+              <td>{{t $.Lang "liabilities"}}</td>
               <td>Rp {{nominal .Report.TotalLiabilities}}</td>
             </tr>
             <tr>
-              <td><span class="balance-row-icon balance-warning-dot"></span>Simpanan Anggota</td>
+              <td><span class="balance-row-icon balance-warning-dot"></span>{{t $.Lang "member_savings"}}</td>
               <td>Rp {{nominal .Report.TotalSavings}}</td>
             </tr>
             <tr class="balance-section-row">
-              <td>EKUITAS</td>
+              <td>{{t $.Lang "equity"}}</td>
               <td>Rp {{nominal .Report.TotalEquity}}</td>
             </tr>
             <tr class="balance-total-row">
-              <td>TOTAL ASET = TOTAL KEWAJIBAN + EKUITAS</td>
+              <td>{{t $.Lang "balance_equation"}}</td>
               <td>Rp {{nominal .Report.TotalAssets}} = Rp {{nominal .Report.TotalAssets}}</td>
             </tr>
           </tbody>
@@ -299,14 +299,14 @@
 
           <section class="balance-meta-grid">
             <article class="balance-meta-card balance-meta-info">
-              <h3>Informasi</h3>
-              <p>Periode Laporan: Semua s/d Semua</p>
-              <p>Dicetak pada: {{.Report.PrintedAt}}</p>
+              <h3>{{t .Lang "information"}}</h3>
+              <p>{{t .Lang "report_period_all"}}</p>
+              <p>{{t .Lang "printed_at"}} {{.Report.PrintedAt}}</p>
             </article>
             <article class="balance-meta-card balance-meta-secondary">
-              <h3>Komposisi</h3>
-              <p>Kas: {{nominal .Report.CashAsset}}</p>
-              <p>Piutang: {{nominal .Report.LoanReceivable}}</p>
+              <h3>{{t .Lang "composition"}}</h3>
+              <p>{{t .Lang "cash"}}: {{nominal .Report.CashAsset}}</p>
+              <p>{{t .Lang "receivables"}}: {{nominal .Report.LoanReceivable}}</p>
             </article>
           </section>
         </div>
@@ -317,91 +317,91 @@
 {{define "admin-profit-loss-report"}}
 {{template "admin-shell-start" .}}
       <section class="profit-period-toolbar">
-        <div class="profit-period-badge"><i data-lucide="calendar-days"></i> Periode: {{.Report.PeriodStart}} - {{.Report.PeriodEnd}}</div>
+        <div class="profit-period-badge"><i data-lucide="calendar-days"></i> {{t .Lang "period"}} {{.Report.PeriodStart}} - {{.Report.PeriodEnd}}</div>
         <form class="profit-period-form" method="get" action="/admin/reports/profit-loss">
           <label>
-            <span>Dari</span>
+            <span>{{t .Lang "date_from"}}</span>
             <input type="date" name="date_from" value="{{.Period.DateFrom}}">
           </label>
           <label>
-            <span>Sampai</span>
+            <span>{{t .Lang "date_to"}}</span>
             <input type="date" name="date_to" value="{{.Period.DateTo}}">
           </label>
-          <button class="button-link profit-filter-button" type="submit">Terapkan</button>
-          <a class="button-link button-link-secondary profit-reset-button" href="/admin/reports/profit-loss">Reset</a>
+          <button class="button-link profit-filter-button" type="submit">{{t .Lang "apply_filters"}}</button>
+          <a class="button-link button-link-secondary profit-reset-button" href="/admin/reports/profit-loss">{{t .Lang "reset"}}</a>
         </form>
       </section>
 
       <section class="profit-kpi-grid">
         <article class="profit-kpi-card profit-kpi-income">
-          <span>Total Pendapatan</span>
+          <span>{{t .Lang "total_income"}}</span>
           <strong>Rp {{nominal .Report.TotalIncome}}</strong>
           <small>{{.Report.IncomePercent}}%</small>
         </article>
         <article class="profit-kpi-card profit-kpi-cost">
-          <span>Total Biaya</span>
+          <span>{{t .Lang "total_cost"}}</span>
           <strong>Rp {{nominal .Report.TotalCost}}</strong>
           <small>{{.Report.CostPercent}}%</small>
         </article>
         <article class="profit-kpi-card profit-kpi-net">
-          <span>Laba Bersih</span>
+          <span>{{t .Lang "net_profit"}}</span>
           <strong>+ Rp {{nominal .Report.NetProfit}}</strong>
-          <small>Margin: {{.Report.MarginPercent}}%</small>
+          <small>{{t .Lang "margin"}} {{.Report.MarginPercent}}%</small>
         </article>
       </section>
 
       <section class="profit-card">
-        <header class="profit-card-header"><h2><i data-lucide="download"></i> Ekspor Data</h2></header>
+        <header class="profit-card-header"><h2><i data-lucide="download"></i> {{t .Lang "data_export"}}</h2></header>
         <div class="profit-card-body">
           <div class="profit-action-row">
-            <a class="button-link profit-export-button" href="{{.ExportCSVURL}}">Ekspor CSV</a>
-            <a class="button-link profit-export-button" href="{{.ExportPDFURL}}">Ekspor PDF</a>
-            <button class="profit-print-button" type="button" onclick="window.print()">Cetak Laporan</button>
+            <a class="button-link profit-export-button" href="{{.ExportCSVURL}}">{{t .Lang "export_csv"}}</a>
+            <a class="button-link profit-export-button" href="{{.ExportPDFURL}}">{{t .Lang "export_pdf"}}</a>
+            <button class="profit-print-button" type="button" onclick="window.print()">{{t .Lang "print_report"}}</button>
           </div>
         </div>
       </section>
 
       <section class="profit-tabs-card">
         <header class="profit-tabs-header">
-          <span class="active"><i data-lucide="banknote"></i> Detail Pendapatan</span>
-          <span><i data-lucide="receipt-text"></i> Detail Biaya</span>
-          <span><i data-lucide="chart-column"></i> Breakdown Per Bulan</span>
+          <span class="active"><i data-lucide="banknote"></i> {{t .Lang "income_detail"}}</span>
+          <span><i data-lucide="receipt-text"></i> {{t .Lang "cost_detail"}}</span>
+          <span><i data-lucide="chart-column"></i> {{t .Lang "monthly_breakdown"}}</span>
         </header>
         <div class="profit-tabs-body">
           <section class="profit-detail-column">
-            <h2><i data-lucide="list"></i> Rincian Pendapatan</h2>
-            <p>Total {{.Report.IncomeTransactions}} transaksi pendapatan</p>
+            <h2><i data-lucide="list"></i> {{t .Lang "income_breakdown"}}</h2>
+            <p>{{t .Lang "total_income_transactions"}} {{.Report.IncomeTransactions}} {{t .Lang "income_transactions"}}</p>
             {{if .Report.IncomeTransactions}}
-            <div class="profit-total-line"><span>Kas Masuk Terverifikasi</span><strong>Rp {{nominal .Report.TotalIncome}}</strong></div>
+            <div class="profit-total-line"><span>{{t .Lang "verified_cash_in"}}</span><strong>Rp {{nominal .Report.TotalIncome}}</strong></div>
             {{else}}
-            <p class="profit-empty">Tidak ada data pendapatan pada periode ini</p>
+            <p class="profit-empty">{{t .Lang "no_income_data_for_period"}}</p>
             {{end}}
           </section>
           <section class="profit-detail-column">
-            <h2><i data-lucide="receipt"></i> Rincian Biaya</h2>
-            <p>Total {{.Report.CostTransactions}} transaksi biaya</p>
+            <h2><i data-lucide="receipt"></i> {{t .Lang "cost_breakdown"}}</h2>
+            <p>{{t .Lang "total_cost_transactions"}} {{.Report.CostTransactions}} {{t .Lang "cost_transactions"}}</p>
             {{if .Report.CostTransactions}}
-            <div class="profit-total-line"><span>Kas Keluar Terverifikasi</span><strong>Rp {{nominal .Report.TotalCost}}</strong></div>
+            <div class="profit-total-line"><span>{{t .Lang "verified_cash_out"}}</span><strong>Rp {{nominal .Report.TotalCost}}</strong></div>
             {{else}}
-            <p class="profit-empty">Tidak ada data biaya pada periode ini</p>
+            <p class="profit-empty">{{t .Lang "no_cost_data_for_period"}}</p>
             {{end}}
           </section>
         </div>
       </section>
 
       <section class="profit-insights-card">
-        <header class="profit-insights-header"><h2><i data-lucide="lightbulb"></i> Insights & Analisis</h2></header>
+        <header class="profit-insights-header"><h2><i data-lucide="lightbulb"></i> {{t .Lang "insights_analysis"}}</h2></header>
         <div class="profit-insights-grid">
           <article class="profit-insight-box profit-insight-info">
-            <h3>Komposisi Keuangan</h3>
-            <p>Rasio Pendapatan vs Biaya:</p>
-            <p>Pendapatan {{.Report.IncomePercent}}%</p>
-            <p>Biaya {{.Report.CostPercent}}%</p>
-            <p>Margin Profit: {{.Report.MarginPercent}}%</p>
+            <h3>{{t .Lang "financial_composition"}}</h3>
+            <p>{{t .Lang "income_cost_ratio"}}</p>
+            <p>{{t .Lang "income"}} {{.Report.IncomePercent}}%</p>
+            <p>{{t .Lang "cost"}} {{.Report.CostPercent}}%</p>
+            <p>{{t .Lang "profit_margin"}} {{.Report.MarginPercent}}%</p>
           </article>
           <article class="profit-insight-box profit-insight-primary">
-            <h3>Performa Bulanan</h3>
-            <p>Rata-rata Bulanan:</p>
+            <h3>{{t .Lang "monthly_performance"}}</h3>
+            <p>{{t .Lang "monthly_average"}}</p>
             <strong>Rp {{nominal .Report.MonthlyAverage}}</strong>
           </article>
         </div>
@@ -453,9 +453,9 @@
           <label>{{t .Lang "join_date"}} <input name="join_date" type="date" required></label>
           <label>{{t .Lang "status"}}
             <select name="status">
-              <option value="active">active</option>
-              <option value="inactive">inactive</option>
-              <option value="suspended">suspended</option>
+              <option value="active">{{t .Lang "active"}}</option>
+              <option value="inactive">{{t .Lang "inactive"}}</option>
+              <option value="suspended">{{t .Lang "suspended"}}</option>
             </select>
           </label>
           <div class="form-section">
@@ -552,8 +552,8 @@
           </label>
           <label>{{t .Lang "type"}}
             <select name="type" onchange="this.form.querySelector('[data-saving-submit]').textContent = this.value === 'withdrawal' ? this.dataset.withdrawalText : this.dataset.depositText" data-deposit-text="{{t .Lang "record_deposit"}}" data-withdrawal-text="{{t .Lang "record_withdrawal"}}">
-              <option value="deposit">deposit</option>
-              <option value="withdrawal">withdrawal</option>
+              <option value="deposit">{{t .Lang "deposit"}}</option>
+              <option value="withdrawal">{{t .Lang "withdrawal"}}</option>
             </select>
           </label>
           <label>{{t .Lang "saving_category"}}
@@ -643,7 +643,7 @@
             {{range .LoanRequests}}
             <tr>
               <td>{{nominal .RequestedAmount}}</td>
-              <td>{{.DurationMonths}} months</td>
+              <td>{{.DurationMonths}} {{t $.Lang "months"}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>{{.Purpose}}</td>
               <td>{{.RejectionReason}}</td>
@@ -662,7 +662,7 @@
           <div><span>{{t .Lang "approved_amount"}}</span><strong>{{nominal .ActiveLoan.ApprovedAmount}}</strong></div>
           <div><span>{{t .Lang "monthly_installment"}}</span><strong>{{nominal .ActiveLoan.MonthlyInstallment}}</strong></div>
           <div><span>{{t .Lang "remaining_balance"}}</span><strong>{{nominal .ActiveLoan.RemainingBalance}}</strong></div>
-          <div><span>{{t .Lang "duration"}}</span><strong>{{.ActiveLoan.DurationMonths}} months</strong></div>
+          <div><span>{{t .Lang "duration"}}</span><strong>{{.ActiveLoan.DurationMonths}} {{t .Lang "months"}}</strong></div>
           <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .ActiveLoan.Status}}</strong></div>
         </div>
         {{else}}
@@ -767,7 +767,7 @@
             <tr>
               <td>{{template "member-table-cell" .}}</td>
               <td>{{nominal .RequestedAmount}}</td>
-              <td>{{.DurationMonths}} months</td>
+              <td>{{.DurationMonths}} {{t $.Lang "months"}}</td>
               <td>{{.Purpose}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>{{.CreatedAt}}</td>
@@ -822,7 +822,7 @@
               <td>{{nominal .ApprovedAmount}}</td>
               <td>{{nominal .MonthlyInstallment}}</td>
               <td>{{nominal .RemainingBalance}}</td>
-              <td>{{.DurationMonths}} months</td>
+              <td>{{.DurationMonths}} {{t $.Lang "months"}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>
                 <form class="inline-repayment-form" method="post" action="/api/admin/loans/{{.ID}}/repayments" hx-post="/api/admin/loans/{{.ID}}/repayments" hx-target="#repayment-form-error" hx-swap="innerHTML">

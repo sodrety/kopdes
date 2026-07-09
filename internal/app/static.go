@@ -631,6 +631,54 @@ button:disabled {
   min-height: 20px;
   color: var(--negative);
 }
+.toast-region {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 60;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--canvas);
+  color: var(--ink);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 700;
+  animation: toast-in 180ms ease-out;
+}
+.toast-success {
+  border-left-color: var(--positive);
+}
+.toast-error {
+  border-left-color: var(--negative);
+}
+.toast-exit {
+  animation: toast-out 180ms ease-in forwards;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
 .form-section {
   display: grid;
   gap: 12px;

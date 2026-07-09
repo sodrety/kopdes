@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -83,6 +84,18 @@ func (s *Server) recordLoanRepayment(c *gin.Context) {
 		return
 	}
 
+	if isHTMXRequest(c) {
+		trigger, err := json.Marshal(gin.H{
+			"kopdes:toast": gin.H{
+				"type":    "success",
+				"message": translate(languageFromRequest(c), "toast_repayment_recorded"),
+				"persist": true,
+			},
+		})
+		if err == nil {
+			c.Header("HX-Trigger", string(trigger))
+		}
+	}
 	respondCreatedOrHXRedirect(c, "/admin/loans", repayment)
 }
 
