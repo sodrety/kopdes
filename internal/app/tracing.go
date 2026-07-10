@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
+	"github.com/XSAM/otelsql"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
@@ -13,6 +16,24 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.38.0"
 )
+
+func OpenDatabase(cfg Config) (*sql.DB, error) {
+	driverName := cfg.DatabaseDriver
+	if cfg.TracingEnabled {
+		tracedDriverName, err := instrumentedDatabaseDriver(cfg)
+		if err != nil {
+			return nil, err
+		}
+		driverName = tracedDriverName
+	}
+	return sql.Open(driverName, cfg.DatabaseURL)
+}
+
+func instrumentedDatabaseDriver(cfg Config) (string, error) {
+	return otelsql.Register(cfg.DatabaseDriver, otelsql.WithAttributes(
+		attribute.String("db.system.name", databaseSystemName(cfg.DatabaseDriver)),
+	))
+}
 
 func ConfigureTracing(ctx context.Context, cfg Config) (func(context.Context) error, error) {
 	if !cfg.TracingEnabled {
@@ -72,4 +93,15 @@ func (cfg Config) observabilityServiceVersion() string {
 		return cfg.ServiceVersion
 	}
 	return "development"
+}
+
+func databaseSystemName(driverName string) string {
+	switch strings.ToLower(strings.TrimSpace(driverName)) {
+	case "pgx", "postgres", "postgresql":
+		return "postgresql"
+	case "sqlite", "sqlite3":
+		return "sqlite"
+	default:
+		return driverName
+	}
 }

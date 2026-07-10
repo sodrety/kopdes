@@ -122,3 +122,19 @@ func TestConfigureTracingRejectsUnsupportedExporter(t *testing.T) {
 		t.Fatal("expected unsupported tracing exporter to be rejected")
 	}
 }
+
+func TestOpenDatabaseUsesInstrumentedDriverWhenTracingEnabled(t *testing.T) {
+	db, err := app.OpenDatabase(app.Config{
+		DatabaseDriver: "sqlite",
+		DatabaseURL:    ":memory:",
+		TracingEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("open traced database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if err := db.PingContext(t.Context()); err != nil {
+		t.Fatalf("ping traced database: %v", err)
+	}
+}

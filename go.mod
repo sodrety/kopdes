@@ -5,6 +5,7 @@ go 1.26
 toolchain go1.26.4
 
 require (
+	github.com/XSAM/otelsql v0.42.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/jackc/pgx/v5 v5.10.0

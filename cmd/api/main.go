@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"log/slog"
 	"net/http"
@@ -34,7 +33,7 @@ func main() {
 		}
 	}()
 
-	db, err := sql.Open(cfg.DatabaseDriver, cfg.DatabaseURL)
+	db, err := app.OpenDatabase(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
