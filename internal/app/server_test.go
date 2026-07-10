@@ -254,6 +254,89 @@ func TestResponsesIncludeSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestResponsesIncludeRequestID(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected health status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Request-ID"); got == "" {
+		t.Fatal("expected generated request id response header")
+	}
+}
+
+func TestResponsesPreserveIncomingRequestID(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("X-Request-ID", "external-request-id")
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("X-Request-ID"); got != "external-request-id" {
+		t.Fatalf("expected incoming request id to be preserved, got %q", got)
+	}
+}
+
+func TestReadinessChecksDatabase(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	readyReq := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	readyRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(readyRec, readyReq)
+	if readyRec.Code != http.StatusOK {
+		t.Fatalf("expected ready status 200, got %d: %s", readyRec.Code, readyRec.Body.String())
+	}
+
+	if err := fixture.db.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+	unreadyReq := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	unreadyRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(unreadyRec, unreadyReq)
+	if unreadyRec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected unready status 503, got %d: %s", unreadyRec.Code, unreadyRec.Body.String())
+	}
+}
+
+func TestMetricsEndpointExposesHTTPMetrics(t *testing.T) {
+	fixture := newTestFixtureWithConfig(t, app.Config{
+		JWTSecret:      "0123456789abcdef0123456789abcdef",
+		ServiceName:    "kopdes-test",
+		ServiceVersion: "test",
+		MetricsEnabled: true,
+	})
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	healthRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(healthRec, healthReq)
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(metricsRec, metricsReq)
+
+	if metricsRec.Code != http.StatusOK {
+		t.Fatalf("expected metrics status 200, got %d: %s", metricsRec.Code, metricsRec.Body.String())
+	}
+	body := metricsRec.Body.String()
+	for _, expected := range []string{
+		"http_requests_total",
+		`service="kopdes-test"`,
+		`version="test"`,
+		`route="/health"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected metrics body to contain %q, got %s", expected, body)
+		}
+	}
+}
+
 func TestCookieAuthenticatedMutationRejectsCrossSiteOrigin(t *testing.T) {
 	fixture := newTestFixture(t)
 	authCookie := fixture.browserLogin(t, "admin@coop.test", "password")

@@ -11,31 +11,40 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Server struct {
-	cfg         Config
-	db          *sql.DB
-	financialMu sync.Mutex
-	loginMu     sync.Mutex
-	loginStates map[string]loginState
+	cfg             Config
+	db              *sql.DB
+	instrumentation *instrumentation
+	financialMu     sync.Mutex
+	loginMu         sync.Mutex
+	loginStates     map[string]loginState
 }
 
 func NewServer(cfg Config, db *sql.DB) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	server := &Server{
-		cfg:         cfg,
-		db:          db,
-		loginStates: make(map[string]loginState),
+		cfg:             cfg,
+		db:              db,
+		instrumentation: newInstrumentation(cfg),
+		loginStates:     make(map[string]loginState),
 	}
 
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(server.requestID())
+	router.Use(server.observeRequests())
 	router.Use(server.securityHeaders())
 	router.Use(server.requireSameOriginForCookieMutations())
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	router.GET("/ready", server.readiness)
+	if cfg.MetricsEnabled {
+		router.GET("/metrics", gin.WrapH(promhttp.HandlerFor(server.instrumentation.registry, promhttp.HandlerOpts{})))
+	}
 	router.GET("/static/app.css", server.staticCSS)
 	router.GET("/static/vendor/*file", server.staticVendorAsset)
 	router.GET("/static/images/*file", server.staticImageAsset)

@@ -15,6 +15,9 @@ type Config struct {
 	AdminEmail     string
 	AdminPassword  string
 	AppEnv         string
+	ServiceName    string
+	ServiceVersion string
+	MetricsEnabled bool
 	CookieSecure   bool
 	ReadTimeout    time.Duration
 	WriteTimeout   time.Duration
@@ -31,6 +34,9 @@ func ConfigFromEnv() (Config, error) {
 		AdminEmail:     os.Getenv("ADMIN_EMAIL"),
 		AdminPassword:  os.Getenv("ADMIN_PASSWORD"),
 		AppEnv:         appEnv,
+		ServiceName:    envOrDefault("SERVICE_NAME", "kopdes"),
+		ServiceVersion: envOrDefault("SERVICE_VERSION", "development"),
+		MetricsEnabled: !isFalsey(os.Getenv("METRICS_ENABLED")),
 		CookieSecure:   cookieSecureFromEnv(appEnv),
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   15 * time.Second,
@@ -67,6 +73,15 @@ func cookieSecureFromEnv(appEnv string) bool {
 func isTruthy(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func isFalsey(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "0", "false", "no", "n", "off":
 		return true
 	default:
 		return false

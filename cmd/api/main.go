@@ -3,7 +3,9 @@ package main
 import (
 	"database/sql"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/sodrety/kopdes/internal/app"
@@ -11,6 +13,8 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
 	cfg, err := app.ConfigFromEnv()
 	if err != nil {
 		log.Fatal(err)
@@ -29,7 +33,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("listening on %s", cfg.Address)
+	slog.Info("server_starting", "address", cfg.Address, "service", cfg.ServiceName, "version", cfg.ServiceVersion)
 	server := &http.Server{
 		Addr:         cfg.Address,
 		Handler:      app.NewServer(cfg, db),

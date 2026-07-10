@@ -23,6 +23,12 @@ services:
         generateValue: true
       - key: COOKIE_SECURE
         value: "true"
+      - key: SERVICE_NAME
+        value: kopdes-staging
+      - key: SERVICE_VERSION
+        value: staging
+      - key: METRICS_ENABLED
+        value: "true"
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD

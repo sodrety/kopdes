@@ -33,6 +33,9 @@ Optional:
 APP_ADDRESS=:8080
 APP_ENV=development
 COOKIE_SECURE=false
+SERVICE_NAME=kopdes
+SERVICE_VERSION=development
+METRICS_ENABLED=true
 ADMIN_EMAIL=admin@coop.test
 ADMIN_PASSWORD=password
 ```
@@ -58,6 +61,13 @@ $EDITOR .env.supabase
 
 Use the Supabase database password from the project settings. If the password contains special characters, URL-encode it in `DATABASE_URL`.
 The app runs migrations on startup and records applied versions in `schema_migrations`.
+
+## Observability
+
+- `/health` is a liveness check.
+- `/ready` checks database connectivity.
+- `/metrics` exposes Prometheus metrics when `METRICS_ENABLED` is not set to a false value such as `false`, `0`, or `off`.
+- Requests include an `X-Request-ID` response header and emit structured JSON logs.
 
 ## Test
 
