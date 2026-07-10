@@ -29,6 +29,14 @@ services:
         value: staging
       - key: METRICS_ENABLED
         value: "true"
+      - key: TRACING_ENABLED
+        sync: false
+      - key: TRACING_EXPORTER
+        value: otlp
+      - key: TRACING_ENDPOINT
+        sync: false
+      - key: TRACING_INSECURE
+        sync: false
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD

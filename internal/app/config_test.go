@@ -75,6 +75,12 @@ func TestConfigFromEnvSetsObservabilityDefaults(t *testing.T) {
 	if !cfg.MetricsEnabled {
 		t.Fatal("expected metrics to be enabled by default")
 	}
+	if cfg.TracingEnabled {
+		t.Fatal("expected tracing to be disabled by default")
+	}
+	if cfg.TracingExporter != "stdout" {
+		t.Fatalf("expected stdout tracing exporter default, got %q", cfg.TracingExporter)
+	}
 }
 
 func TestConfigFromEnvAllowsObservabilityOverrides(t *testing.T) {
@@ -83,6 +89,10 @@ func TestConfigFromEnvAllowsObservabilityOverrides(t *testing.T) {
 	t.Setenv("SERVICE_NAME", "koperasi")
 	t.Setenv("SERVICE_VERSION", "2026.07.10")
 	t.Setenv("METRICS_ENABLED", "off")
+	t.Setenv("TRACING_ENABLED", "true")
+	t.Setenv("TRACING_EXPORTER", "otlp")
+	t.Setenv("TRACING_ENDPOINT", "tempo.internal:4317")
+	t.Setenv("TRACING_INSECURE", "true")
 
 	cfg, err := app.ConfigFromEnv()
 	if err != nil {
@@ -94,5 +104,21 @@ func TestConfigFromEnvAllowsObservabilityOverrides(t *testing.T) {
 	}
 	if cfg.MetricsEnabled {
 		t.Fatal("expected METRICS_ENABLED=off to disable metrics")
+	}
+	if !cfg.TracingEnabled {
+		t.Fatal("expected TRACING_ENABLED=true to enable tracing")
+	}
+	if cfg.TracingExporter != "otlp" || cfg.TracingEndpoint != "tempo.internal:4317" || !cfg.TracingInsecure {
+		t.Fatalf("unexpected tracing config: exporter=%q endpoint=%q insecure=%v", cfg.TracingExporter, cfg.TracingEndpoint, cfg.TracingInsecure)
+	}
+}
+
+func TestConfigureTracingRejectsUnsupportedExporter(t *testing.T) {
+	_, err := app.ConfigureTracing(t.Context(), app.Config{
+		TracingEnabled:  true,
+		TracingExporter: "unknown",
+	})
+	if err == nil {
+		t.Fatal("expected unsupported tracing exporter to be rejected")
 	}
 }

@@ -8,20 +8,24 @@ import (
 )
 
 type Config struct {
-	Address        string
-	DatabaseDriver string
-	DatabaseURL    string
-	JWTSecret      string
-	AdminEmail     string
-	AdminPassword  string
-	AppEnv         string
-	ServiceName    string
-	ServiceVersion string
-	MetricsEnabled bool
-	CookieSecure   bool
-	ReadTimeout    time.Duration
-	WriteTimeout   time.Duration
-	IdleTimeout    time.Duration
+	Address         string
+	DatabaseDriver  string
+	DatabaseURL     string
+	JWTSecret       string
+	AdminEmail      string
+	AdminPassword   string
+	AppEnv          string
+	ServiceName     string
+	ServiceVersion  string
+	MetricsEnabled  bool
+	TracingEnabled  bool
+	TracingExporter string
+	TracingEndpoint string
+	TracingInsecure bool
+	CookieSecure    bool
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -37,10 +41,17 @@ func ConfigFromEnv() (Config, error) {
 		ServiceName:    envOrDefault("SERVICE_NAME", "kopdes"),
 		ServiceVersion: envOrDefault("SERVICE_VERSION", "development"),
 		MetricsEnabled: !isFalsey(os.Getenv("METRICS_ENABLED")),
-		CookieSecure:   cookieSecureFromEnv(appEnv),
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   15 * time.Second,
-		IdleTimeout:    60 * time.Second,
+		TracingEnabled: isTruthy(os.Getenv("TRACING_ENABLED")),
+		TracingExporter: strings.ToLower(strings.TrimSpace(envOrDefault(
+			"TRACING_EXPORTER",
+			envOrDefault("OTEL_TRACES_EXPORTER", "stdout"),
+		))),
+		TracingEndpoint: envOrDefault("TRACING_ENDPOINT", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
+		TracingInsecure: isTruthy(envOrDefault("TRACING_INSECURE", os.Getenv("OTEL_EXPORTER_OTLP_INSECURE"))),
+		CookieSecure:    cookieSecureFromEnv(appEnv),
+		ReadTimeout:     10 * time.Second,
+		WriteTimeout:    15 * time.Second,
+		IdleTimeout:     60 * time.Second,
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")

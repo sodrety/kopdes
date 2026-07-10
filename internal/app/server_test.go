@@ -337,6 +337,28 @@ func TestMetricsEndpointExposesHTTPMetrics(t *testing.T) {
 	}
 }
 
+func TestTracingEnabledKeepsRoutesServing(t *testing.T) {
+	fixture := newTestFixtureWithConfig(t, app.Config{
+		JWTSecret:      "0123456789abcdef0123456789abcdef",
+		ServiceName:    "kopdes-test",
+		ServiceVersion: "test",
+		TracingEnabled: true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected traced health status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Request-ID"); got == "" {
+		t.Fatal("expected traced response to include request id")
+	}
+}
+
 func TestCookieAuthenticatedMutationRejectsCrossSiteOrigin(t *testing.T) {
 	fixture := newTestFixture(t)
 	authCookie := fixture.browserLogin(t, "admin@coop.test", "password")

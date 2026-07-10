@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
 type Server struct {
@@ -35,6 +36,9 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(server.requestID())
+	if cfg.TracingEnabled {
+		router.Use(otelgin.Middleware(cfg.observabilityServiceName()))
+	}
 	router.Use(server.observeRequests())
 	router.Use(server.securityHeaders())
 	router.Use(server.requireSameOriginForCookieMutations())

@@ -31,18 +31,9 @@ func newInstrumentation(cfg Config) *instrumentation {
 		collectors.NewBuildInfoCollector(),
 	)
 
-	serviceName := cfg.ServiceName
-	if serviceName == "" {
-		serviceName = "kopdes"
-	}
-	serviceVersion := cfg.ServiceVersion
-	if serviceVersion == "" {
-		serviceVersion = "development"
-	}
-
 	registerer := prometheus.WrapRegistererWith(prometheus.Labels{
-		"service": serviceName,
-		"version": serviceVersion,
+		"service": cfg.observabilityServiceName(),
+		"version": cfg.observabilityServiceVersion(),
 	}, registry)
 	factory := promauto.With(registerer)
 

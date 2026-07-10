@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/sodrety/kopdes/internal/app"
@@ -19,6 +21,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	tracingShutdown, err := app.ConfigureTracing(context.Background(), cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tracingShutdown(ctx); err != nil {
+			slog.Error("tracing_shutdown_failed", "error", err)
+		}
+	}()
 
 	db, err := sql.Open(cfg.DatabaseDriver, cfg.DatabaseURL)
 	if err != nil {

@@ -36,6 +36,10 @@ COOKIE_SECURE=false
 SERVICE_NAME=kopdes
 SERVICE_VERSION=development
 METRICS_ENABLED=true
+TRACING_ENABLED=false
+TRACING_EXPORTER=stdout
+TRACING_ENDPOINT=
+TRACING_INSECURE=false
 ADMIN_EMAIL=admin@coop.test
 ADMIN_PASSWORD=password
 ```
@@ -68,6 +72,7 @@ The app runs migrations on startup and records applied versions in `schema_migra
 - `/ready` checks database connectivity.
 - `/metrics` exposes Prometheus metrics when `METRICS_ENABLED` is not set to a false value such as `false`, `0`, or `off`.
 - Requests include an `X-Request-ID` response header and emit structured JSON logs.
+- Endpoint traces are emitted when `TRACING_ENABLED=true`. Use `TRACING_EXPORTER=otlp`, `TRACING_ENDPOINT=<collector-host>:4317`, and `TRACING_INSECURE=true` for a private OTLP gRPC collector such as Grafana Tempo or the OpenTelemetry Collector.
 
 ## Test
 
