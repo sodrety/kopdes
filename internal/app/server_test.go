@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -211,16 +212,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 8 {
-		t.Fatalf("expected eight tracked migrations, got %d", migrationCount)
+	if migrationCount != 11 {
+		t.Fatalf("expected eleven tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 8`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 11`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "create_withdrawal_requests" {
-		t.Fatalf("expected latest migration name create_withdrawal_requests, got %q", latestName)
+	if latestName != "enforce_maximum_loan_tenor" {
+		t.Fatalf("expected latest tenor migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -541,39 +542,26 @@ func TestConcurrentWithdrawalsCannotOverdrawSavings(t *testing.T) {
 	}
 }
 
-func TestConcurrentLoanApprovalsCreateOnlyOneActiveLoan(t *testing.T) {
+func TestConcurrentLoanRequestSubmissionsCreateOnlyOnePendingRequest(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-RACE-LOAN","full_name":"Loan Race","join_date":"2026-06-17","status":"active"}`)
 	fixture.createMemberUser(t, adminToken, member.ID, "loan-race@coop.test", "secret-password")
 	memberToken := fixture.login(t, "loan-race@coop.test", "secret-password")
-	firstRequestID := fixture.createLoanRequest(t, memberToken, 1000000, 5)
-	secondRequestID := "second-race-request"
-	if _, err := fixture.db.Exec(
-		`INSERT INTO loan_requests (id, member_id, requested_amount, duration_months, purpose, status) VALUES ($1, $2, $3, $4, $5, 'pending')`,
-		secondRequestID,
-		member.ID,
-		900000,
-		5,
-		"Concurrent approval test",
-	); err != nil {
-		t.Fatalf("seed second pending loan request: %v", err)
-	}
-
 	statuses := make(chan int, 2)
 	var wg sync.WaitGroup
-	for _, requestID := range []string{firstRequestID, secondRequestID} {
+	for range 2 {
 		wg.Add(1)
-		go func(requestID string) {
+		go func() {
 			defer wg.Done()
-			req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(`{"approved_amount":500000,"duration_months":5}`))
+			req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":500000,"duration_months":5}`))
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", "Bearer "+adminToken)
+			req.Header.Set("Authorization", "Bearer "+memberToken)
 			rec := httptest.NewRecorder()
 
 			fixture.server.ServeHTTP(rec, req)
 			statuses <- rec.Code
-		}(requestID)
+		}()
 	}
 	wg.Wait()
 	close(statuses)
@@ -588,15 +576,15 @@ func TestConcurrentLoanApprovalsCreateOnlyOneActiveLoan(t *testing.T) {
 		}
 	}
 	if created != 1 || rejected != 1 {
-		t.Fatalf("expected one approval created and one rejected, got created=%d rejected=%d", created, rejected)
+		t.Fatalf("expected one request created and one rejected, got created=%d rejected=%d", created, rejected)
 	}
 
-	var activeLoans int
-	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loans WHERE member_id = $1 AND status = 'active'`, member.ID).Scan(&activeLoans); err != nil {
-		t.Fatalf("query active loans: %v", err)
+	var pendingRequests int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loan_requests WHERE member_id = $1 AND status = 'pending'`, member.ID).Scan(&pendingRequests); err != nil {
+		t.Fatalf("query pending requests: %v", err)
 	}
-	if activeLoans != 1 {
-		t.Fatalf("expected one active loan, got %d", activeLoans)
+	if pendingRequests != 1 {
+		t.Fatalf("expected one pending request, got %d", pendingRequests)
 	}
 }
 
@@ -643,8 +631,8 @@ func TestConcurrentRepaymentsCannotOverpayLoan(t *testing.T) {
 	if err := fixture.db.QueryRow(`SELECT remaining_balance FROM loans WHERE id = $1`, loan.ID).Scan(&remainingBalance); err != nil {
 		t.Fatalf("query remaining loan balance: %v", err)
 	}
-	if remainingBalance != 20000 {
-		t.Fatalf("expected remaining balance 20000, got %d", remainingBalance)
+	if remainingBalance != 25000 {
+		t.Fatalf("expected remaining balance 25000 including Bunga, got %d", remainingBalance)
 	}
 }
 
@@ -1933,7 +1921,7 @@ func TestAdminCanExportPinjamanAndAngsuranCSV(t *testing.T) {
 		t.Fatalf("expected pinjaman export status 200, got %d: %s", loanRec.Code, loanRec.Body.String())
 	}
 	loanBody := loanRec.Body.String()
-	for _, text := range []string{"member_no,member,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_at", "M-LOAN-EXP,Loan Export,900000,9,100000,800000,active"} {
+	for _, text := range []string{"member_no,member,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_at", "M-LOAN-EXP,Loan Export,900000,9,109000,881000,active"} {
 		if !strings.Contains(loanBody, text) {
 			t.Fatalf("expected pinjaman export to include %q, got %s", text, loanBody)
 		}
@@ -2043,7 +2031,7 @@ func TestAdminReportsRenderOperationalChartsAndEmptyStates(t *testing.T) {
 		t.Fatalf("expected reports page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"Simpanan by category", "Penarikan by status", "Pinjaman exposure", "Angsuran progress", "Simpanan report", "Penarikan report", "Pinjaman report", "Angsuran report", "Chart Member", "M-CHART", "Simpanan Pokok", "50.000", "Simpanan Wajib", "150.000", "Simpanan Sukarela", "300.000", "Menunggu", "Approved principal", "600.000", "Remaining balance", "400.000", "Actual repayment", "200.000"} {
+	for _, text := range []string{"Simpanan by category", "Penarikan by status", "Pinjaman exposure", "Angsuran progress", "Simpanan report", "Penarikan report", "Pinjaman report", "Angsuran report", "Chart Member", "M-CHART", "Simpanan Pokok", "50.000", "Simpanan Wajib", "150.000", "Simpanan Sukarela", "300.000", "Menunggu", "Approved principal", "600.000", "Remaining balance", "436.000", "Actual repayment", "200.000"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected reports page to include %q, got %s", text, body)
 		}
@@ -2086,7 +2074,7 @@ func TestAdminBalanceReportRendersOperationalBalance(t *testing.T) {
 		t.Fatalf("expected balance report status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{`<h1>Balance report</h1>`, `href="/admin/reports/balance" title="Balance report"`, `<span class="sidebar-group-label">Reports</span>`, "Financial balance report", "Export CSV", "Export PDF", "Financial health indicator", "Liability to asset ratio", "Total assets", "Total liabilities", "Total equity", "Balance detail", "Assets", "Cash (in - out)", "Loan receivable", "Liabilities", "Member savings", "Equity", "TOTAL ASSETS = TOTAL LIABILITIES &#43; EQUITY", "Information", "Composition", "Rp 750.000", "Rp 600.000", "Rp 200.000", "Rp 150.000"} {
+	for _, text := range []string{`<h1>Balance report</h1>`, `href="/admin/reports/balance" title="Balance report"`, `<span class="sidebar-group-label">Reports</span>`, "Financial balance report", "Export CSV", "Export PDF", "Financial health indicator", "Liability to asset ratio", "Total assets", "Total liabilities", "Total equity", "Balance detail", "Assets", "Cash (in - out)", "Loan receivable", "Liabilities", "Member savings", "Equity", "TOTAL ASSETS = TOTAL LIABILITIES &#43; EQUITY", "Information", "Composition", "Rp 764.400", "Rp 600.000", "Rp 214.400", "Rp 164.400"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected balance report to include %q, got %s", text, body)
 		}
@@ -2805,7 +2793,7 @@ func TestAdminCanApproveLoanRequestAndExposeActiveLoan(t *testing.T) {
 	requestID := fixture.createLoanRequest(t, memberToken, 2400000, 12)
 
 	loan := fixture.approveLoanRequest(t, adminToken, requestID, 1200000, 6)
-	if loan.ID == "" || loan.LoanRequestID != requestID || loan.MemberID != member.ID || loan.ApprovedAmount != 1200000 || loan.DurationMonths != 6 || loan.MonthlyInstallment != 200000 || loan.RemainingBalance != 1200000 || loan.Status != "active" {
+	if loan.ID == "" || loan.LoanRequestID != requestID || loan.MemberID != member.ID || loan.ApprovedAmount != 1200000 || loan.DurationMonths != 6 || loan.MonthlyInstallment != 212000 || loan.RemainingBalance != 1272000 || loan.Status != "active" {
 		t.Fatalf("unexpected approved loan: %+v", loan)
 	}
 
@@ -2851,7 +2839,7 @@ func TestAdminCanApproveLoanRequestAndExposeActiveLoan(t *testing.T) {
 	if err := json.Unmarshal(activeRec.Body.Bytes(), &activeLoan); err != nil {
 		t.Fatalf("decode member active loan: %v", err)
 	}
-	if activeLoan.ID != loan.ID || activeLoan.ApprovedAmount != 1200000 || activeLoan.MonthlyInstallment != 200000 || activeLoan.RemainingBalance != 1200000 || activeLoan.Status != "active" {
+	if activeLoan.ID != loan.ID || activeLoan.ApprovedAmount != 1200000 || activeLoan.MonthlyInstallment != 212000 || activeLoan.RemainingBalance != 1272000 || activeLoan.Status != "active" {
 		t.Fatalf("unexpected member active loan: %+v", activeLoan)
 	}
 
@@ -2898,7 +2886,7 @@ func TestLoanApprovalValidationAndConflicts(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Approved amount and duration months must be greater than zero")
+		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Approved amount, duration months, start date, and a valid interest rate are required")
 		if loans := fixture.activeLoans(t, adminToken); len(loans) != 0 {
 			t.Fatalf("expected validation failure to create no loans, got %+v", loans)
 		}
@@ -2909,7 +2897,7 @@ func TestLoanApprovalValidationAndConflicts(t *testing.T) {
 		adminToken := fixture.login(t, "admin@coop.test", "password")
 		fixture.createMember(t, adminToken, `{"member_no":"M-0023","full_name":"Approval Rules","join_date":"2026-06-16","status":"active","email":"approval-rules@coop.test","password":"member-password"}`)
 		memberToken := fixture.login(t, "approval-rules@coop.test", "member-password")
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+fixture.pendingLoanRequestID(t, memberToken)+"/approve", bytes.NewBufferString(`{"approved_amount":1500000,"duration_months":5}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+fixture.pendingLoanRequestID(t, memberToken)+"/approve", bytes.NewBufferString(`{"approved_amount":1500000,"duration_months":5,"start_date":"2026-07-11"}`))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+adminToken)
 		rec := httptest.NewRecorder()
@@ -2933,7 +2921,7 @@ func TestLoanApprovalValidationAndConflicts(t *testing.T) {
 		requestID := fixture.pendingLoanRequestID(t, memberToken)
 		firstLoan := fixture.approveLoanRequest(t, adminToken, requestID, 800000, 4)
 
-		reapproveReq := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(`{"approved_amount":800000,"duration_months":4}`))
+		reapproveReq := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(`{"approved_amount":800000,"duration_months":4,"start_date":"2026-07-11"}`))
 		reapproveReq.Header.Set("Content-Type", "application/json")
 		reapproveReq.Header.Set("Authorization", "Bearer "+adminToken)
 		reapproveRec := httptest.NewRecorder()
@@ -2948,10 +2936,9 @@ func TestLoanApprovalValidationAndConflicts(t *testing.T) {
 			t.Fatalf("expected reapproval failure to keep one active loan, got %+v", loans)
 		}
 
-		secondRequestID := fixture.createLoanRequest(t, memberToken, 600000, 3)
-		conflictReq := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+secondRequestID+"/approve", bytes.NewBufferString(`{"approved_amount":600000,"duration_months":3}`))
+		conflictReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":600000,"duration_months":3,"purpose":"blocked"}`))
 		conflictReq.Header.Set("Content-Type", "application/json")
-		conflictReq.Header.Set("Authorization", "Bearer "+adminToken)
+		conflictReq.Header.Set("Authorization", "Bearer "+memberToken)
 		conflictRec := httptest.NewRecorder()
 
 		fixture.server.ServeHTTP(conflictRec, conflictReq)
@@ -2959,7 +2946,7 @@ func TestLoanApprovalValidationAndConflicts(t *testing.T) {
 		if conflictRec.Code != http.StatusBadRequest {
 			t.Fatalf("expected active loan conflict status 400, got %d: %s", conflictRec.Code, conflictRec.Body.String())
 		}
-		assertError(t, conflictRec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Member already has an active loan")
+		assertError(t, conflictRec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Outstanding loan balance must be fully paid before requesting another loan")
 		if loans := fixture.activeLoans(t, adminToken); len(loans) != 1 || loans[0].ID != firstLoan.ID {
 			t.Fatalf("expected active loan conflict to keep one active loan, got %+v", loans)
 		}
@@ -3003,7 +2990,7 @@ func TestLoanApprovalPagesRenderReviewAndActiveLoanViews(t *testing.T) {
 		t.Fatalf("expected member profile status 200, got %d: %s", profileRec.Code, profileRec.Body.String())
 	}
 	profileBody := profileRec.Body.String()
-	for _, text := range []string{"Active loan", "900.000", "100.000", "active"} {
+	for _, text := range []string{"Active loan", "900.000", "109.000", "active"} {
 		if !strings.Contains(profileBody, text) {
 			t.Fatalf("expected member profile to include %q, got %s", text, profileBody)
 		}
@@ -3019,7 +3006,7 @@ func TestLoanApprovalPagesRenderReviewAndActiveLoanViews(t *testing.T) {
 		t.Fatalf("expected admin loans page status 200, got %d: %s", adminLoansRec.Code, adminLoansRec.Body.String())
 	}
 	adminLoansBody := adminLoansRec.Body.String()
-	for _, text := range []string{"Active loans", "table-scroll", member.FullName, member.MemberNo, "900.000", "100.000", "Aktif"} {
+	for _, text := range []string{"Active loans", "table-scroll", member.FullName, member.MemberNo, "900.000", "109.000", "Aktif"} {
 		if !strings.Contains(adminLoansBody, text) {
 			t.Fatalf("expected admin loans page to include %q, got %s", text, adminLoansBody)
 		}
@@ -3118,7 +3105,7 @@ func TestLoanRejectionValidationAndReviewedRequestRules(t *testing.T) {
 		requestID := fixture.createLoanRequest(t, memberToken, 1000000, 5)
 		fixture.rejectLoanRequest(t, adminToken, requestID, "Does not meet policy")
 
-		approveReq := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(`{"approved_amount":800000,"duration_months":4}`))
+		approveReq := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(`{"approved_amount":800000,"duration_months":4,"start_date":"2026-07-11"}`))
 		approveReq.Header.Set("Content-Type", "application/json")
 		approveReq.Header.Set("Authorization", "Bearer "+adminToken)
 		approveRec := httptest.NewRecorder()
@@ -3201,7 +3188,7 @@ func TestAdminCanRecordRepaymentAndMemberCanViewHistory(t *testing.T) {
 	if err := json.Unmarshal(activeRec.Body.Bytes(), &activeLoan); err != nil {
 		t.Fatalf("decode active loan: %v", err)
 	}
-	if activeLoan.ID != loan.ID || activeLoan.RemainingBalance != 750000 || activeLoan.Status != "active" {
+	if activeLoan.ID != loan.ID || activeLoan.RemainingBalance != 800000 || activeLoan.Status != "active" {
 		t.Fatalf("expected updated active loan balance, got %+v", activeLoan)
 	}
 
@@ -3247,7 +3234,7 @@ func TestRepaymentValidationBalanceAndPaidTransition(t *testing.T) {
 		if repayments := fixture.memberRepayments(t, memberToken); len(repayments) != 0 {
 			t.Fatalf("expected invalid repayment to create no records, got %+v", repayments)
 		}
-		if loans := fixture.activeLoans(t, adminToken); len(loans) != 1 || loans[0].RemainingBalance != 500000 {
+		if loans := fixture.activeLoans(t, adminToken); len(loans) != 1 || loans[0].RemainingBalance != 525000 {
 			t.Fatalf("expected invalid repayment to keep loan balance, got %+v", loans)
 		}
 	})
@@ -3273,7 +3260,7 @@ func TestRepaymentValidationBalanceAndPaidTransition(t *testing.T) {
 		if repayments := fixture.memberRepayments(t, memberToken); len(repayments) != 0 {
 			t.Fatalf("expected overpayment to create no records, got %+v", repayments)
 		}
-		if loans := fixture.activeLoans(t, adminToken); len(loans) != 1 || loans[0].RemainingBalance != 500000 {
+		if loans := fixture.activeLoans(t, adminToken); len(loans) != 1 || loans[0].RemainingBalance != 525000 {
 			t.Fatalf("expected overpayment to keep loan balance, got %+v", loans)
 		}
 	})
@@ -3285,7 +3272,7 @@ func TestRepaymentValidationBalanceAndPaidTransition(t *testing.T) {
 		memberToken := fixture.login(t, "repayment-rules@coop.test", "member-password")
 		loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 500000, 5), 500000, 5)
 
-		fixture.recordRepayment(t, adminToken, loan.ID, 500000)
+		fixture.recordRepayment(t, adminToken, loan.ID, loan.RemainingBalance)
 
 		activeReq := httptest.NewRequest(http.MethodGet, "/api/member/loans/active", nil)
 		activeReq.Header.Set("Authorization", "Bearer "+memberToken)
@@ -3334,7 +3321,7 @@ func TestRepaymentHistoryIsMemberIsolatedAndPagesRender(t *testing.T) {
 		t.Fatalf("expected admin loans page status 200, got %d: %s", adminLoansRec.Code, adminLoansRec.Body.String())
 	}
 	adminLoansBody := adminLoansRec.Body.String()
-	for _, text := range []string{"/api/admin/loans/" + firstLoan.ID + "/repayments", `name="record_date"`, `name="reference_no"`, "Record repayment", "600000"} {
+	for _, text := range []string{"/api/admin/loans/" + firstLoan.ID + "/repayments", `name="record_date"`, `name="reference_no"`, "Record repayment", "600.000"} {
 		if !strings.Contains(adminLoansBody, text) {
 			t.Fatalf("expected admin loans page to include %q, got %s", text, adminLoansBody)
 		}
@@ -3351,7 +3338,7 @@ func TestRepaymentHistoryIsMemberIsolatedAndPagesRender(t *testing.T) {
 		t.Fatalf("expected member profile status 200, got %d: %s", profileRec.Code, profileRec.Body.String())
 	}
 	profileBody := profileRec.Body.String()
-	for _, text := range []string{"Repayment history", "200.000", "RPY-TEST", "Test repayment", "600.000"} {
+	for _, text := range []string{"Repayment history", "200.000", "RPY-TEST", "Test repayment", "632.000"} {
 		if !strings.Contains(profileBody, text) {
 			t.Fatalf("expected member profile to include %q, got %s", text, profileBody)
 		}
@@ -3367,7 +3354,7 @@ func TestRepaymentHistoryIsMemberIsolatedAndPagesRender(t *testing.T) {
 		t.Fatalf("expected admin member detail status 200, got %d: %s", adminMemberDetailRec.Code, adminMemberDetailRec.Body.String())
 	}
 	detailBody := adminMemberDetailRec.Body.String()
-	for _, text := range []string{"Saving balance", "350.000", "Saving records", "DETAIL-SAVE", "Loan requests", "800.000", "Active loan", "600.000", "Repayment records", "RPY-TEST"} {
+	for _, text := range []string{"Saving balance", "350.000", "Saving records", "DETAIL-SAVE", "Loan requests", "800.000", "Active loan", "632.000", "Repayment records", "RPY-TEST"} {
 		if !strings.Contains(detailBody, text) {
 			t.Fatalf("expected admin member detail to include %q, got %s", text, detailBody)
 		}
@@ -3449,7 +3436,6 @@ func TestAdminDashboardAggregatesOperationalTotals(t *testing.T) {
 	fixture.recordSaving(t, adminToken, active.ID, "withdrawal", 200000, "DASH-WD", "Dashboard withdrawal")
 	activeLoan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 600000, 6), 600000, 6)
 	fixture.recordRepayment(t, adminToken, activeLoan.ID, 150000)
-	fixture.createLoanRequest(t, memberToken, 300000, 3)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard", nil)
 	req.Header.Set("Authorization", "Bearer "+adminToken)
@@ -3471,7 +3457,7 @@ func TestAdminDashboardAggregatesOperationalTotals(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
 		t.Fatalf("decode dashboard summary: %v", err)
 	}
-	if summary.TotalMembers != 2 || summary.ActiveMembers != 1 || summary.TotalSavings != 800000 || summary.ActiveLoans != 1 || summary.TotalOutstandingLoan != 450000 || summary.PendingLoanRequests != 1 {
+	if summary.TotalMembers != 2 || summary.ActiveMembers != 1 || summary.TotalSavings != 800000 || summary.ActiveLoans != 1 || summary.TotalOutstandingLoan != 486000 || summary.PendingLoanRequests != 0 {
 		t.Fatalf("unexpected dashboard summary: %+v", summary)
 	}
 }
@@ -3510,7 +3496,7 @@ func TestMemberDashboardIsIsolatedAndIncludesLatestActivity(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &dashboard); err != nil {
 		t.Fatalf("decode member dashboard: %v", err)
 	}
-	if dashboard.SavingBalance != 700000 || dashboard.RemainingLoanBalance != 400000 || dashboard.ActiveLoan == nil || dashboard.ActiveLoan.ID != firstLoan.ID {
+	if dashboard.SavingBalance != 700000 || dashboard.RemainingLoanBalance != 425000 || dashboard.ActiveLoan == nil || dashboard.ActiveLoan.ID != firstLoan.ID {
 		t.Fatalf("unexpected member dashboard balances: %+v", dashboard)
 	}
 	if len(dashboard.LatestSavings) != 1 || dashboard.LatestSavings[0].MemberID != first.ID || dashboard.LatestSavings[0].ReferenceNo != "FIRST-DEP" {
@@ -3544,13 +3530,139 @@ func TestMemberDashboardIsIsolatedAndIncludesLatestActivity(t *testing.T) {
 		t.Fatalf("expected member dashboard page status 200, got %d: %s", dashboardPageRec.Code, dashboardPageRec.Body.String())
 	}
 	pageBody := dashboardPageRec.Body.String()
-	for _, text := range []string{"member-dashboard-shell", "Saving balance", "700.000", "Remaining loan", "400.000", "Loan request status", "FIRST-DEP", "Latest repayment records", "100.000"} {
+	for _, text := range []string{"member-dashboard-shell", "Saving balance", "700.000", "Remaining loan", "425.000", "Loan request status", "FIRST-DEP", "Latest repayment records", "100.000"} {
 		if !strings.Contains(pageBody, text) {
 			t.Fatalf("expected member dashboard page to include %q, got %s", text, pageBody)
 		}
 	}
 	if strings.Contains(pageBody, "SECOND-DEP") {
 		t.Fatalf("expected member dashboard page not to expose second member data, got %s", pageBody)
+	}
+}
+
+func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-SCHEDULE","full_name":"Schedule Member","join_date":"2026-06-16","status":"active","email":"schedule@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "schedule@coop.test", "member-password")
+	requestID := fixture.createLoanRequest(t, memberToken, 1000000, 3)
+	startDate := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
+	body := fmt.Sprintf(`{"approved_amount":900000,"duration_months":3,"start_date":%q,"interest_rate_bps":125}`, startDate)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("approve scheduled loan: %d %s", rec.Code, rec.Body.String())
+	}
+	var loan testLoan
+	if err := json.Unmarshal(rec.Body.Bytes(), &loan); err != nil {
+		t.Fatal(err)
+	}
+	if loan.RemainingBalance != 933750 {
+		t.Fatalf("expected obligation 933750, got %+v", loan)
+	}
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/admin/loans/"+loan.ID, nil)
+	detailReq.Header.Set("Authorization", "Bearer "+adminToken)
+	detailRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(detailRec, detailReq)
+	if detailRec.Code != http.StatusOK {
+		t.Fatalf("detail: %d %s", detailRec.Code, detailRec.Body.String())
+	}
+	var detail struct {
+		Installments []struct {
+			ScheduledAmount int    `json:"scheduled_amount"`
+			DueDate         string `json:"due_date"`
+		} `json:"installments"`
+	}
+	if json.Unmarshal(detailRec.Body.Bytes(), &detail) != nil || len(detail.Installments) != 3 {
+		t.Fatalf("unexpected schedule detail %s", detailRec.Body.String())
+	}
+	sum := 0
+	for _, i := range detail.Installments {
+		sum += i.ScheduledAmount
+	}
+	if sum != 933750 {
+		t.Fatalf("schedule sum %d", sum)
+	}
+
+	memberPageReq := httptest.NewRequest(http.MethodGet, "/member/loan-requests", nil)
+	memberPageReq.Header.Set("Accept-Language", "id")
+	memberPageReq.AddCookie(fixture.browserLogin(t, "schedule@coop.test", "member-password"))
+	memberPageRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(memberPageRec, memberPageReq)
+	for _, text := range []string{"Pinjaman belum lunas", "Sisa saldo", "Tenggat angsuran berikutnya", "Tenggat pelunasan akhir"} {
+		if memberPageRec.Code != http.StatusOK || !strings.Contains(memberPageRec.Body.String(), text) {
+			t.Fatalf("expected Indonesian outstanding UI %q, got %d %s", text, memberPageRec.Code, memberPageRec.Body.String())
+		}
+	}
+
+	adminDetailPageReq := httptest.NewRequest(http.MethodGet, "/admin/loans/"+loan.ID, nil)
+	adminDetailPageReq.Header.Set("Accept-Language", "id")
+	adminDetailPageReq.AddCookie(fixture.browserLogin(t, "admin@coop.test", "password"))
+	adminDetailPageRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(adminDetailPageRec, adminDetailPageReq)
+	for _, text := range []string{"Detail pinjaman", "Jadwal angsuran", startDate, "1.25%"} {
+		if adminDetailPageRec.Code != http.StatusOK || !strings.Contains(adminDetailPageRec.Body.String(), text) {
+			t.Fatalf("expected Indonesian detail UI %q, got %d %s", text, adminDetailPageRec.Code, adminDetailPageRec.Body.String())
+		}
+	}
+
+	correctReq := httptest.NewRequest(http.MethodPost, "/api/admin/loans/"+loan.ID+"/start-date", bytes.NewBufferString(fmt.Sprintf(`{"start_date":%q}`, startDate)))
+	correctReq.Header.Set("Content-Type", "application/json")
+	correctReq.Header.Set("Authorization", "Bearer "+adminToken)
+	correctReq.Header.Set("HX-Request", "true")
+	correctRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(correctRec, correctReq)
+	if correctRec.Code != http.StatusNoContent {
+		t.Fatalf("correct date: %d %s", correctRec.Code, correctRec.Body.String())
+	}
+	if redirect := correctRec.Header().Get("HX-Redirect"); redirect != "/admin/loans/"+loan.ID {
+		t.Fatalf("expected correction HX redirect, got %q", redirect)
+	}
+	var audits int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loan_start_date_audits WHERE loan_id=$1`, loan.ID).Scan(&audits); err != nil || audits != 1 {
+		t.Fatalf("audit count=%d err=%v", audits, err)
+	}
+
+	blockedReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":100000,"duration_months":1}`))
+	blockedReq.Header.Set("Content-Type", "application/json")
+	blockedReq.Header.Set("Authorization", "Bearer "+memberToken)
+	blockedRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(blockedRec, blockedReq)
+	if blockedRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected outstanding block, got %d %s", blockedRec.Code, blockedRec.Body.String())
+	}
+	blockedIDReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":100000,"duration_months":1}`))
+	blockedIDReq.Header.Set("Content-Type", "application/json")
+	blockedIDReq.Header.Set("Authorization", "Bearer "+memberToken)
+	blockedIDReq.Header.Set("Accept-Language", "id")
+	blockedIDReq.Header.Set("HX-Request", "true")
+	blockedIDRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(blockedIDRec, blockedIDReq)
+	if blockedIDRec.Code != http.StatusBadRequest || !strings.Contains(blockedIDRec.Body.String(), "Saldo pinjaman yang belum lunas") {
+		t.Fatalf("expected localized outstanding error, got %d %s", blockedIDRec.Code, blockedIDRec.Body.String())
+	}
+
+	if _, err := fixture.db.Exec(`UPDATE loans SET status='adjustment_due' WHERE id=$1`, loan.ID); err != nil {
+		t.Fatal(err)
+	}
+	fixture.recordRepayment(t, adminToken, loan.ID, 1000)
+	lockedReq := httptest.NewRequest(http.MethodPost, "/api/admin/loans/"+loan.ID+"/start-date", bytes.NewBufferString(fmt.Sprintf(`{"start_date":%q}`, startDate)))
+	lockedReq.Header.Set("Content-Type", "application/json")
+	lockedReq.Header.Set("Authorization", "Bearer "+adminToken)
+	lockedReq.Header.Set("Accept-Language", "id")
+	lockedReq.Header.Set("HX-Request", "true")
+	lockedRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(lockedRec, lockedReq)
+	if lockedRec.Code != http.StatusBadRequest || !strings.Contains(lockedRec.Body.String(), "tidak dapat diubah setelah ada angsuran") {
+		t.Fatalf("expected correction lock, got %d %s", lockedRec.Code, lockedRec.Body.String())
+	}
+	var total int
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND remaining_balance>0`, member.ID).Scan(&total); err != nil || total != 932750 {
+		t.Fatalf("adjusted total=%d err=%v", total, err)
 	}
 }
 
@@ -3862,7 +3974,8 @@ func (f testFixture) approveLoanRequest(t *testing.T, adminToken, requestID stri
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(`{
 		"approved_amount":`+strconv.Itoa(approvedAmount)+`,
-		"duration_months":`+strconv.Itoa(durationMonths)+`
+		"duration_months":`+strconv.Itoa(durationMonths)+`,
+		"start_date":"`+time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")+`"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+adminToken)

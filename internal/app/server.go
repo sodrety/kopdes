@@ -3,6 +3,7 @@ package app
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -14,6 +15,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
+
+func rowLockClause(db *sql.DB) string {
+	if strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite") {
+		return ""
+	}
+	return " FOR UPDATE"
+}
 
 type Server struct {
 	cfg             Config
@@ -75,10 +83,13 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	admin.POST("/loan-requests/:id/approve", server.approveLoanRequest)
 	admin.POST("/loan-requests/:id/reject", server.rejectLoanRequest)
 	admin.GET("/loans", server.adminLoans)
+	admin.GET("/loans/:id", server.adminLoanDetail)
+	admin.POST("/loans/:id/start-date", server.correctLoanStartDate)
 	admin.POST("/loans/:id/repayments", server.recordLoanRepayment)
 	admin.GET("/exports/savings.csv", server.exportSavingsCSV)
 	admin.GET("/exports/withdrawal-requests.csv", server.exportWithdrawalRequestsCSV)
 	admin.GET("/exports/loans.csv", server.exportLoansCSV)
+	admin.GET("/loans/:id/export.pdf", server.exportLoanPDF)
 	admin.GET("/exports/repayments.csv", server.exportRepaymentsCSV)
 
 	member := router.Group("/api/member")
@@ -92,6 +103,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	member.POST("/loan-requests", server.submitLoanRequest)
 	member.GET("/loan-requests", server.memberLoanRequests)
 	member.GET("/loans/active", server.memberActiveLoan)
+	member.GET("/loans/outstanding", server.memberOutstandingLoans)
 	member.GET("/repayments", server.memberRepayments)
 
 	router.GET("/admin/dashboard", server.requireRole("admin"), server.adminDashboardPage)
@@ -106,6 +118,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.GET("/admin/withdrawal-requests", server.requireRole("admin"), server.adminWithdrawalRequestsPage)
 	router.GET("/admin/loan-requests", server.requireRole("admin"), server.adminLoanRequestsPage)
 	router.GET("/admin/loans", server.requireRole("admin"), server.adminLoansPage)
+	router.GET("/admin/loans/:id", server.requireRole("admin"), server.adminLoanDetailPage)
 	router.GET("/admin/repayments", server.requireRole("admin"), server.adminRepaymentsPage)
 	router.GET("/member/dashboard", server.requireRole("member"), server.memberDashboardPage)
 	router.GET("/member/profile", server.requireRole("member"), server.memberProfilePage)

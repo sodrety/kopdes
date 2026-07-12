@@ -18,6 +18,8 @@ var pageTemplateFS embed.FS
 var pageTemplates = template.Must(template.New("").Funcs(template.FuncMap{
 	"dict":    templateDict,
 	"nominal": formatNominal,
+	"rate":    func(bps int) string { return fmt.Sprintf("%.2f%%", float64(bps)/100) },
+	"sub":     func(a, b int) int { return a - b },
 	"t":       translateTemplate,
 }).ParseFS(pageTemplateFS, "templates/*.tmpl"))
 
@@ -245,12 +247,8 @@ func (s *Server) adminMemberDetailPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	var activeLoan any
-	loan, err := s.activeLoanByMember(member.ID)
-	if err == nil {
-		activeLoan = loan
-	}
-	if err != nil && err != sql.ErrNoRows {
+	outstandingLoans, err := s.outstandingLoansByMember(member.ID)
+	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
@@ -260,12 +258,12 @@ func (s *Server) adminMemberDetailPage(c *gin.Context) {
 		return
 	}
 	renderPage(c, "admin-member-detail", pageData(c, "Member detail - KKSUK PD Dharma Jaya", "members", "member_detail", member.FullName, gin.H{
-		"Member":       member,
-		"Summary":      summary,
-		"Savings":      savings,
-		"LoanRequests": requests,
-		"ActiveLoan":   activeLoan,
-		"Repayments":   repayments,
+		"Member":           member,
+		"Summary":          summary,
+		"Savings":          savings,
+		"LoanRequests":     requests,
+		"OutstandingLoans": outstandingLoans,
+		"Repayments":       repayments,
 	}))
 }
 
@@ -281,13 +279,19 @@ func (s *Server) adminLoanRequestsPage(c *gin.Context) {
 }
 
 func (s *Server) adminLoansPage(c *gin.Context) {
-	loans, err := s.loansForAdmin("active")
+	loans, err := s.loansForAdmin("")
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	outstanding := loans[:0]
+	for _, loan := range loans {
+		if loan.RemainingBalance > 0 && loan.Status != "cancelled" {
+			outstanding = append(outstanding, loan)
+		}
+	}
 	renderPage(c, "admin-loans", pageData(c, "Active loans - KKSUK PD Dharma Jaya", "loans", "active_loans", "monitor_loans", gin.H{
-		"Loans": loans,
+		"Loans": outstanding,
 	}))
 }
 
@@ -319,12 +323,8 @@ func (s *Server) memberProfilePage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	var activeLoan any
-	loan, err := s.activeLoanByMember(member.ID)
-	if err == nil {
-		activeLoan = loan
-	}
-	if err != nil && err != sql.ErrNoRows {
+	outstandingLoans, err := s.outstandingLoansByMember(member.ID)
+	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
@@ -334,12 +334,12 @@ func (s *Server) memberProfilePage(c *gin.Context) {
 		return
 	}
 	renderPage(c, "member-profile", pageData(c, "Member profile - KKSUK PD Dharma Jaya", "profile", "member_profile", member.FullName, gin.H{
-		"Member":     member,
-		"Summary":    summary,
-		"Savings":    savings,
-		"ActiveLoan": activeLoan,
-		"Repayments": repayments,
-		"ShellClass": "member-profile-shell",
+		"Member":           member,
+		"Summary":          summary,
+		"Savings":          savings,
+		"OutstandingLoans": outstandingLoans,
+		"Repayments":       repayments,
+		"ShellClass":       "member-profile-shell",
 	}))
 }
 
@@ -370,9 +370,20 @@ func (s *Server) memberLoanRequestsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	outstanding, err := s.outstandingLoansByMember(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	total := 0
+	for _, loan := range outstanding {
+		total += loan.RemainingBalance
+	}
 	renderPage(c, "member-loan-requests", pageData(c, "Loan requests - KKSUK PD Dharma Jaya", "loan-requests", "loan_requests", "track_loan_requests", gin.H{
-		"LoanRequests": requests,
-		"ShellClass":   "member-loan-requests-shell",
+		"LoanRequests":     requests,
+		"OutstandingLoans": outstanding,
+		"TotalOutstanding": total,
+		"ShellClass":       "member-loan-requests-shell",
 	}))
 }
 

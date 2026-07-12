@@ -54,6 +54,7 @@ var (
 )
 
 func (s *Server) recordLoanRepayment(c *gin.Context) {
+	lang := languageFromRequest(c)
 	user, ok := currentUser(c)
 	if !ok {
 		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication token is required")
@@ -62,21 +63,21 @@ func (s *Server) recordLoanRepayment(c *gin.Context) {
 
 	var req repaymentInput
 	if err := c.ShouldBind(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid repayment")
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_loan_repayment"))
 		return
 	}
 
 	repayment, err := s.recordRepayment(c.Param("id"), user.ID, req)
 	if errors.Is(err, errInvalidRepayment) {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Repayment amount and record date are required")
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_repayment_fields"))
 		return
 	}
 	if errors.Is(err, errRepaymentOverBalance) {
-		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Repayment amount cannot exceed remaining loan balance")
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_loan_repayment_over_balance"))
 		return
 	}
 	if errors.Is(err, errLoanNotActive) {
-		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Only active loans can receive repayments")
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_loan_repayment_status"))
 		return
 	}
 	if errors.Is(err, errLoanNotFound) {
@@ -138,7 +139,7 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 		Status           string
 	}
 	err = tx.QueryRow(
-		`SELECT member_id, remaining_balance, status FROM loans WHERE id = $1`,
+		`SELECT member_id, remaining_balance, status FROM loans WHERE id = $1`+rowLockClause(s.db),
 		loanID,
 	).Scan(&loan.MemberID, &loan.RemainingBalance, &loan.Status)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -147,7 +148,7 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 	if err != nil {
 		return LoanRepayment{}, err
 	}
-	if loan.Status != "active" {
+	if loan.Status != "active" && loan.Status != "adjustment_due" {
 		return LoanRepayment{}, errLoanNotActive
 	}
 	if req.Amount > loan.RemainingBalance {
@@ -165,14 +166,61 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 		RecordedBy:  adminID,
 	}
 
+	remaining := req.Amount
+	rows, err := tx.Query(`SELECT id,scheduled_amount,paid_amount FROM loan_installments WHERE loan_id=$1 AND paid_amount < scheduled_amount ORDER BY installment_no`, loanID)
+	if err != nil {
+		return LoanRepayment{}, err
+	}
+	type unpaidInstallment struct {
+		id              string
+		scheduled, paid int
+	}
+	var installments []unpaidInstallment
+	for rows.Next() {
+		var i unpaidInstallment
+		if err = rows.Scan(&i.id, &i.scheduled, &i.paid); err != nil {
+			rows.Close()
+			return LoanRepayment{}, err
+		}
+		installments = append(installments, i)
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return LoanRepayment{}, err
+	}
+	if err = rows.Close(); err != nil {
+		return LoanRepayment{}, err
+	}
+	for _, i := range installments {
+		if remaining == 0 {
+			break
+		}
+		applied := i.scheduled - i.paid
+		if applied > remaining {
+			applied = remaining
+		}
+		if _, err = tx.Exec(`UPDATE loan_installments SET paid_amount=paid_amount+$1 WHERE id=$2`, applied, i.id); err != nil {
+			return LoanRepayment{}, err
+		}
+		remaining -= applied
+	}
+	if remaining != 0 {
+		return LoanRepayment{}, errRepaymentOverBalance
+	}
+	newBalance := loan.RemainingBalance - req.Amount
+	newStatus := loan.Status
+	if newBalance == 0 {
+		newStatus = "paid"
+	}
+	var nextDue string
+	if newBalance > 0 {
+		if err = tx.QueryRow(`SELECT due_date FROM loan_installments WHERE loan_id=$1 AND paid_amount < scheduled_amount ORDER BY installment_no LIMIT 1`, loanID).Scan(&nextDue); err != nil {
+			return LoanRepayment{}, err
+		}
+	}
 	result, err := tx.Exec(
-		`UPDATE loans
-		SET remaining_balance = remaining_balance - $1,
-			status = CASE WHEN remaining_balance - $1 = 0 THEN 'paid' ELSE 'active' END,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = $2 AND status = 'active' AND remaining_balance >= $1`,
-		req.Amount,
-		loanID,
+		`UPDATE loans SET remaining_balance=$1,status=$2,next_due_date=$3,updated_at=CURRENT_TIMESTAMP WHERE id=$4 AND status=$5 AND remaining_balance=$6`,
+		newBalance, newStatus, nextDue, loanID, loan.Status, loan.RemainingBalance,
 	)
 	if err != nil {
 		return LoanRepayment{}, err

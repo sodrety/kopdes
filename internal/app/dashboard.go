@@ -24,6 +24,10 @@ type MemberDashboardSummary struct {
 	LatestSavings        []SavingRecord  `json:"latest_savings"`
 	LatestRepayments     []LoanRepayment `json:"latest_repayments"`
 	LoanRequests         []LoanRequest   `json:"loan_requests"`
+	OutstandingLoans     []Loan          `json:"outstanding_loans"`
+	EarliestDueDate      string          `json:"earliest_due_date"`
+	LatestFinalDueDate   string          `json:"latest_final_due_date"`
+	HasOverdueLoan       bool            `json:"has_overdue_loan"`
 }
 
 func (s *Server) memberDashboard(c *gin.Context) {
@@ -56,7 +60,7 @@ func (s *Server) adminDashboardSummary() (AdminDashboardSummary, error) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM loans WHERE status = 'active'`).Scan(&summary.ActiveLoans); err != nil {
 		return AdminDashboardSummary{}, err
 	}
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(remaining_balance), 0) FROM loans WHERE status = 'active'`).Scan(&summary.TotalOutstandingLoan); err != nil {
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(remaining_balance), 0) FROM loans WHERE status <> 'cancelled' AND remaining_balance > 0`).Scan(&summary.TotalOutstandingLoan); err != nil {
 		return AdminDashboardSummary{}, err
 	}
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM loan_requests WHERE status = 'pending'`).Scan(&summary.PendingLoanRequests); err != nil {
@@ -92,16 +96,31 @@ func (s *Server) memberDashboardSummary(memberID string) (MemberDashboardSummary
 		return MemberDashboardSummary{}, err
 	}
 
-	remainingBalance := 0
-	if activeLoan != nil {
-		remainingBalance = activeLoan.RemainingBalance
+	remainingBalance, err := s.totalOutstandingByMember(memberID)
+	if err != nil {
+		return MemberDashboardSummary{}, err
 	}
-	return MemberDashboardSummary{
+	outstanding, err := s.outstandingLoansByMember(memberID)
+	if err != nil {
+		return MemberDashboardSummary{}, err
+	}
+	summary := MemberDashboardSummary{
 		SavingBalance:        savingSummary.CurrentBalance,
 		ActiveLoan:           activeLoan,
 		RemainingLoanBalance: remainingBalance,
 		LatestSavings:        savings,
 		LatestRepayments:     repayments,
 		LoanRequests:         requests,
-	}, nil
+		OutstandingLoans:     outstanding,
+	}
+	for _, loan := range outstanding {
+		if summary.EarliestDueDate == "" || loan.NextDueDate < summary.EarliestDueDate {
+			summary.EarliestDueDate = loan.NextDueDate
+		}
+		if loan.FinalDueDate > summary.LatestFinalDueDate {
+			summary.LatestFinalDueDate = loan.FinalDueDate
+		}
+		summary.HasOverdueLoan = summary.HasOverdueLoan || loan.IsOverdue
+	}
+	return summary, nil
 }
