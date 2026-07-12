@@ -3,6 +3,9 @@
     <section class="summary-grid">
 {{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Dashboard.SavingBalance))}}
 {{template "summary-card" (dict "Label" (t .Lang "remaining_loan") "Value" (nominal .Dashboard.RemainingLoanBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "next_due_date") "Value" .Dashboard.EarliestDueDate)}}
+{{template "summary-card" (dict "Label" (t .Lang "final_due_date") "Value" .Dashboard.LatestFinalDueDate)}}
+{{if .Dashboard.HasOverdueLoan}}{{template "summary-card" (dict "Label" (t .Lang "payment_status") "Value" (t .Lang "overdue"))}}{{end}}
 {{if .Dashboard.ActiveLoan}}
 {{template "summary-card" (dict "Label" (t .Lang "active_loan") "Value" (nominal .Dashboard.ActiveLoan.ApprovedAmount))}}
 {{else}}
@@ -105,16 +108,20 @@
 {{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" (nominal .Summary.TotalDeposit))}}
 {{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" (nominal .Summary.TotalWithdrawal))}}
     </section>
-    {{if .ActiveLoan}}
+    {{if .OutstandingLoans}}
     <section class="panel">
-      <h2>{{t .Lang "active_loan"}}</h2>
+      <h2>{{t .Lang "outstanding_loans"}}</h2>
+      {{range .OutstandingLoans}}
+      {{if eq .Status "active"}}<p>{{t $.Lang "active_loan"}}</p>{{end}}
       <div class="detail-grid">
-        <div><span>{{t .Lang "approved_amount"}}</span><strong>{{nominal .ActiveLoan.ApprovedAmount}}</strong></div>
-        <div><span>{{t .Lang "monthly_installment"}}</span><strong>{{nominal .ActiveLoan.MonthlyInstallment}}</strong></div>
-        <div><span>{{t .Lang "remaining_balance"}}</span><strong>{{nominal .ActiveLoan.RemainingBalance}}</strong></div>
-        <div><span>{{t .Lang "duration"}}</span><strong>{{.ActiveLoan.DurationMonths}} {{t .Lang "months"}}</strong></div>
-        <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .ActiveLoan.Status}}</strong></div>
+        <div><span>{{t $.Lang "approved_amount"}}</span><strong>{{nominal .ApprovedAmount}}</strong></div>
+        <div><span>{{t $.Lang "monthly_installment"}}</span><strong>{{nominal .MonthlyInstallment}}</strong></div>
+        <div><span>{{t $.Lang "remaining_balance"}}</span><strong>{{nominal .RemainingBalance}}</strong></div>
+        <div><span>{{t $.Lang "next_due_date"}}</span><strong>{{.NextDueDate}}</strong></div>
+        <div><span>{{t $.Lang "final_due_date"}}</span><strong>{{.FinalDueDate}}</strong></div>
+        <div><span>{{t $.Lang "status"}}</span><strong>{{t $.Lang (printf "status_%s" .Status)}}</strong></div>
       </div>
+      {{end}}
     </section>
     {{end}}
     <section class="panel detail-grid">
@@ -235,14 +242,35 @@
 
 {{define "member-loan-requests"}}
 {{template "member-shell-start" .}}
+    {{if .OutstandingLoans}}
+    <section class="panel loan-warning" role="alert">
+      <h2>{{t .Lang "outstanding_loans"}} — Rp {{nominal .TotalOutstanding}}</h2>
+      <p>{{t .Lang "loan_request_blocked_outstanding"}}</p>
+      <div class="loan-card-grid">
+      {{range .OutstandingLoans}}
+        <article class="loan-summary-card {{if .IsOverdue}}loan-overdue{{end}}">
+          <header><strong>{{t $.Lang (printf "status_%s" .Status)}}</strong>{{if .IsOverdue}}<span>{{t $.Lang "overdue"}}</span>{{end}}</header>
+          <dl>
+            <div><dt>{{t $.Lang "remaining_balance"}}</dt><dd>Rp {{nominal .RemainingBalance}}</dd></div>
+            <div><dt>{{t $.Lang "approved_principal"}}</dt><dd>Rp {{nominal .ApprovedAmount}}</dd></div>
+            <div><dt>{{t $.Lang "start_date"}}</dt><dd>{{.StartDate}}</dd></div>
+            <div><dt>{{t $.Lang "monthly_interest_rate"}}</dt><dd>{{rate .InterestRateBPS}}</dd></div>
+            <div><dt>{{t $.Lang "next_due_date"}}</dt><dd>{{.NextDueDate}}</dd></div>
+            <div><dt>{{t $.Lang "final_due_date"}}</dt><dd>{{.FinalDueDate}}</dd></div>
+          </dl>
+        </article>
+      {{end}}
+      </div>
+    </section>
+    {{end}}
     <section class="two-column">
       <article class="panel">
         <h2>{{t .Lang "submit_loan_request"}}</h2>
         <form method="post" action="/api/member/loan-requests" hx-post="/api/member/loan-requests" hx-target="#loan-request-error" hx-swap="innerHTML">
           <label>{{t .Lang "requested_amount"}} <input name="requested_amount" type="number" min="1" required></label>
-          <label>{{t .Lang "duration_months"}} <input name="duration_months" type="number" min="1" required></label>
+          <label>{{t .Lang "duration_months"}} <input name="duration_months" type="number" min="1" max="120" required></label>
           <label>{{t .Lang "purpose"}} <input name="purpose"></label>
-          <button type="submit">{{t .Lang "submit_loan_request"}}</button>
+          <button type="submit" {{if .OutstandingLoans}}disabled aria-disabled="true" title="{{t .Lang "loan_request_blocked_outstanding"}}"{{end}}>{{t .Lang "submit_loan_request"}}</button>
         </form>
 {{template "form-error" (dict "ID" "loan-request-error")}}
       </article>

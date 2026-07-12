@@ -46,6 +46,7 @@ type rejectLoanInput struct {
 }
 
 func (s *Server) submitLoanRequest(c *gin.Context) {
+	lang := languageFromRequest(c)
 	member, ok := s.profileMember(c)
 	if !ok {
 		return
@@ -53,21 +54,25 @@ func (s *Server) submitLoanRequest(c *gin.Context) {
 
 	var req loanRequestInput
 	if err := c.ShouldBind(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid loan request")
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_loan_request"))
 		return
 	}
 
 	loanRequest, err := s.insertLoanRequest(member, req)
 	if errors.Is(err, errInvalidLoanRequest) {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Requested amount and duration months must be greater than zero")
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_request_fields"))
 		return
 	}
 	if errors.Is(err, errInactiveLoanMember) {
-		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Only active members can request loans")
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_inactive_loan_member"))
 		return
 	}
 	if errors.Is(err, errPendingLoanRequestExists) {
-		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Member already has a pending loan request")
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_pending_loan_request"))
+		return
+	}
+	if errors.Is(err, errOutstandingLoanBalance) {
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_outstanding_loan_request"))
 		return
 	}
 	if err != nil {
@@ -140,18 +145,39 @@ var (
 	errInactiveLoanMember       = errors.New("inactive loan member")
 	errPendingLoanRequestExists = errors.New("pending loan request exists")
 	errInvalidLoanRejection     = errors.New("invalid loan rejection")
+	errOutstandingLoanBalance   = errors.New("outstanding loan balance")
 )
 
 func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanRequest, error) {
-	if req.RequestedAmount <= 0 || req.DurationMonths <= 0 {
+	if req.RequestedAmount <= 0 || req.DurationMonths <= 0 || req.DurationMonths > maxLoanDurationMonths {
 		return LoanRequest{}, errInvalidLoanRequest
 	}
 	if member.Status != "active" {
 		return LoanRequest{}, errInactiveLoanMember
 	}
+	s.financialMu.Lock()
+	defer s.financialMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return LoanRequest{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// PostgreSQL serializes all outstanding/pending checks for this member.
+	// SQLite serializes writers and the in-process mutex avoids upgrade races.
+	var lockedMemberID string
+	if err := tx.QueryRow(`SELECT id FROM members WHERE id = $1`+rowLockClause(s.db), member.ID).Scan(&lockedMemberID); err != nil {
+		return LoanRequest{}, err
+	}
+	var outstanding int
+	if err := tx.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND status <> 'cancelled' AND remaining_balance > 0`, member.ID).Scan(&outstanding); err != nil {
+		return LoanRequest{}, err
+	}
+	if outstanding > 0 {
+		return LoanRequest{}, errOutstandingLoanBalance
+	}
 
 	var pendingID string
-	err := s.db.QueryRow(`SELECT id FROM loan_requests WHERE member_id = $1 AND status = 'pending' LIMIT 1`, member.ID).Scan(&pendingID)
+	err = tx.QueryRow(`SELECT id FROM loan_requests WHERE member_id = $1 AND status = 'pending' LIMIT 1`, member.ID).Scan(&pendingID)
 	if err == nil {
 		return LoanRequest{}, errPendingLoanRequestExists
 	}
@@ -167,7 +193,7 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 		Purpose:         strings.TrimSpace(req.Purpose),
 		Status:          "pending",
 	}
-	_, err = s.db.Exec(
+	_, err = tx.Exec(
 		`INSERT INTO loan_requests (id, member_id, requested_amount, duration_months, purpose, status) VALUES ($1, $2, $3, $4, $5, 'pending')`,
 		loanRequest.ID,
 		loanRequest.MemberID,
@@ -176,6 +202,15 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 		loanRequest.Purpose,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return LoanRequest{}, errPendingLoanRequestExists
+		}
+		return LoanRequest{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		if isUniqueViolation(err) {
+			return LoanRequest{}, errPendingLoanRequestExists
+		}
 		return LoanRequest{}, err
 	}
 	return loanRequest, nil

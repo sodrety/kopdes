@@ -167,8 +167,13 @@
             <tr>
               <th>{{t $.Lang "member"}}</th>
               <th>{{t $.Lang "approved_amount"}}</th>
+              <th>{{t $.Lang "start_date"}}</th>
+              <th>{{t $.Lang "monthly_interest_rate"}}</th>
+              <th>{{t $.Lang "total_obligation"}}</th>
               <th>{{t $.Lang "monthly_installment"}}</th>
               <th>{{t $.Lang "remaining_balance"}}</th>
+              <th>{{t $.Lang "next_due_date"}}</th>
+              <th>{{t $.Lang "final_due_date"}}</th>
               <th>{{t $.Lang "status"}}</th>
             </tr>
           </thead>
@@ -177,8 +182,13 @@
             <tr>
               <td>{{template "member-table-cell" .}}</td>
               <td>{{nominal .ApprovedAmount}}</td>
+              <td>{{.StartDate}}</td>
+              <td>{{rate .InterestRateBPS}}</td>
+              <td>{{nominal .TotalObligation}}</td>
               <td>{{nominal .MonthlyInstallment}}</td>
               <td>{{nominal .RemainingBalance}}</td>
+              <td>{{.NextDueDate}}</td>
+              <td>{{.FinalDueDate}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
             </tr>
             {{end}}
@@ -656,15 +666,18 @@
         {{end}}
       </section>
       <section class="panel">
-        <h2>{{t .Lang "active_loan"}}</h2>
-        {{if .ActiveLoan}}
+        <h2>{{t .Lang "outstanding_loans"}}</h2>
+        {{if .OutstandingLoans}}
+        {{range .OutstandingLoans}}
+        {{if eq .Status "active"}}<p>{{t $.Lang "active_loan"}}</p>{{end}}
         <div class="detail-grid">
-          <div><span>{{t .Lang "approved_amount"}}</span><strong>{{nominal .ActiveLoan.ApprovedAmount}}</strong></div>
-          <div><span>{{t .Lang "monthly_installment"}}</span><strong>{{nominal .ActiveLoan.MonthlyInstallment}}</strong></div>
-          <div><span>{{t .Lang "remaining_balance"}}</span><strong>{{nominal .ActiveLoan.RemainingBalance}}</strong></div>
-          <div><span>{{t .Lang "duration"}}</span><strong>{{.ActiveLoan.DurationMonths}} {{t .Lang "months"}}</strong></div>
-          <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .ActiveLoan.Status}}</strong></div>
+          <div><span>{{t $.Lang "approved_amount"}}</span><strong>{{nominal .ApprovedAmount}}</strong></div>
+          <div><span>{{t $.Lang "remaining_balance"}}</span><strong>{{nominal .RemainingBalance}}</strong></div>
+          <div><span>{{t $.Lang "next_due_date"}}</span><strong>{{.NextDueDate}}</strong></div>
+          <div><span>{{t $.Lang "final_due_date"}}</span><strong>{{.FinalDueDate}}</strong></div>
+          <div><span>{{t $.Lang "status"}}</span><strong>{{t $.Lang (printf "status_%s" .Status)}}</strong></div>
         </div>
+        {{end}}
         {{else}}
 {{template "empty-state" (t .Lang "no_active_loan")}}
         {{end}}
@@ -696,6 +709,35 @@
 {{template "empty-state" (t .Lang "no_repayment_records")}}
         {{end}}
       </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-loan-detail"}}
+{{template "admin-shell-start" .}}
+      <section class="page-actions">
+        <a class="button-link button-link-secondary" href="/api/admin/loans/{{.Loan.ID}}/export.pdf">{{t .Lang "export_pdf"}}</a>
+      </section>
+      <section class="panel {{if .Loan.IsOverdue}}loan-warning{{end}}">
+        <h2>{{t .Lang "loan_detail"}}</h2>
+        <div class="detail-grid">
+          <div><span>{{t .Lang "approved_principal"}}</span><strong>Rp {{nominal .Loan.ApprovedAmount}}</strong></div>
+          <div><span>{{t .Lang "monthly_interest_rate"}}</span><strong>{{rate .Loan.InterestRateBPS}}</strong></div>
+          <div><span>{{t .Lang "total_interest"}}</span><strong>Rp {{nominal .Loan.TotalInterest}}</strong></div>
+          <div><span>{{t .Lang "total_obligation"}}</span><strong>Rp {{nominal .Loan.TotalObligation}}</strong></div>
+          <div><span>{{t .Lang "remaining_balance"}}</span><strong>Rp {{nominal .Loan.RemainingBalance}}</strong></div>
+          <div><span>{{t .Lang "start_date"}}</span><strong>{{.Loan.StartDate}}</strong></div>
+          <div><span>{{t .Lang "next_due_date"}}</span><strong>{{.Loan.NextDueDate}}</strong></div>
+          <div><span>{{t .Lang "final_due_date"}}</span><strong>{{.Loan.FinalDueDate}}</strong></div>
+          <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang (printf "status_%s" .Loan.Status)}}</strong></div>
+        </div>
+        {{if .Loan.IsOverdue}}<p class="overdue-label">{{t .Lang "overdue"}}</p>{{end}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "installment_schedule"}}</h2>
+        {{if .Installments}}{{template "table-open" .}}<thead><tr><th>#</th><th>{{t $.Lang "due_date"}}</th><th>{{t $.Lang "scheduled_amount"}}</th><th>{{t $.Lang "paid_amount"}}</th><th>{{t $.Lang "unpaid_amount"}}</th></tr></thead><tbody>{{range .Installments}}<tr><td>{{.InstallmentNo}}</td><td>{{.DueDate}}</td><td>{{nominal .ScheduledAmount}}</td><td>{{nominal .PaidAmount}}</td><td>{{nominal (sub .ScheduledAmount .PaidAmount)}}</td></tr>{{end}}</tbody>{{template "table-close" .}}{{else}}{{template "empty-state" (t .Lang "no_installments")}}{{end}}
+      </section>
+      {{if .CanCorrectStartDate}}<section class="panel"><h2>{{t .Lang "correct_start_date"}}</h2><form method="post" action="/api/admin/loans/{{.Loan.ID}}/start-date" hx-post="/api/admin/loans/{{.Loan.ID}}/start-date"><label>{{t .Lang "start_date"}} <input type="date" name="start_date" value="{{.Loan.StartDate}}" required></label><button type="submit">{{t .Lang "save"}}</button></form></section>{{end}}
+      <section class="panel"><h2>{{t .Lang "start_date_history"}}</h2>{{if .Audits}}{{template "table-open" .}}<thead><tr><th>{{t $.Lang "old_date"}}</th><th>{{t $.Lang "new_date"}}</th><th>{{t $.Lang "changed_by"}}</th><th>{{t $.Lang "date"}}</th></tr></thead><tbody>{{range .Audits}}<tr><td>{{.OldStartDate}}</td><td>{{.NewStartDate}}</td><td>{{.ChangedBy}}</td><td>{{.CreatedAt}}</td></tr>{{end}}</tbody>{{template "table-close" .}}{{else}}{{template "empty-state" (t .Lang "no_start_date_changes")}}{{end}}</section>
 {{template "admin-shell-end" .}}
 {{end}}
 
@@ -774,7 +816,9 @@
               <td class="review-cell">
                 <form class="inline-approval-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/approve" hx-post="/api/admin/loan-requests/{{.ID}}/approve" hx-target="#loan-review-error" hx-swap="innerHTML">
                   <label>{{t $.Lang "approved_amount"}} <input name="approved_amount" type="number" min="1" value="{{.RequestedAmount}}" aria-label="{{t $.Lang "approved_amount"}}"></label>
-                  <label>{{t $.Lang "duration"}} <input name="duration_months" type="number" min="1" value="{{.DurationMonths}}" aria-label="{{t $.Lang "duration_months"}}"></label>
+                  <label>{{t $.Lang "duration"}} <input name="duration_months" type="number" min="1" max="120" value="{{.DurationMonths}}" aria-label="{{t $.Lang "duration_months"}}"></label>
+                  <label>{{t $.Lang "start_date"}} <input name="start_date" type="date" required aria-label="{{t $.Lang "start_date"}}"></label>
+                  <label>{{t $.Lang "monthly_interest_rate"}} <input name="interest_rate_percent" type="number" min="0.00" max="10.00" step="0.01" value="1.00" required aria-label="{{t $.Lang "monthly_interest_rate"}}"></label>
                   <div class="table-actions">
                     <button type="submit">{{t $.Lang "approve"}}</button>
                   </div>
@@ -799,7 +843,7 @@
 {{define "admin-loans"}}
 {{template "admin-shell-start" .}}
       <section class="page-actions">
-        <a class="button-link button-link-secondary" href="/api/admin/exports/loans.csv?status=active">{{t .Lang "export_csv"}}</a>
+        <a class="button-link button-link-secondary" href="/api/admin/exports/loans.csv">{{t .Lang "export_csv"}}</a>
       </section>
       <section class="panel">
         {{if .Loans}}
@@ -810,21 +854,25 @@
               <th>{{t $.Lang "approved"}}</th>
               <th>{{t $.Lang "installment"}}</th>
               <th>{{t $.Lang "remaining"}}</th>
+              <th>{{t $.Lang "final_due_date"}}</th>
               <th>{{t $.Lang "duration"}}</th>
               <th>{{t $.Lang "status"}}</th>
               <th>{{t $.Lang "repayment"}}</th>
+              <th>{{t $.Lang "details"}}</th>
             </tr>
           </thead>
           <tbody>
             {{range .Loans}}
-            <tr>
+            <tr class="{{if .IsOverdue}}loan-overdue-row{{end}}">
               <td>{{template "member-table-cell" .}}</td>
               <td>{{nominal .ApprovedAmount}}</td>
               <td>{{nominal .MonthlyInstallment}}</td>
               <td>{{nominal .RemainingBalance}}</td>
+              <td>{{.FinalDueDate}}{{if .IsOverdue}} <strong>{{t $.Lang "overdue"}}</strong>{{end}}</td>
               <td>{{.DurationMonths}} {{t $.Lang "months"}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>
+                {{if or (eq .Status "active") (eq .Status "adjustment_due")}}
                 <form class="inline-repayment-form" method="post" action="/api/admin/loans/{{.ID}}/repayments" hx-post="/api/admin/loans/{{.ID}}/repayments" hx-target="#repayment-form-error" hx-swap="innerHTML">
                   <input name="amount" type="number" min="1" max="{{.RemainingBalance}}" placeholder="{{t $.Lang "amount"}}" aria-label="{{t $.Lang "repayment_amount"}}">
                   <input name="record_date" type="date" aria-label="{{t $.Lang "repayment_date"}}">
@@ -832,7 +880,9 @@
                   <input name="note" placeholder="{{t $.Lang "note"}}" aria-label="{{t $.Lang "repayment_note"}}">
                   <button type="submit">{{t $.Lang "record_repayment"}}</button>
                 </form>
+                {{end}}
               </td>
+              <td><a class="button-link button-link-secondary" href="/admin/loans/{{.ID}}">{{t $.Lang "view_details"}}</a></td>
             </tr>
             {{end}}
           </tbody>

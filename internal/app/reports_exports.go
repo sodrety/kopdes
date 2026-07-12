@@ -232,24 +232,40 @@ func writeProfitLossReportCSV(c *gin.Context, report ProfitLossReport) {
 }
 
 func writeReportPDF(c *gin.Context, filename, title string, lines []string) {
-	content := strings.Builder{}
-	content.WriteString("BT /F1 16 Tf 50 790 Td (")
-	content.WriteString(escapePDFText(title))
-	content.WriteString(") Tj /F1 11 Tf 0 -28 Td ")
-	for _, line := range lines {
-		content.WriteString("(")
-		content.WriteString(escapePDFText(line))
-		content.WriteString(") Tj 0 -18 Td ")
+	const linesPerPage = 38
+	pageCount := (len(lines) + linesPerPage - 1) / linesPerPage
+	if pageCount == 0 {
+		pageCount = 1
 	}
-	content.WriteString("ET")
-
-	objects := []string{
-		"<< /Type /Catalog /Pages 2 0 R >>",
-		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
-		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", content.Len(), content.String()),
-		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+	fontObject := 3 + pageCount*2
+	objects := []string{"<< /Type /Catalog /Pages 2 0 R >>"}
+	kids := make([]string, 0, pageCount)
+	for page := 0; page < pageCount; page++ {
+		kids = append(kids, fmt.Sprintf("%d 0 R", 3+page*2))
 	}
+	objects = append(objects, fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), pageCount))
+	for page := 0; page < pageCount; page++ {
+		content := strings.Builder{}
+		content.WriteString("BT /F1 16 Tf 50 790 Td (")
+		content.WriteString(escapePDFText(title))
+		content.WriteString(") Tj /F1 11 Tf 0 -28 Td ")
+		start := page * linesPerPage
+		end := start + linesPerPage
+		if end > len(lines) {
+			end = len(lines)
+		}
+		for _, line := range lines[start:end] {
+			content.WriteString("(")
+			content.WriteString(escapePDFText(line))
+			content.WriteString(") Tj 0 -18 Td ")
+		}
+		content.WriteString("ET")
+		contentObject := 4 + page*2
+		objects = append(objects,
+			fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>", fontObject, contentObject),
+			fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", content.Len(), content.String()))
+	}
+	objects = append(objects, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
 	var pdf bytes.Buffer
 	pdf.WriteString("%PDF-1.4\n")
 	offsets := make([]int, len(objects)+1)
@@ -549,16 +565,16 @@ func (s *Server) withdrawalStatusChart() (ChartSegments, error) {
 }
 
 func (s *Server) loanExposureChart() (ChartSegments, error) {
-	var approved, remaining int
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(approved_amount), 0), COALESCE(SUM(remaining_balance), 0) FROM loans WHERE status = 'active'`).Scan(&approved, &remaining); err != nil {
+	var approved, obligation, remaining, repaid int
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(approved_amount), 0), COALESCE(SUM(total_obligation), 0), COALESCE(SUM(remaining_balance), 0) FROM loans WHERE status <> 'cancelled'`).Scan(&approved, &obligation, &remaining); err != nil {
 		return nil, err
 	}
-	repaid := approved - remaining
-	if repaid < 0 {
-		repaid = 0
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0) FROM loan_repayments`).Scan(&repaid); err != nil {
+		return nil, err
 	}
 	return chartSegments([]ChartSegment{
 		{Label: "approved_principal", Value: approved, Class: "chart-pinjaman"},
+		{Label: "total_obligation", Value: obligation, Class: "chart-warning"},
 		{Label: "remaining_balance", Value: remaining, Class: "chart-pinjaman"},
 		{Label: "actual_repayment", Value: repaid, Class: "chart-simpanan"},
 	}), nil
@@ -566,7 +582,10 @@ func (s *Server) loanExposureChart() (ChartSegments, error) {
 
 func (s *Server) repaymentProgressChart() (ChartSegments, error) {
 	var scheduled, actual int
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(approved_amount), 0), COALESCE(SUM(approved_amount - remaining_balance), 0) FROM loans`).Scan(&scheduled, &actual); err != nil {
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(total_obligation), 0) FROM loans WHERE status <> 'cancelled'`).Scan(&scheduled); err != nil {
+		return nil, err
+	}
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0) FROM loan_repayments`).Scan(&actual); err != nil {
 		return nil, err
 	}
 	return chartSegments([]ChartSegment{
@@ -871,9 +890,9 @@ func (s *Server) exportLoansCSV(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	writeCSV(c, "pinjaman-export.csv", []string{"member_no", "member", "approved_amount", "duration_months", "monthly_installment", "remaining_balance", "status", "approved_at"}, func(w *csv.Writer) error {
+	writeCSV(c, "pinjaman-export.csv", []string{"member_no", "member", "approved_amount", "duration_months", "monthly_installment", "remaining_balance", "status", "approved_at", "start_date", "interest_rate_bps", "total_interest", "total_obligation", "next_due_date", "final_due_date"}, func(w *csv.Writer) error {
 		for _, loan := range loans {
-			if err := w.Write([]string{loan.MemberNo, loan.FullName, strconv.Itoa(loan.ApprovedAmount), strconv.Itoa(loan.DurationMonths), strconv.Itoa(loan.MonthlyInstallment), strconv.Itoa(loan.RemainingBalance), loan.Status, loan.ApprovedAt}); err != nil {
+			if err := w.Write([]string{loan.MemberNo, loan.FullName, strconv.Itoa(loan.ApprovedAmount), strconv.Itoa(loan.DurationMonths), strconv.Itoa(loan.MonthlyInstallment), strconv.Itoa(loan.RemainingBalance), loan.Status, loan.ApprovedAt, loan.StartDate, strconv.Itoa(loan.InterestRateBPS), strconv.Itoa(loan.TotalInterest), strconv.Itoa(loan.TotalObligation), loan.NextDueDate, loan.FinalDueDate}); err != nil {
 				return err
 			}
 		}

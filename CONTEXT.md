@@ -65,7 +65,7 @@ The Bahasa-first product label for the cooperative loan area, including **Loan R
 _Avoid_: Using Pinjaman alone when the distinction between a **Loan Request** and a **Loan** matters
 
 **Bunga**:
-A flat monthly interest amount calculated from a **Loan**'s approved principal.
+A flat monthly interest amount calculated once from a **Loan**'s approved principal, basis-point rate, and tenor, then rounded to whole Rupiah using half-up rounding.
 _Avoid_: Declining-balance interest, penalty, fee
 
 **Repayment Record**:
@@ -80,6 +80,14 @@ _Avoid_: Payment when the system only records verified external activity
 **Installment Schedule**:
 The expected monthly **Angsuran** rows generated from an approved **Loan**'s principal, tenor, and flat monthly **Bunga**.
 _Avoid_: Treating scheduled rows as proof that money was received
+
+**Loan Start Date**:
+The exact Jakarta calendar date on which an approved **Loan** is disbursed. Its original day anchors every monthly installment deadline, with invalid month days clamped to the final valid day.
+_Avoid_: Request submission date, a timestamp used without Jakarta conversion
+
+**Adjustment Due**:
+The internal status for a historically paid **Loan** reopened by retroactive **Bunga**. It carries a Remaining Balance but does not count as the Member's one active Loan.
+_Avoid_: Marking multiple historical Loans active
 
 **Remaining Balance**:
 The unpaid amount still owed on a **Loan**, including approved principal and scheduled **Bunga**.
@@ -105,10 +113,13 @@ _Avoid_: Renaming stable internal enum values only to match display text
 - A **Member** may have many **Loan Requests**.
 - A **Loan Request** may create zero or one **Loan**.
 - A **Member** may have at most one active **Loan**.
+- A **Member** may have multiple historical **Adjustment Due** Loans, and cannot submit a new **Loan Request** while any Loan has a positive **Remaining Balance**.
+- A cancelled **Loan** is a void obligation: it has no Bunga, schedule, or Remaining Balance and never blocks a new **Loan Request**.
 - A **Loan** has one generated **Installment Schedule**.
 - A **Loan** has many **Repayment Records**.
 - A **Loan** may include **Bunga** as part of its scheduled **Angsuran**.
 - A **Repayment Record** may be partial, exact, or extra relative to scheduled **Angsuran** rows.
+- **Repayment Records** cover the oldest unpaid **Installment Schedule** row first; partial coverage remains unpaid and may become overdue without adding penalties or Bunga.
 - A **Saving Balance** is derived from **Saving Records**.
 - A **Remaining Balance** is reduced by **Repayment Records**.
 - **Simpanan** contains **Saving Records** and derived **Saving Balances**.

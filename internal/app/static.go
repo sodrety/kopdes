@@ -2511,6 +2511,17 @@ td:nth-child(n+2):not(.review-cell) {
   .member-loan-requests-shell .panel {
     border-radius: var(--radius-lg);
   }
+}
+.loan-warning { border-left: 5px solid var(--warning); background: var(--warning-pale); }
+.loan-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }
+.loan-summary-card { background: var(--canvas); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 16px; }
+.loan-summary-card header { display: flex; justify-content: space-between; gap: 12px; }
+.loan-summary-card dl { margin: 12px 0 0; display: grid; gap: 8px; }
+.loan-summary-card dl div { display: flex; justify-content: space-between; gap: 12px; }
+.loan-summary-card dd { margin: 0; font-weight: 700; text-align: right; }
+.loan-overdue, .loan-overdue-row { background: var(--negative-pale); }
+.overdue-label, .loan-overdue-row strong { color: var(--negative); font-weight: 800; }
+button:disabled { cursor: not-allowed; opacity: .55; }
 }`
 
 func (s *Server) staticCSS(c *gin.Context) {
