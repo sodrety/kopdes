@@ -149,7 +149,8 @@ func TestOfficerPermissionsForcedPasswordChangeAndImmediateSessionInvalidation(t
 		t.Fatalf("Manager Officer administration should be forbidden, got %d", response.Code)
 	}
 
-	response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/officers", ketuaUtamaToken, `{"full_name":"New Manager","email":"new-manager@coop.test","role":"manager","password":"temporary123"}`)
+	member := fixture.createMember(t, managerToken, `{"member_no":"OFF-001","full_name":"New Manager","join_date":"2026-07-01","status":"active"}`)
+	response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/officers", ketuaUtamaToken, `{"member_id":"`+member.ID+`","email":"new-manager@coop.test","role":"manager","password":"temporary123"}`)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create officer: %d: %s", response.Code, response.Body.String())
 	}
@@ -234,6 +235,95 @@ func TestApprovalNotificationsMoveToNextRoleAndFinishWithMember(t *testing.T) {
 	}
 	if events != 5 {
 		t.Fatalf("expected four stage events and one outcome event, got %d", events)
+	}
+}
+
+func TestExistingMemberKeepsOneLoginAcrossMemberAndOfficerAreas(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	ketuaUtamaToken := fixture.login(t, "ketua-utama@coop.test", "password")
+	member := fixture.createMember(t, managerToken, `{"member_no":"DUAL-001","full_name":"Dual Role Member","join_date":"2026-07-14","status":"active","email":"dual-role@coop.test","password":"member-password"}`)
+
+	var userID, originalHash string
+	if err := fixture.db.QueryRow(`SELECT id,password_hash FROM users WHERE member_id=$1`, member.ID).Scan(&userID, &originalHash); err != nil {
+		t.Fatalf("read Member login: %v", err)
+	}
+	response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/officers", ketuaUtamaToken, `{"member_id":"`+member.ID+`","role":"manager"}`)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("appoint existing Member: %d: %s", response.Code, response.Body.String())
+	}
+	var officer struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &officer); err != nil || officer.ID == "" {
+		t.Fatalf("decode appointment: %v body=%s", err, response.Body.String())
+	}
+	var currentHash string
+	var userCount int
+	if err := fixture.db.QueryRow(`SELECT password_hash FROM users WHERE id=$1`, userID).Scan(&currentHash); err != nil {
+		t.Fatalf("read retained login: %v", err)
+	}
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM users WHERE member_id=$1 AND historical_identity=FALSE`, member.ID).Scan(&userCount); err != nil {
+		t.Fatalf("count current Member logins: %v", err)
+	}
+	if currentHash != originalHash || userCount != 1 {
+		t.Fatalf("appointment replaced Member credentials: hash changed=%v users=%d", currentHash != originalHash, userCount)
+	}
+
+	dualToken := fixture.login(t, "dual-role@coop.test", "member-password")
+	if response = hierarchyRequest(fixture, http.MethodGet, "/api/member/dashboard", dualToken, ""); response.Code != http.StatusOK {
+		t.Fatalf("Officer should retain Member Area: %d: %s", response.Code, response.Body.String())
+	}
+	if response = hierarchyRequest(fixture, http.MethodGet, "/api/admin/dashboard", dualToken, ""); response.Code != http.StatusOK {
+		t.Fatalf("appointed Member should gain Admin Area: %d: %s", response.Code, response.Body.String())
+	}
+
+	requestID := fixture.createLoanRequest(t, dualToken, 250_000, 5)
+	body := `{"approved_amount":250000,"duration_months":5,"start_date":"` + time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02") + `"}`
+	if response = hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", dualToken, body); response.Code != http.StatusOK {
+		t.Fatalf("self approval at assigned stage should be allowed: %d: %s", response.Code, response.Body.String())
+	}
+	var snapshotMemberID, snapshotMemberNo, snapshotRole string
+	if err := fixture.db.QueryRow(`SELECT officer_member_id,officer_member_no,officer_role FROM loan_request_approvals WHERE request_id=$1 AND stage='manager'`, requestID).Scan(&snapshotMemberID, &snapshotMemberNo, &snapshotRole); err != nil {
+		t.Fatalf("read immutable approval snapshot: %v", err)
+	}
+	if snapshotMemberID != member.ID || snapshotMemberNo != "DUAL-001" || snapshotRole != "manager" {
+		t.Fatalf("unexpected approval snapshot: member=%q number=%q role=%q", snapshotMemberID, snapshotMemberNo, snapshotRole)
+	}
+
+	if _, err := fixture.db.Exec(`UPDATE members SET status='inactive',updated_at=CURRENT_TIMESTAMP WHERE id=$1`, member.ID); err != nil {
+		t.Fatalf("deactivate Member: %v", err)
+	}
+	if response = hierarchyRequest(fixture, http.MethodGet, "/api/member/dashboard", dualToken, ""); response.Code != http.StatusUnauthorized {
+		t.Fatalf("membership change should invalidate existing session, got %d", response.Code)
+	}
+	if _, err := fixture.db.Exec(`UPDATE members SET status='active',updated_at=CURRENT_TIMESTAMP WHERE id=$1`, member.ID); err != nil {
+		t.Fatalf("reactivate Member: %v", err)
+	}
+	var appointmentActive bool
+	if err := fixture.db.QueryRow(`SELECT active FROM officer_appointments WHERE id=$1`, officer.ID).Scan(&appointmentActive); err != nil {
+		t.Fatalf("read suspended appointment: %v", err)
+	}
+	if appointmentActive {
+		t.Fatal("Member reactivation must not automatically restore Officer authority")
+	}
+	memberOnlyToken := fixture.login(t, "dual-role@coop.test", "member-password")
+	if response = hierarchyRequest(fixture, http.MethodGet, "/api/member/dashboard", memberOnlyToken, ""); response.Code != http.StatusOK {
+		t.Fatalf("reactivated Member should regain Member Area: %d: %s", response.Code, response.Body.String())
+	}
+	if response = hierarchyRequest(fixture, http.MethodGet, "/api/admin/dashboard", memberOnlyToken, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("suspended appointment should not regain Admin Area, got %d", response.Code)
+	}
+}
+
+func TestDatabaseProtectsLastActiveKetuaUtamaMember(t *testing.T) {
+	fixture := newTestFixture(t)
+	var memberID string
+	if err := fixture.db.QueryRow(`SELECT member_id FROM officer_appointments WHERE role='ketua_utama' AND active=TRUE`).Scan(&memberID); err != nil {
+		t.Fatalf("read Ketua Utama Member: %v", err)
+	}
+	if _, err := fixture.db.Exec(`UPDATE members SET status='inactive' WHERE id=$1`, memberID); err == nil {
+		t.Fatal("database must reject deactivation of the last active Ketua Utama Member")
 	}
 }
 

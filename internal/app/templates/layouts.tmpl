@@ -250,7 +250,8 @@
     <main class="page-shell">
       <header class="admin-topbar">
         <button class="sidebar-toggle" type="button" aria-label="{{t .Lang "toggle_sidebar"}}" onclick="document.body.classList.toggle('sidebar-collapsed')">☰</button>
-        <a class="button-link button-link-secondary" href="/notifications" title="{{t .Lang "notifications"}}">{{t .Lang "notifications"}}{{if gt .UnreadNotifications 0}} ({{.UnreadNotifications}}){{end}}</a>
+        <a class="button-link button-link-secondary" href="/member/dashboard" title="{{t .Lang "switch_member_area"}}">{{t .Lang "switch_member_area"}}</a>
+        <a class="button-link button-link-secondary" href="/admin/notifications" title="{{t .Lang "notifications"}}">{{t .Lang "notifications"}}{{if gt .UnreadNotifications 0}} ({{.UnreadNotifications}}){{end}}</a>
 {{template "language-form" .}}
         <form class="logout-form" method="post" action="/logout">
           <button class="button-secondary" type="submit">{{t .Lang "logout"}}</button>
@@ -278,7 +279,8 @@
         <a href="/member/profile">{{t .Lang "profile"}}</a>
         <a href="/member/withdrawal-requests">{{t .Lang "withdrawal_requests"}}</a>
         <a href="/member/loan-requests">{{t .Lang "loan_requests"}}</a>
-        <a href="/notifications">{{t .Lang "notifications"}}{{if gt .UnreadNotifications 0}} ({{.UnreadNotifications}}){{end}}</a>
+        <a href="/member/notifications">{{t .Lang "notifications"}}{{if gt .UnreadNotifications 0}} ({{.UnreadNotifications}}){{end}}</a>
+        {{if ne .Role "member"}}<a href="/admin/dashboard">{{t .Lang "switch_admin_area"}}</a>{{end}}
       </nav>
 {{end}}
 

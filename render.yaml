@@ -35,9 +35,11 @@ services:
         sync: false
       - key: TRACING_INSECURE
         sync: false
-      - key: KETUA_UTAMA_NAME
+      - key: KETUA_UTAMA_MEMBER_ID
         sync: false
       - key: KETUA_UTAMA_EMAIL
         sync: false
       - key: KETUA_UTAMA_PASSWORD
+        sync: false
+      - key: LEGACY_OFFICER_MEMBER_MAPPINGS
         sync: false

@@ -142,6 +142,9 @@ func TestLoanScheduleMigrationPreservesLegacyTenorAboveCurrentLimit(t *testing.T
 			t.Fatal(err)
 		}
 	}
+	if err := PrepareLegacyOfficerMappings(db, map[string]string{"admin": "member"}); err != nil {
+		t.Fatalf("prepare legacy Officer mapping: %v", err)
+	}
 	for _, migration := range migrations[8:] {
 		if err := applyMigration(db, migration); err != nil {
 			t.Fatalf("apply migration %d: %v", migration.Version, err)

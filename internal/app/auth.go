@@ -18,6 +18,8 @@ type User struct {
 	Email              string
 	Role               string
 	MemberID           sql.NullString
+	MemberNo           string
+	MemberStatus       string
 	FullName           string
 	Active             bool
 	MustChangePassword bool
@@ -43,48 +45,78 @@ func EnsureAdminUser(db *sql.DB, email, password string) error {
 	if err != nil {
 		return err
 	}
-
-	_, err = db.Exec(
-		`INSERT INTO users (id, email, password_hash, role, full_name, active, must_change_password) VALUES ($1, $2, $3, 'manager', $4, TRUE, FALSE)`,
-		newID(),
-		email,
-		string(hash),
-		email,
-	)
-	return err
-}
-
-func EnsureKetuaUtamaUser(db *sql.DB, fullName, email, password string) error {
-	fullName = strings.TrimSpace(fullName)
-	email = strings.ToLower(strings.TrimSpace(email))
-	if fullName == "" && email == "" && password == "" {
-		return nil
-	}
-	if fullName == "" || email == "" || password == "" {
-		return errors.New("KETUA_UTAMA_NAME, KETUA_UTAMA_EMAIL, and KETUA_UTAMA_PASSWORD must be provided together")
-	}
-
-	var existingRole string
-	err := db.QueryRow(`SELECT role FROM users WHERE email = $1`, email).Scan(&existingRole)
-	if err == nil {
-		if existingRole != "ketua_utama" {
-			return fmt.Errorf("bootstrap email already belongs to role %s", existingRole)
-		}
-		return nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(
-		`INSERT INTO users (id, email, password_hash, role, full_name, active, must_change_password) VALUES ($1, $2, $3, 'ketua_utama', $4, TRUE, FALSE)`,
-		newID(), email, string(hash), fullName,
-	)
-	return err
+	defer func() { _ = tx.Rollback() }()
+	memberID := newID()
+	userID := newID()
+	memberNo := "BOOTSTRAP-" + strings.ToUpper(memberID[:8])
+	if _, err := tx.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ($1,$2,$3,$4,'active')`, memberID, memberNo, email, time.Now().Format("2006-01-02")); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO users (id,email,password_hash,role,member_id,full_name,active,must_change_password,historical_identity) VALUES ($1,$2,$3,'member',$4,$5,TRUE,FALSE,FALSE)`, userID, email, string(hash), memberID, email); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO officer_appointments (id,member_id,role,active) VALUES ($1,$2,'manager',TRUE)`, newID(), memberID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func EnsureKetuaUtamaUser(db *sql.DB, memberID, email, password string) error {
+	memberID = strings.TrimSpace(memberID)
+	email = strings.ToLower(strings.TrimSpace(email))
+	if memberID == "" && email == "" && password == "" {
+		return nil
+	}
+	if memberID == "" {
+		return errors.New("KETUA_UTAMA_MEMBER_ID is required for Ketua Utama bootstrap")
+	}
+	var fullName, status string
+	if err := db.QueryRow(`SELECT full_name,status FROM members WHERE id=$1`, memberID).Scan(&fullName, &status); err != nil {
+		return fmt.Errorf("load Ketua Utama Member: %w", err)
+	}
+	if status != "active" {
+		return errors.New("KETUA_UTAMA_MEMBER_ID must identify an active Member")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var userID string
+	err = tx.QueryRow(`SELECT id FROM users WHERE member_id=$1 AND historical_identity=FALSE`, memberID).Scan(&userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if email == "" || len(password) < 8 {
+			return errors.New("KETUA_UTAMA_EMAIL and KETUA_UTAMA_PASSWORD are required when the Member has no User")
+		}
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return hashErr
+		}
+		userID = newID()
+		if _, err := tx.Exec(`INSERT INTO users (id,email,password_hash,role,member_id,full_name,active,must_change_password,historical_identity) VALUES ($1,$2,$3,'member',$4,$5,TRUE,TRUE,FALSE)`, userID, email, string(hash), memberID, fullName); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	var appointmentID string
+	err = tx.QueryRow(`SELECT id FROM officer_appointments WHERE member_id=$1`, memberID).Scan(&appointmentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, err = tx.Exec(`INSERT INTO officer_appointments (id,member_id,role,active) VALUES ($1,$2,'ketua_utama',TRUE)`, newID(), memberID)
+	} else if err == nil {
+		_, err = tx.Exec(`UPDATE officer_appointments SET role='ketua_utama',active=TRUE,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, appointmentID)
+	}
+	if err != nil {
+		return err
+	}
+	if err := syncOfficerNotifications(tx, userID, "ketua_utama", true); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func CreateMemberUser(db *sql.DB, email, password, memberID string) (User, error) {
@@ -102,7 +134,7 @@ func CreateMemberUser(db *sql.DB, email, password, memberID string) (User, error
 		MustChangePassword: false,
 	}
 	_, err = db.Exec(
-		`INSERT INTO users (id, email, password_hash, role, member_id) VALUES ($1, $2, $3, 'member', $4)`,
+		`INSERT INTO users (id, email, password_hash, role, member_id, historical_identity) VALUES ($1, $2, $3, 'member', $4, FALSE)`,
 		user.ID,
 		user.Email,
 		string(hash),
@@ -118,16 +150,18 @@ func AuthenticateUser(db *sql.DB, email, password string) (User, error) {
 	var user User
 	var passwordHash string
 	err := db.QueryRow(
-		`SELECT id, email, password_hash, role, member_id, full_name, active, must_change_password FROM users WHERE email = $1`,
+		`SELECT u.id,u.email,u.password_hash,COALESCE(CASE WHEN oa.active=TRUE AND m.status='active' THEN oa.role END,'member'),u.member_id,m.member_no,m.status,m.full_name,u.active,u.must_change_password
+		 FROM users u JOIN members m ON m.id=u.member_id LEFT JOIN officer_appointments oa ON oa.member_id=m.id
+		 WHERE LOWER(u.email)=LOWER($1) AND u.historical_identity=FALSE`,
 		email,
-	).Scan(&user.ID, &user.Email, &passwordHash, &user.Role, &user.MemberID, &user.FullName, &user.Active, &user.MustChangePassword)
+	).Scan(&user.ID, &user.Email, &passwordHash, &user.Role, &user.MemberID, &user.MemberNo, &user.MemberStatus, &user.FullName, &user.Active, &user.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrInvalidCredentials
 	}
 	if err != nil {
 		return User{}, err
 	}
-	if !user.Active {
+	if !user.Active || user.MemberStatus != "active" {
 		return User{}, ErrInvalidCredentials
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
@@ -139,9 +173,11 @@ func AuthenticateUser(db *sql.DB, email, password string) (User, error) {
 func UserByID(db *sql.DB, id string) (User, error) {
 	var user User
 	err := db.QueryRow(
-		`SELECT id, email, role, member_id, full_name, active, must_change_password FROM users WHERE id = $1`,
+		`SELECT u.id,u.email,COALESCE(CASE WHEN oa.active=TRUE AND m.status='active' THEN oa.role END,'member'),u.member_id,m.member_no,m.status,m.full_name,u.active,u.must_change_password
+		 FROM users u JOIN members m ON m.id=u.member_id LEFT JOIN officer_appointments oa ON oa.member_id=m.id
+		 WHERE u.id=$1 AND u.historical_identity=FALSE`,
 		id,
-	).Scan(&user.ID, &user.Email, &user.Role, &user.MemberID, &user.FullName, &user.Active, &user.MustChangePassword)
+	).Scan(&user.ID, &user.Email, &user.Role, &user.MemberID, &user.MemberNo, &user.MemberStatus, &user.FullName, &user.Active, &user.MustChangePassword)
 	return user, err
 }
 

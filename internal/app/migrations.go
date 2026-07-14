@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -180,6 +181,14 @@ var migrations = []migration{
 		Version: 12,
 		Name:    "add_officer_hierarchy_and_approvals",
 	},
+	{
+		Version: 13,
+		Name:    "add_member_backed_officer_appointments",
+	},
+	{
+		Version: 14,
+		Name:    "lock_officer_trigger_function_search_path",
+	},
 }
 
 func Migrate(db *sql.DB) error {
@@ -290,6 +299,16 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 			return err
 		}
 	}
+	if migration.Version == 13 {
+		if err := addMemberBackedOfficerAppointments(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 14 && !isSQLite {
+		if err := lockOfficerTriggerFunctionSearchPath(tx); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`,
 		migration.Version,
@@ -298,6 +317,243 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 		return err
 	}
 	return tx.Commit()
+}
+
+// PrepareLegacyOfficerMappings stores the explicit one-time mapping required
+// before migration 13 can convert standalone Officer users into appointments.
+// Keys may be legacy user IDs or email addresses; values are existing Member IDs.
+func PrepareLegacyOfficerMappings(db *sql.DB, mappings map[string]string) error {
+	if len(mappings) == 0 {
+		return nil
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS legacy_officer_member_mappings (
+		legacy_user_id TEXT PRIMARY KEY,
+		member_id TEXT NOT NULL UNIQUE,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (legacy_user_id) REFERENCES users(id),
+		FOREIGN KEY (member_id) REFERENCES members(id)
+	)`); err != nil {
+		return fmt.Errorf("create legacy Officer mappings: %w", err)
+	}
+	isSQLite := strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
+	if !isSQLite {
+		if _, err := db.Exec(`ALTER TABLE legacy_officer_member_mappings ENABLE ROW LEVEL SECURITY`); err != nil {
+			return fmt.Errorf("secure legacy Officer mappings: %w", err)
+		}
+	}
+	for key, memberID := range mappings {
+		key = strings.TrimSpace(key)
+		memberID = strings.TrimSpace(memberID)
+		if key == "" || memberID == "" {
+			return fmt.Errorf("legacy Officer mappings must use non-empty user/email and Member IDs")
+		}
+		var userID string
+		if err := db.QueryRow(`SELECT id FROM users WHERE id=$1 OR LOWER(email)=LOWER($1)`, key).Scan(&userID); err != nil {
+			return fmt.Errorf("resolve legacy Officer %q: %w", key, err)
+		}
+		if _, err := db.Exec(`INSERT INTO legacy_officer_member_mappings (legacy_user_id,member_id) VALUES ($1,$2)
+			ON CONFLICT(legacy_user_id) DO UPDATE SET member_id=excluded.member_id`, userID, memberID); err != nil {
+			return fmt.Errorf("store legacy Officer mapping for %q: %w", key, err)
+		}
+	}
+	return nil
+}
+
+func addMemberBackedOfficerAppointments(tx *sql.Tx, isSQLite bool) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS legacy_officer_member_mappings (
+			legacy_user_id TEXT PRIMARY KEY,
+			member_id TEXT NOT NULL UNIQUE,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (legacy_user_id) REFERENCES users(id),
+			FOREIGN KEY (member_id) REFERENCES members(id)
+		)`,
+		`ALTER TABLE users ADD COLUMN historical_identity BOOLEAN NOT NULL DEFAULT FALSE`,
+		`CREATE TABLE officer_appointments (
+			id TEXT PRIMARY KEY,
+			member_id TEXT NOT NULL UNIQUE,
+			role TEXT NOT NULL CHECK (role IN ('manager','ketua_i','ketua_ii','ketua_utama')),
+			active BOOLEAN NOT NULL DEFAULT TRUE,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (member_id) REFERENCES members(id)
+		)`,
+		`CREATE INDEX idx_officer_appointments_role_active ON officer_appointments(role,active)`,
+		`ALTER TABLE loan_request_approvals ADD COLUMN officer_member_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE loan_request_approvals ADD COLUMN officer_member_no TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE withdrawal_request_approvals ADD COLUMN officer_member_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE withdrawal_request_approvals ADD COLUMN officer_member_no TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE officer_audit_events ADD COLUMN actor_member_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE officer_audit_events ADD COLUMN actor_member_no TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE officer_audit_events ADD COLUMN target_member_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE officer_audit_events ADD COLUMN target_member_no TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE officer_audit_events ADD COLUMN target_appointment_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE notifications ADD COLUMN audience TEXT NOT NULL DEFAULT 'officer' CHECK (audience IN ('member','officer'))`,
+		`UPDATE notifications SET audience=CASE WHEN link LIKE '/member/%' THEN 'member' ELSE 'officer' END`,
+		`CREATE INDEX idx_notifications_user_audience_state ON notifications(user_id,audience,resolved_at,is_read,created_at)`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+
+	rows, err := tx.Query(`SELECT id,role FROM users WHERE role <> 'member' AND historical_identity=FALSE ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	type legacyOfficer struct {
+		ID   string
+		Role string
+	}
+	var legacy []legacyOfficer
+	for rows.Next() {
+		var officer legacyOfficer
+		if err := rows.Scan(&officer.ID, &officer.Role); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		legacy = append(legacy, officer)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, officer := range legacy {
+		memberID := ""
+		err := tx.QueryRow(`SELECT member_id FROM legacy_officer_member_mappings WHERE legacy_user_id=$1`, officer.ID).Scan(&memberID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("legacy Officer user %s requires an explicit Member mapping", officer.ID)
+		}
+		if err != nil {
+			return err
+		}
+		var memberNo, memberName, memberStatus string
+		if err := tx.QueryRow(`SELECT member_no,full_name,status FROM members WHERE id=$1`, memberID).Scan(&memberNo, &memberName, &memberStatus); err != nil {
+			return fmt.Errorf("load mapped Member %s: %w", memberID, err)
+		}
+		if memberStatus != "active" {
+			return fmt.Errorf("mapped Member %s must be active", memberID)
+		}
+		canonicalUserID := officer.ID
+		var existingUserID string
+		err = tx.QueryRow(`SELECT id FROM users WHERE member_id=$1 AND id<>$2 AND historical_identity=FALSE ORDER BY created_at,id LIMIT 1`, memberID, officer.ID).Scan(&existingUserID)
+		if err == nil {
+			canonicalUserID = existingUserID
+			if _, err := tx.Exec(`UPDATE users SET role='member',member_id=NULL,full_name=$1,active=FALSE,historical_identity=TRUE,password_hash='!historical!',updated_at=CURRENT_TIMESTAMP WHERE id=$2`, memberName, officer.ID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`UPDATE notifications SET user_id=$1 WHERE user_id=$2`, canonicalUserID, officer.ID); err != nil {
+				return err
+			}
+		} else if errors.Is(err, sql.ErrNoRows) {
+			if _, err := tx.Exec(`UPDATE users SET role='member',member_id=$1,full_name=$2,historical_identity=FALSE,updated_at=CURRENT_TIMESTAMP WHERE id=$3`, memberID, memberName, officer.ID); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+		appointmentID := "appointment-" + officer.ID
+		if _, err := tx.Exec(`INSERT INTO officer_appointments (id,member_id,role,active) VALUES ($1,$2,$3,TRUE)`, appointmentID, memberID, officer.Role); err != nil {
+			return err
+		}
+		for _, table := range []string{"loan_request_approvals", "withdrawal_request_approvals"} {
+			if _, err := tx.Exec(`UPDATE `+table+` SET officer_member_id=$1,officer_member_no=$2,officer_name=CASE WHEN officer_name='' THEN $3 ELSE officer_name END WHERE officer_id=$4`, memberID, memberNo, memberName, officer.ID); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`UPDATE officer_audit_events SET actor_member_id=$1,actor_member_no=$2,actor_name=CASE WHEN actor_name='' THEN $3 ELSE actor_name END WHERE actor_id=$4`, memberID, memberNo, memberName, officer.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE officer_audit_events SET target_member_id=$1,target_member_no=$2,target_name=CASE WHEN target_name='' THEN $3 ELSE target_name END,target_appointment_id=$4 WHERE target_id=$5`, memberID, memberNo, memberName, appointmentID, officer.ID); err != nil {
+			return err
+		}
+		_ = canonicalUserID
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX idx_users_one_current_per_member ON users(member_id) WHERE member_id IS NOT NULL AND historical_identity=FALSE`); err != nil {
+		return err
+	}
+	if isSQLite {
+		statements := []string{
+			`CREATE TRIGGER protect_last_ketua_utama_member_deactivation
+			 BEFORE UPDATE OF status ON members
+			 WHEN OLD.status='active' AND NEW.status<>'active'
+			  AND EXISTS (SELECT 1 FROM officer_appointments WHERE member_id=OLD.id AND role='ketua_utama' AND active=TRUE)
+			  AND (SELECT COUNT(*) FROM officer_appointments oa JOIN members m ON m.id=oa.member_id WHERE oa.role='ketua_utama' AND oa.active=TRUE AND m.status='active') <= 1
+			 BEGIN SELECT RAISE(ABORT, 'at least one active Ketua Utama is required'); END`,
+			`CREATE TRIGGER suspend_officer_on_member_deactivation
+			 AFTER UPDATE OF status ON members
+			 WHEN OLD.status='active' AND NEW.status<>'active'
+			 BEGIN UPDATE officer_appointments SET active=FALSE,updated_at=CURRENT_TIMESTAMP WHERE member_id=NEW.id AND active=TRUE; END`,
+			`CREATE TRIGGER protect_last_ketua_utama_appointment
+			 BEFORE UPDATE OF role,active ON officer_appointments
+			 WHEN OLD.role='ketua_utama' AND OLD.active=TRUE AND (NEW.role<>'ketua_utama' OR NEW.active=FALSE)
+			  AND EXISTS (SELECT 1 FROM members WHERE id=OLD.member_id AND status='active')
+			  AND (SELECT COUNT(*) FROM officer_appointments oa JOIN members m ON m.id=oa.member_id WHERE oa.role='ketua_utama' AND oa.active=TRUE AND m.status='active') <= 1
+			 BEGIN SELECT RAISE(ABORT, 'at least one active Ketua Utama is required'); END`,
+		}
+		for _, statement := range statements {
+			if _, err := tx.Exec(statement); err != nil {
+				return err
+			}
+		}
+	} else {
+		statements := []string{
+			`CREATE FUNCTION protect_last_ketua_utama_member_deactivation() RETURNS trigger LANGUAGE plpgsql AS $$
+			 BEGIN
+			  IF OLD.status='active' AND NEW.status<>'active'
+			   AND EXISTS (SELECT 1 FROM officer_appointments WHERE member_id=OLD.id AND role='ketua_utama' AND active=TRUE)
+			   AND (SELECT COUNT(*) FROM officer_appointments oa JOIN members m ON m.id=oa.member_id WHERE oa.role='ketua_utama' AND oa.active=TRUE AND m.status='active') <= 1
+			  THEN RAISE EXCEPTION 'at least one active Ketua Utama is required'; END IF;
+			  RETURN NEW;
+			 END $$`,
+			`CREATE TRIGGER protect_last_ketua_utama_member_deactivation BEFORE UPDATE OF status ON members FOR EACH ROW EXECUTE FUNCTION protect_last_ketua_utama_member_deactivation()`,
+			`CREATE FUNCTION suspend_officer_on_member_deactivation() RETURNS trigger LANGUAGE plpgsql AS $$
+			 BEGIN
+			  IF OLD.status='active' AND NEW.status<>'active' THEN
+			   UPDATE officer_appointments SET active=FALSE,updated_at=CURRENT_TIMESTAMP WHERE member_id=NEW.id AND active=TRUE;
+			  END IF;
+			  RETURN NEW;
+			 END $$`,
+			`CREATE TRIGGER suspend_officer_on_member_deactivation AFTER UPDATE OF status ON members FOR EACH ROW EXECUTE FUNCTION suspend_officer_on_member_deactivation()`,
+			`CREATE FUNCTION protect_last_ketua_utama_appointment() RETURNS trigger LANGUAGE plpgsql AS $$
+			 BEGIN
+			  IF OLD.role='ketua_utama' AND OLD.active=TRUE AND (NEW.role<>'ketua_utama' OR NEW.active=FALSE)
+			   AND EXISTS (SELECT 1 FROM members WHERE id=OLD.member_id AND status='active')
+			   AND (SELECT COUNT(*) FROM officer_appointments oa JOIN members m ON m.id=oa.member_id WHERE oa.role='ketua_utama' AND oa.active=TRUE AND m.status='active') <= 1
+			  THEN RAISE EXCEPTION 'at least one active Ketua Utama is required'; END IF;
+			  RETURN NEW;
+			 END $$`,
+			`CREATE TRIGGER protect_last_ketua_utama_appointment BEFORE UPDATE OF role,active ON officer_appointments FOR EACH ROW EXECUTE FUNCTION protect_last_ketua_utama_appointment()`,
+			`REVOKE EXECUTE ON FUNCTION protect_last_ketua_utama_member_deactivation() FROM PUBLIC`,
+			`REVOKE EXECUTE ON FUNCTION suspend_officer_on_member_deactivation() FROM PUBLIC`,
+			`REVOKE EXECUTE ON FUNCTION protect_last_ketua_utama_appointment() FROM PUBLIC`,
+		}
+		for _, statement := range statements {
+			if _, err := tx.Exec(statement); err != nil {
+				return err
+			}
+		}
+		for _, table := range []string{"legacy_officer_member_mappings", "officer_appointments"} {
+			if _, err := tx.Exec(`ALTER TABLE ` + table + ` ENABLE ROW LEVEL SECURITY`); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func lockOfficerTriggerFunctionSearchPath(tx *sql.Tx) error {
+	statements := []string{
+		`ALTER FUNCTION protect_last_ketua_utama_member_deactivation() SET search_path = public, pg_temp`,
+		`ALTER FUNCTION suspend_officer_on_member_deactivation() SET search_path = public, pg_temp`,
+		`ALTER FUNCTION protect_last_ketua_utama_appointment() SET search_path = public, pg_temp`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func addOfficerHierarchyAndApprovals(tx *sql.Tx, isSQLite bool) error {

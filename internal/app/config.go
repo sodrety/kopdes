@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -8,25 +9,26 @@ import (
 )
 
 type Config struct {
-	Address            string
-	DatabaseDriver     string
-	DatabaseURL        string
-	JWTSecret          string
-	KetuaUtamaName     string
-	KetuaUtamaEmail    string
-	KetuaUtamaPassword string
-	AppEnv             string
-	ServiceName        string
-	ServiceVersion     string
-	MetricsEnabled     bool
-	TracingEnabled     bool
-	TracingExporter    string
-	TracingEndpoint    string
-	TracingInsecure    bool
-	CookieSecure       bool
-	ReadTimeout        time.Duration
-	WriteTimeout       time.Duration
-	IdleTimeout        time.Duration
+	Address                     string
+	DatabaseDriver              string
+	DatabaseURL                 string
+	JWTSecret                   string
+	KetuaUtamaMemberID          string
+	KetuaUtamaEmail             string
+	KetuaUtamaPassword          string
+	LegacyOfficerMemberMappings map[string]string
+	AppEnv                      string
+	ServiceName                 string
+	ServiceVersion              string
+	MetricsEnabled              bool
+	TracingEnabled              bool
+	TracingExporter             string
+	TracingEndpoint             string
+	TracingInsecure             bool
+	CookieSecure                bool
+	ReadTimeout                 time.Duration
+	WriteTimeout                time.Duration
+	IdleTimeout                 time.Duration
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -36,7 +38,7 @@ func ConfigFromEnv() (Config, error) {
 		DatabaseDriver:     envOrDefault("DATABASE_DRIVER", "pgx"),
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		JWTSecret:          os.Getenv("JWT_SECRET"),
-		KetuaUtamaName:     os.Getenv("KETUA_UTAMA_NAME"),
+		KetuaUtamaMemberID: os.Getenv("KETUA_UTAMA_MEMBER_ID"),
 		KetuaUtamaEmail:    os.Getenv("KETUA_UTAMA_EMAIL"),
 		KetuaUtamaPassword: os.Getenv("KETUA_UTAMA_PASSWORD"),
 		AppEnv:             appEnv,
@@ -63,6 +65,11 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if len(cfg.JWTSecret) < 32 {
 		return Config{}, errors.New("JWT_SECRET must be at least 32 characters")
+	}
+	if raw := strings.TrimSpace(os.Getenv("LEGACY_OFFICER_MEMBER_MAPPINGS")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &cfg.LegacyOfficerMemberMappings); err != nil || cfg.LegacyOfficerMemberMappings == nil {
+			return Config{}, errors.New("LEGACY_OFFICER_MEMBER_MAPPINGS must be a JSON object of user IDs or emails to Member IDs")
+		}
 	}
 	return cfg, nil
 }

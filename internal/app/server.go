@@ -121,6 +121,8 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.POST("/api/notifications/:id/read", server.requireAuthenticated(), server.markNotificationRead)
 	router.GET("/password/change", server.requireAuthenticated(), server.passwordChangePage)
 	router.GET("/notifications", server.requireAuthenticated(), server.notificationsPage)
+	router.GET("/member/notifications", server.requireRole("member"), server.notificationsPage)
+	router.GET("/admin/notifications", server.requirePermission(PermissionDashboardView), server.notificationsPage)
 
 	router.GET("/admin/dashboard", server.requirePermission(PermissionDashboardView), server.adminDashboardPage)
 	router.GET("/admin/reports", server.requirePermission(PermissionReportsView), server.adminReportsPage)
@@ -242,10 +244,7 @@ func (s *Server) login(c *gin.Context) {
 		return
 	}
 
-	redirectPath := "/admin/dashboard"
-	if user.Role == "member" {
-		redirectPath = "/member/dashboard"
-	}
+	redirectPath := "/member/dashboard"
 	if user.MustChangePassword {
 		redirectPath = "/password/change"
 	}
@@ -320,7 +319,12 @@ func (s *Server) requireRole(role string) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		if user.Role != role {
+		if role == "member" && !user.MemberID.Valid {
+			respondError(c, http.StatusForbidden, "FORBIDDEN", "Insufficient role")
+			c.Abort()
+			return
+		}
+		if role != "member" && user.Role != role {
 			respondError(c, http.StatusForbidden, "FORBIDDEN", "Insufficient role")
 			c.Abort()
 			return
@@ -406,7 +410,7 @@ func (s *Server) validateSessionUser(tokenUser User) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
-	if !current.Active || current.Role != tokenUser.Role || !strings.EqualFold(current.Email, tokenUser.Email) {
+	if !current.Active || current.MemberStatus != "active" || current.Role != tokenUser.Role || !strings.EqualFold(current.Email, tokenUser.Email) {
 		return User{}, ErrUnauthorized
 	}
 	return current, nil

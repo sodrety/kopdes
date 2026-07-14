@@ -40,12 +40,15 @@ TRACING_ENABLED=false
 TRACING_EXPORTER=stdout
 TRACING_ENDPOINT=
 TRACING_INSECURE=false
-KETUA_UTAMA_NAME="Ketua Utama"
+KETUA_UTAMA_MEMBER_ID=<existing-active-member-id>
 KETUA_UTAMA_EMAIL=ketua-utama@coop.test
 KETUA_UTAMA_PASSWORD=password
+LEGACY_OFFICER_MEMBER_MAPPINGS='{"legacy-officer@coop.test":"existing-active-member-id"}'
 ```
 
-When all three `KETUA_UTAMA_*` values are set, the app creates the initial Ketua Utama if it does not already exist. Ketua Utama can then create the other Officer accounts in the application.
+`KETUA_UTAMA_MEMBER_ID` must identify an existing active Member. If that Member already has a login, the app keeps the existing credentials and assigns the Ketua Utama appointment. Otherwise, `KETUA_UTAMA_EMAIL` and `KETUA_UTAMA_PASSWORD` create the Member's initial login. Ketua Utama can then assign other Officer appointments to existing Members in the application.
+
+Before migration 13 runs against a database containing legacy standalone Officer users, set `LEGACY_OFFICER_MEMBER_MAPPINGS` to a JSON object whose keys are legacy user IDs or emails and whose values are existing active Member IDs. The migration fails safely when any legacy Officer lacks an explicit mapping.
 `APP_ENV=staging` or `APP_ENV=production` enables secure auth cookies by default. Set `COOKIE_SECURE` explicitly to override that default.
 
 ## Run
@@ -65,7 +68,7 @@ $EDITOR .env.supabase
 ```
 
 Use the Supabase database password from the project settings. If the password contains special characters, URL-encode it in `DATABASE_URL`.
-The app runs migrations on startup and records applied versions in `schema_migrations`.
+The app runs migrations on startup and records applied versions in `schema_migrations`. Migration 13 converts Officer users into Member-backed appointments, so production deployments must prepare the explicit legacy mapping before starting the new release.
 
 ## Observability
 

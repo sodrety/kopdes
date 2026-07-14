@@ -120,7 +120,9 @@ func (s *Server) requireAuthenticated() gin.HandlerFunc {
 
 func (s *Server) decorateAuthenticatedContext(c *gin.Context, user User) {
 	c.Set("permissions", permissionSet(user.Role))
-	count, err := s.unreadNotificationCount(user.ID)
+	audience := notificationAudienceFromPath(c.Request.URL.Path)
+	c.Set("notification_audience", audience)
+	count, err := s.unreadNotificationCount(user.ID, audience)
 	if err == nil {
 		c.Set("unread_notifications", count)
 	}
@@ -148,11 +150,9 @@ func (s *Server) authenticateRequest(c *gin.Context) (User, bool) {
 		s.respondUnauthorized(c, usesBearerToken, "Invalid authentication token", true)
 		return User{}, false
 	}
-	if user.Role == "member" {
-		if err := s.validateMemberSession(tokenUser, user); err != nil {
-			s.respondUnauthorized(c, usesBearerToken, "Invalid authentication token", true)
-			return User{}, false
-		}
+	if err := s.validateMemberSession(tokenUser, user); err != nil {
+		s.respondUnauthorized(c, usesBearerToken, "Invalid authentication token", true)
+		return User{}, false
 	}
 	return user, true
 }

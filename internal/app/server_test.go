@@ -70,15 +70,8 @@ func TestAdminCanLoginAndSeeEmptyDashboardSummary(t *testing.T) {
 	if err := json.Unmarshal(dashboardRec.Body.Bytes(), &summary); err != nil {
 		t.Fatalf("decode dashboard response: %v", err)
 	}
-	if summary != (struct {
-		TotalMembers         int `json:"total_members"`
-		ActiveMembers        int `json:"active_members"`
-		TotalSavings         int `json:"total_savings"`
-		ActiveLoans          int `json:"active_loans"`
-		TotalOutstandingLoan int `json:"total_outstanding_loan"`
-		PendingLoanRequests  int `json:"pending_loan_requests"`
-	}{}) {
-		t.Fatalf("expected empty dashboard summary, got %+v", summary)
+	if summary.TotalMembers != 5 || summary.ActiveMembers != 5 || summary.TotalSavings != 0 || summary.ActiveLoans != 0 || summary.TotalOutstandingLoan != 0 || summary.PendingLoanRequests != 0 {
+		t.Fatalf("expected only the five fixture Members and no financial activity, got %+v", summary)
 	}
 }
 
@@ -212,16 +205,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 12 {
-		t.Fatalf("expected twelve tracked migrations, got %d", migrationCount)
+	if migrationCount != 14 {
+		t.Fatalf("expected fourteen tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 12`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 14`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "add_officer_hierarchy_and_approvals" {
-		t.Fatalf("expected latest Officer hierarchy migration, got %q", latestName)
+	if latestName != "lock_officer_trigger_function_search_path" {
+		t.Fatalf("expected latest Officer trigger search path migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -731,15 +724,11 @@ func TestBrowserPageWithInsufficientRoleRedirectsToLogin(t *testing.T) {
 
 		fixture.server.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusSeeOther {
-			t.Fatalf("expected redirect status 303, got %d: %s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
 		}
-		if location := rec.Header().Get("Location"); location != "/login" {
-			t.Fatalf("expected redirect to /login, got %q", location)
-		}
-		cookies := rec.Result().Cookies()
-		if len(cookies) == 0 || cookies[0].Name != "auth_token" || cookies[0].MaxAge != -1 {
-			t.Fatalf("expected incompatible auth cookie to be cleared, got %+v", cookies)
+		if cookies := rec.Result().Cookies(); len(cookies) != 0 {
+			t.Fatalf("expected authenticated Member cookie to be retained, got %+v", cookies)
 		}
 	})
 
@@ -751,11 +740,11 @@ func TestBrowserPageWithInsufficientRoleRedirectsToLogin(t *testing.T) {
 
 		fixture.server.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("expected status 204, got %d: %s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
 		}
-		if redirect := rec.Header().Get("HX-Redirect"); redirect != "/login" {
-			t.Fatalf("expected HX-Redirect to /login, got %q", redirect)
+		if redirect := rec.Header().Get("HX-Redirect"); redirect != "" {
+			t.Fatalf("expected no login redirect for an authenticated Member, got %q", redirect)
 		}
 	})
 }
@@ -966,8 +955,8 @@ func TestHtmxLoginRedirectsWithoutSwappingDashboardIntoFormTarget(t *testing.T) 
 	if loginRec.Code != http.StatusNoContent {
 		t.Fatalf("expected htmx login status 204, got %d: %s", loginRec.Code, loginRec.Body.String())
 	}
-	if redirect := loginRec.Header().Get("HX-Redirect"); redirect != "/admin/dashboard" {
-		t.Fatalf("expected HX-Redirect to /admin/dashboard, got %q", redirect)
+	if redirect := loginRec.Header().Get("HX-Redirect"); redirect != "/member/dashboard" {
+		t.Fatalf("expected HX-Redirect to /member/dashboard, got %q", redirect)
 	}
 	if loginRec.Body.Len() != 0 {
 		t.Fatalf("expected empty htmx redirect body, got %s", loginRec.Body.String())
@@ -1023,7 +1012,7 @@ func TestRootRedirectsToLoginWithoutSessionAndDashboardWithSession(t *testing.T)
 	if authRec.Code != http.StatusSeeOther {
 		t.Fatalf("expected root with admin session to redirect, got %d: %s", authRec.Code, authRec.Body.String())
 	}
-	if location := authRec.Header().Get("Location"); location != "/admin/dashboard" {
+	if location := authRec.Header().Get("Location"); location != "/member/dashboard" {
 		t.Fatalf("expected root with admin session to redirect to dashboard, got %q", location)
 	}
 }
@@ -1318,11 +1307,17 @@ func TestAdminCanListMembers(t *testing.T) {
 	if err := json.Unmarshal(listRec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode member list: %v", err)
 	}
-	if len(response.Members) != 1 {
-		t.Fatalf("expected one member, got %+v", response.Members)
+	if len(response.Members) != 6 {
+		t.Fatalf("expected five fixture Members and one created Member, got %+v", response.Members)
 	}
-	if response.Members[0].ID != created.ID || response.Members[0].MemberNo != "M-0002" || response.Members[0].FullName != "Budi Santoso" || response.Members[0].Status != "inactive" {
-		t.Fatalf("unexpected member list: %+v", response.Members[0])
+	var listed bool
+	for _, member := range response.Members {
+		if member.ID == created.ID && member.MemberNo == "M-0002" && member.FullName == "Budi Santoso" && member.Status == "inactive" {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Fatalf("created Member missing from list: %+v", response.Members)
 	}
 }
 
@@ -1349,7 +1344,7 @@ func TestAdminDashboardCountsMembers(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
 		t.Fatalf("decode dashboard summary: %v", err)
 	}
-	if summary.TotalMembers != 2 || summary.ActiveMembers != 1 {
+	if summary.TotalMembers != 7 || summary.ActiveMembers != 6 {
 		t.Fatalf("unexpected member counts: %+v", summary)
 	}
 }
@@ -1557,24 +1552,26 @@ func TestAdminCanCreateMemberLoginAndMemberCanViewOwnProfile(t *testing.T) {
 func TestMemberProfileRequiresMemberRoleAndLinkedIdentity(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
-	unlinkedMemberToken := fixture.login(t, "member@coop.test", "password")
+	memberToken := fixture.login(t, "member@coop.test", "password")
 
-	t.Run("admin cannot use member profile route", func(t *testing.T) {
+	t.Run("Officer can use Member profile route", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/member/profile", nil)
 		req.Header.Set("Authorization", "Bearer "+adminToken)
 		rec := httptest.NewRecorder()
 
 		fixture.server.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "FORBIDDEN", "Insufficient role")
 	})
 
-	t.Run("member token must be linked to a member", func(t *testing.T) {
+	t.Run("session is invalidated when User loses Member identity", func(t *testing.T) {
+		if _, err := fixture.db.Exec(`UPDATE users SET member_id=NULL WHERE email='member@coop.test'`); err != nil {
+			t.Fatalf("unlink Member identity: %v", err)
+		}
 		req := httptest.NewRequest(http.MethodGet, "/api/member/profile", nil)
-		req.Header.Set("Authorization", "Bearer "+unlinkedMemberToken)
+		req.Header.Set("Authorization", "Bearer "+memberToken)
 		rec := httptest.NewRecorder()
 
 		fixture.server.ServeHTTP(rec, req)
@@ -2790,9 +2787,12 @@ func TestLoanRequestValidationAndEligibility(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	fixture.createMember(t, adminToken, `{"member_no":"M-0017","full_name":"Active Loan","join_date":"2026-06-16","status":"active","email":"active-loan@coop.test","password":"member-password"}`)
-	fixture.createMember(t, adminToken, `{"member_no":"M-0018","full_name":"Inactive Loan","join_date":"2026-06-16","status":"inactive","email":"inactive-loan@coop.test","password":"member-password"}`)
+	inactive := fixture.createMember(t, adminToken, `{"member_no":"M-0018","full_name":"Inactive Loan","join_date":"2026-06-16","status":"active","email":"inactive-loan@coop.test","password":"member-password"}`)
 	activeToken := fixture.login(t, "active-loan@coop.test", "member-password")
 	inactiveToken := fixture.login(t, "inactive-loan@coop.test", "member-password")
+	if _, err := fixture.db.Exec(`UPDATE members SET status='inactive' WHERE id=$1`, inactive.ID); err != nil {
+		t.Fatalf("deactivate ineligible Member: %v", err)
+	}
 
 	t.Run("amount and duration must be positive", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":0,"duration_months":0}`))
@@ -2816,10 +2816,10 @@ func TestLoanRequestValidationAndEligibility(t *testing.T) {
 
 		fixture.server.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Only active members can request loans")
+		assertError(t, rec.Body.Bytes(), "UNAUTHORIZED", "Invalid authentication token")
 	})
 
 	t.Run("member can have only one pending request", func(t *testing.T) {
@@ -3656,7 +3656,7 @@ func TestAdminDashboardAggregatesOperationalTotals(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
 		t.Fatalf("decode dashboard summary: %v", err)
 	}
-	if summary.TotalMembers != 2 || summary.ActiveMembers != 1 || summary.TotalSavings != 800000 || summary.ActiveLoans != 1 || summary.TotalOutstandingLoan != 486000 || summary.PendingLoanRequests != 0 {
+	if summary.TotalMembers != 7 || summary.ActiveMembers != 6 || summary.TotalSavings != 800000 || summary.ActiveLoans != 1 || summary.TotalOutstandingLoan != 486000 || summary.PendingLoanRequests != 0 {
 		t.Fatalf("unexpected dashboard summary: %+v", summary)
 	}
 }
@@ -4363,14 +4363,21 @@ func seedUser(t *testing.T, db *sql.DB, id, email, password, role string) {
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
+	memberID := id + "-member"
+	memberNo := "TEST-" + strings.ToUpper(id)
+	if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ($1,$2,$3,'2026-01-01','active')`, memberID, memberNo, email); err != nil {
+		t.Fatalf("seed Member: %v", err)
+	}
 	if _, err := db.Exec(
-		`INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, $3, $4)`,
-		id,
-		email,
-		string(hash),
-		role,
+		`INSERT INTO users (id,email,password_hash,role,member_id,full_name,historical_identity) VALUES ($1,$2,$3,'member',$4,$5,FALSE)`,
+		id, email, string(hash), memberID, email,
 	); err != nil {
 		t.Fatalf("seed user: %v", err)
+	}
+	if role != "member" {
+		if _, err := db.Exec(`INSERT INTO officer_appointments (id,member_id,role,active) VALUES ($1,$2,$3,TRUE)`, id, memberID, role); err != nil {
+			t.Fatalf("seed Officer Appointment: %v", err)
+		}
 	}
 }
 

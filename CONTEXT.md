@@ -16,13 +16,21 @@ _Avoid_: Customer, client, borrower as a general replacement
 The cooperative back-office area available to officers according to their **Officer Role**.
 _Avoid_: Treating Admin as an assignable role or a universally authorized superuser
 
+**Member Area**:
+The personal area where a **Member** views and manages their own cooperative activity.
+_Avoid_: Admin Area, treating it as a different login identity
+
 **Officer Role**:
 An officer's position in the cooperative authority hierarchy: **Manager**, **Ketua I**, **Ketua II**, or **Ketua Utama**.
 _Avoid_: Admin, staff role, access level
 
 **Officer**:
-A cooperative operator who holds exactly one **Officer Role**.
+A **Member** appointed to exactly one **Officer Role**.
 _Avoid_: Admin, assuming an Officer Role can be held by only one person
+
+**Officer Appointment**:
+An active or inactive designation of an existing **Member** to exactly one **Officer Role**.
+_Avoid_: Creating a standalone Officer, replacing the Member's User
 
 **Manager**:
 The first **Officer Role** in the cooperative authority hierarchy.
@@ -63,16 +71,24 @@ The **Officer Role** presently responsible for the next decision on a pending **
 _Avoid_: Treating an earlier or later Officer Role as authorized to act
 
 **Approval History**:
-The ordered record of completed **Approval Stages**, including each deciding Officer, decision, decision time, and any decision note.
+The ordered record of completed **Approval Stages**, including an immutable snapshot of each deciding Officer, decision, decision time, and any decision note.
 _Avoid_: Overwriting earlier approvals when the chain advances
 
 **Operational Permission**:
 An authority to perform a specific cooperative back-office activity, assigned to an **Officer Role** independently of its place in the approval hierarchy.
 _Avoid_: Assuming higher approval authority grants every lower role's operational access
 
+**Notification Audience**:
+The Member or Officer capacity in which a notification is intended to be viewed and acted upon.
+_Avoid_: Mixing personal request outcomes with Admin Area tasks
+
 **User**:
-A login identity used to access the system as either a **Member** or an officer with exactly one **Officer Role**.
+A login identity linked to a **Member**, who may also be an **Officer**.
 _Avoid_: Account when referring to login identity
+
+**Historical User Identity**:
+A non-login identifier retained only to preserve the authenticating identity on historical records.
+_Avoid_: Inactive User that may be reactivated, alternate Member login
 
 **Saving Record**:
 A traceable record of a verified saving deposit or withdrawal for a **Member** in exactly one **Simpanan** category.
@@ -170,8 +186,27 @@ _Avoid_: Renaming stable internal enum values only to match display text
 
 ## Relationships
 
-- A **User** is either a **Member** user or an **Officer**.
-- An **Officer** has exactly one **Officer Role**, and an **Officer Role** may be held by many Officers.
+- A **User** is linked to exactly one **Member**.
+- A **Member** has at most one current **User**; a **Historical User Identity** is not a login and does not count as another User.
+- A **User** enters the **Member Area** by default after login.
+- An **Officer** uses an explicit area switch between the **Member Area** and permitted **Admin Area** without changing identity or role.
+- An **Officer Appointment** does not change the Member's eligibility, limits, or rights in the **Member Area**.
+- A credential reset for an **Officer** resets the Member's single **User**, invalidates all sessions, and preserves both membership and the **Officer Appointment**.
+- A **Member** may hold zero or one **Officer Appointment**; a Member holding an Officer Appointment is an **Officer**.
+- A **Member** has at most one Officer Appointment record, which may be changed, suspended, and reactivated over time.
+- An **Officer Appointment** belongs to an existing Member and assigns exactly one **Officer Role**.
+- An **Officer Appointment** has its own active status, separate from the **Member** status and **User** availability.
+- An **Officer Appointment** does not duplicate the Member's name or number or the User's email.
+- Creating an **Officer Appointment** reuses the Member's linked User or creates that Member's first User when none exists.
+- Deactivating an **Officer Appointment** removes the Member's officer authority without deactivating the **Member** or their **User**.
+- An active **Officer Appointment** requires an active **Member**; membership deactivation suspends the appointment immediately.
+- Reactivating a **Member** does not reactivate a suspended **Officer Appointment**.
+- The last active **Ketua Utama** cannot have their membership deactivated until another active Ketua Utama exists.
+- Activating or changing an **Officer Appointment** gives the Officer notifications for requests already waiting at the assigned **Officer Role**.
+- Changing or suspending an **Officer Appointment** resolves notifications that are no longer actionable for that Officer without changing **Approval History**.
+- A notification has exactly one **Notification Audience** and appears only in its corresponding Member or Admin Area.
+- Every Officer Appointment creation, role change, suspension, and reactivation appends an immutable audit event.
+- An **Officer Role** may be held by many Officers.
 - **Officer Roles** are ordered from lowest to highest authority: **Manager**, **Ketua I**, **Ketua II**, and **Ketua Utama**.
 - An Officer accesses the **Admin Area** through the **Operational Permissions** assigned to their **Officer Role**.
 - A higher **Officer Role** does not automatically inherit the **Operational Permissions** of a lower Officer Role.
@@ -179,9 +214,11 @@ _Avoid_: Renaming stable internal enum values only to match display text
 - A **Loan Request** and **Penarikan** each follow an **Approval Chain** beginning with **Manager**.
 - Every **Officer Role** must approve in order, and no approval stage may be skipped.
 - Each **Approval Stage** is completed once by any Officer holding its assigned **Officer Role**, with the Officer's identity and decision time retained.
+- An **Officer** may decide an **Approval Stage** for their own **Loan Request** or **Penarikan**; conflict-of-interest enforcement is not currently part of the cooperative's approval rule.
 - An approval may include an immutable optional note, while a **Rejection** requires an immutable reason.
 - The same Officer may decide more than one **Approval Stage** in an **Approval Chain** when they hold each stage's **Officer Role** at its decision time.
 - Each **Approval History** entry retains the Officer Role held at decision time even if the Officer later changes roles.
+- Each **Approval History** entry retains the deciding Member identity, Member number, display name, Officer Role, and authenticating User identity as they existed at decision time.
 - A pending **Approval Chain** has exactly one **Current Approval Stage**.
 - Completing an approval advances the **Current Approval Stage**, while **Rejection** or **Final Approval** ends it.
 - **Cancellation** also ends a pending **Approval Chain** while preserving its completed **Approval History**.
@@ -240,6 +277,21 @@ _Avoid_: Renaming stable internal enum values only to match display text
 - "Simpanan" can mean either a saving activity row or the member's derived savings area. Resolved: use **Saving Record** or **Saving Balance** when precision matters, and **Simpanan** for the UI area.
 - "Pinjaman" can mean either a request or an approved obligation. Resolved: use **Loan Request** or **Loan** when precision matters, and **Pinjaman** for the UI area.
 - "Admin" previously meant both an assignable user role and the back-office area. Resolved: use **Officer Role** for **Manager**, **Ketua I**, **Ketua II**, or **Ketua Utama**, and **Admin Area** for the back-office surface.
+- "Officer" previously meant a login identity separate from a Member. Resolved: an **Officer** is a **Member** holding an **Officer Role**, using the same **User** to access both Member and Admin Areas.
+- "assigning an Officer Role" could imply creating a separate Officer identity. Resolved: an **Officer Appointment** assigns a role only after the **Member** exists and preserves that Member's single **User** identity.
+- "deactivating an Officer" could mean ending cooperative membership or disabling login. Resolved: deactivating an **Officer Appointment** removes only officer authority; Member status and User access remain separate.
+- "reactivating a Member" could imply restoring former officer authority. Resolved: an **Officer Appointment** must be reactivated separately by **Ketua Utama**.
+- "last active Ketua Utama" applies to both appointment administration and membership status. Resolved: routine operations must preserve at least one active **Ketua Utama**.
+- "switching roles" could imply changing the Member's identity or Officer Appointment. Resolved: an **Officer** switches between **Member Area** and **Admin Area** while retaining both capacities in one session.
+- "Officer password" could imply separate Admin Area credentials. Resolved: a Member has one **User** credential shared across Member and Admin Areas.
+- "notification inbox" could imply one mixed list for the shared User. Resolved: notifications retain a Member or Officer **Notification Audience** and appear in the corresponding area.
+- "deciding Officer" could become ambiguous after profile, credential, or appointment changes. Resolved: **Approval History** stores immutable Member, User, display-name, and Officer Role snapshots from decision time.
+- "User role" could imply that login identity and cooperative authority are the same concept. Resolved: the **User** is only the shared login identity; officer authority belongs to the **Officer Appointment**.
+- "Officer benefit" could imply preferential Member treatment. Resolved: an **Officer Appointment** grants Admin Area authority only and does not change personal request eligibility or the **Approval Chain**.
+- "reappointing an Officer" could imply creating another appointment record. Resolved: each **Member** has at most one **Officer Appointment**, whose lifecycle changes are retained as immutable audit events.
+- "Officer profile" could imply a separate copy of identity data. Resolved: Officer name and number come from **Member**, login email comes from **User**, and authority comes from **Officer Appointment**.
+- "inactive legacy User" could imply a second login that may later be restored. Resolved: a duplicate legacy Officer login becomes a credential-free **Historical User Identity** retained only for audit provenance.
+- "self-approval" was unspecified after Members became eligible to be Officers. Resolved for the current rule: an **Officer** may approve or reject their own request when they hold the **Current Approval Stage** role.
 - Legacy users assigned the former "admin" role become **Manager** Officers; "admin" is not retained as an **Officer Role**.
 - "Bunga" can mean flat interest, declining-balance interest, penalty, or fee. Resolved: **Bunga** is flat monthly interest on the approved **Loan** principal.
 - "Remaining Balance" can mean principal-only or total owed. Resolved: **Remaining Balance** includes approved principal and scheduled **Bunga**.

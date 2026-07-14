@@ -12,6 +12,9 @@ import (
 
 type Officer struct {
 	ID                 string `json:"id"`
+	UserID             string `json:"user_id"`
+	MemberID           string `json:"member_id"`
+	MemberNo           string `json:"member_no"`
 	FullName           string `json:"full_name"`
 	Email              string `json:"email"`
 	Role               string `json:"role"`
@@ -34,16 +37,15 @@ type OfficerAuditEvent struct {
 }
 
 type createOfficerInput struct {
-	FullName string `json:"full_name" form:"full_name"`
+	MemberID string `json:"member_id" form:"member_id"`
 	Email    string `json:"email" form:"email"`
 	Role     string `json:"role" form:"role"`
 	Password string `json:"password" form:"password"`
 }
 
 type updateOfficerInput struct {
-	FullName string `json:"full_name" form:"full_name"`
-	Role     string `json:"role" form:"role"`
-	Active   *bool  `json:"active" form:"active"`
+	Role   string `json:"role" form:"role"`
+	Active *bool  `json:"active" form:"active"`
 }
 
 type resetOfficerPasswordInput struct {
@@ -55,6 +57,8 @@ var (
 	errOfficerNotFound          = errors.New("officer not found")
 	errLastActiveKetuaUtama     = errors.New("last active ketua utama")
 	errInvalidTemporaryPassword = errors.New("invalid temporary password")
+	errMemberAlreadyOfficer     = errors.New("member already has an Officer Appointment")
+	errInactiveOfficerMember    = errors.New("Officer Member must be active")
 )
 
 func (s *Server) listOfficers(c *gin.Context) {
@@ -77,7 +81,12 @@ func (s *Server) adminOfficersPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	renderPage(c, "admin-officers", pageData(c, translate(languageFromRequest(c), "officers_page_title"), "officers", "officers", "officers_description", gin.H{"Officers": officers, "Audits": audits}))
+	members, err := s.allMembers()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	renderPage(c, "admin-officers", pageData(c, translate(languageFromRequest(c), "officers_page_title"), "officers", "officers", "officers_description", gin.H{"Officers": officers, "Audits": audits, "Members": members}))
 }
 
 func (s *Server) passwordChangePage(c *gin.Context) {
@@ -96,8 +105,12 @@ func (s *Server) createOfficer(c *gin.Context) {
 		return
 	}
 	officer, err := s.insertOfficer(actor, req)
-	if errors.Is(err, errInvalidOfficer) || errors.Is(err, errInvalidTemporaryPassword) {
+	if errors.Is(err, errInvalidOfficer) || errors.Is(err, errInvalidTemporaryPassword) || errors.Is(err, errInactiveOfficerMember) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid Officer details")
+		return
+	}
+	if errors.Is(err, errMemberAlreadyOfficer) {
+		respondError(c, http.StatusConflict, "DUPLICATE_DATA", translate(languageFromRequest(c), "error_member_already_officer"))
 		return
 	}
 	if isUniqueViolation(err) {
@@ -123,7 +136,7 @@ func (s *Server) updateOfficer(c *gin.Context) {
 		return
 	}
 	officer, err := s.updateOfficerByID(actor, c.Param("id"), req)
-	if errors.Is(err, errInvalidOfficer) {
+	if errors.Is(err, errInvalidOfficer) || errors.Is(err, errInactiveOfficerMember) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid Officer details")
 		return
 	}
@@ -188,15 +201,13 @@ func (s *Server) changePassword(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	redirect := "/admin/dashboard"
-	if user.Role == "member" {
-		redirect = "/member/dashboard"
-	}
-	respondOKOrHXRedirect(c, redirect, gin.H{"status": "ok"})
+	respondOKOrHXRedirect(c, "/member/dashboard", gin.H{"status": "ok"})
 }
 
 func (s *Server) officers() ([]Officer, error) {
-	rows, err := s.db.Query(`SELECT id, full_name, email, role, active, must_change_password, created_at, updated_at FROM users WHERE role <> 'member' ORDER BY role, full_name, email`)
+	rows, err := s.db.Query(`SELECT oa.id,u.id,m.id,m.member_no,m.full_name,u.email,oa.role,oa.active,u.must_change_password,oa.created_at,oa.updated_at
+		FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE
+		ORDER BY oa.role,m.full_name,u.email`)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +215,7 @@ func (s *Server) officers() ([]Officer, error) {
 	var officers []Officer
 	for rows.Next() {
 		var officer Officer
-		if err := rows.Scan(&officer.ID, &officer.FullName, &officer.Email, &officer.Role, &officer.Active, &officer.MustChangePassword, &officer.CreatedAt, &officer.UpdatedAt); err != nil {
+		if err := rows.Scan(&officer.ID, &officer.UserID, &officer.MemberID, &officer.MemberNo, &officer.FullName, &officer.Email, &officer.Role, &officer.Active, &officer.MustChangePassword, &officer.CreatedAt, &officer.UpdatedAt); err != nil {
 			return nil, err
 		}
 		officers = append(officers, officer)
@@ -237,26 +248,56 @@ func (s *Server) officerAuditEvents() ([]OfficerAuditEvent, error) {
 }
 
 func (s *Server) insertOfficer(actor User, req createOfficerInput) (Officer, error) {
-	name := strings.TrimSpace(req.FullName)
+	memberID := strings.TrimSpace(req.MemberID)
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	role := strings.TrimSpace(req.Role)
-	if name == "" || email == "" || !validOfficerRole(role) {
+	if memberID == "" || !validOfficerRole(role) {
 		return Officer{}, errInvalidOfficer
 	}
-	if len(req.Password) < 8 {
-		return Officer{}, errInvalidTemporaryPassword
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return Officer{}, err
-	}
-	officer := Officer{ID: newID(), FullName: name, Email: email, Role: role, Active: true, MustChangePassword: true}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Officer{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`INSERT INTO users (id,email,password_hash,role,full_name,active,must_change_password) VALUES ($1,$2,$3,$4,$5,TRUE,TRUE)`, officer.ID, officer.Email, string(hash), officer.Role, officer.FullName); err != nil {
+	var memberNo, name, status string
+	if err := tx.QueryRow(`SELECT member_no,full_name,status FROM members WHERE id=$1`+rowLockClause(s.db), memberID).Scan(&memberNo, &name, &status); errors.Is(err, sql.ErrNoRows) {
+		return Officer{}, errInvalidOfficer
+	} else if err != nil {
+		return Officer{}, err
+	}
+	if status != "active" {
+		return Officer{}, errInactiveOfficerMember
+	}
+	var existingAppointment string
+	if err := tx.QueryRow(`SELECT id FROM officer_appointments WHERE member_id=$1`, memberID).Scan(&existingAppointment); err == nil {
+		return Officer{}, errMemberAlreadyOfficer
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Officer{}, err
+	}
+	var userID string
+	var userEmail string
+	var mustChange bool
+	err = tx.QueryRow(`SELECT id,email,must_change_password FROM users WHERE member_id=$1 AND historical_identity=FALSE`, memberID).Scan(&userID, &userEmail, &mustChange)
+	if errors.Is(err, sql.ErrNoRows) {
+		if email == "" || len(req.Password) < 8 {
+			return Officer{}, errInvalidTemporaryPassword
+		}
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return Officer{}, hashErr
+		}
+		userID, userEmail, mustChange = newID(), email, true
+		if _, err := tx.Exec(`INSERT INTO users (id,email,password_hash,role,member_id,full_name,active,must_change_password,historical_identity) VALUES ($1,$2,$3,'member',$4,$5,TRUE,TRUE,FALSE)`, userID, userEmail, string(hash), memberID, name); err != nil {
+			return Officer{}, err
+		}
+	} else if err != nil {
+		return Officer{}, err
+	}
+	officer := Officer{ID: newID(), UserID: userID, MemberID: memberID, MemberNo: memberNo, FullName: name, Email: userEmail, Role: role, Active: true, MustChangePassword: mustChange}
+	if _, err := tx.Exec(`INSERT INTO officer_appointments (id,member_id,role,active) VALUES ($1,$2,$3,TRUE)`, officer.ID, memberID, role); err != nil {
+		return Officer{}, err
+	}
+	if err := syncOfficerNotifications(tx, officer.UserID, officer.Role, true); err != nil {
 		return Officer{}, err
 	}
 	if err := insertOfficerAudit(tx, actor, officer, "created", "", officer.Role, nil, boolPointer(true)); err != nil {
@@ -269,9 +310,8 @@ func (s *Server) insertOfficer(actor User, req createOfficerInput) (Officer, err
 }
 
 func (s *Server) updateOfficerByID(actor User, id string, req updateOfficerInput) (Officer, error) {
-	name := strings.TrimSpace(req.FullName)
 	role := strings.TrimSpace(req.Role)
-	if name == "" || !validOfficerRole(role) || req.Active == nil {
+	if !validOfficerRole(role) || req.Active == nil {
 		return Officer{}, errInvalidOfficer
 	}
 	tx, err := s.db.Begin()
@@ -280,27 +320,41 @@ func (s *Server) updateOfficerByID(actor User, id string, req updateOfficerInput
 	}
 	defer func() { _ = tx.Rollback() }()
 	var current Officer
-	err = tx.QueryRow(`SELECT id,full_name,email,role,active,must_change_password,created_at,updated_at FROM users WHERE id=$1 AND role <> 'member'`+rowLockClause(s.db), id).Scan(&current.ID, &current.FullName, &current.Email, &current.Role, &current.Active, &current.MustChangePassword, &current.CreatedAt, &current.UpdatedAt)
+	err = scanOfficer(tx.QueryRow(`SELECT oa.id,u.id,m.id,m.member_no,m.full_name,u.email,oa.role,oa.active,u.must_change_password,oa.created_at,oa.updated_at
+		FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE
+		WHERE oa.id=$1`+rowLockClause(s.db), id), &current)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Officer{}, errOfficerNotFound
 	}
 	if err != nil {
 		return Officer{}, err
 	}
+	var memberStatus string
+	if err := tx.QueryRow(`SELECT status FROM members WHERE id=$1`, current.MemberID).Scan(&memberStatus); err != nil {
+		return Officer{}, err
+	}
+	if *req.Active && memberStatus != "active" {
+		return Officer{}, errInactiveOfficerMember
+	}
 	if current.Role == "ketua_utama" && current.Active && (role != "ketua_utama" || !*req.Active) {
 		var activeCount int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role='ketua_utama' AND active=TRUE`).Scan(&activeCount); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM officer_appointments oa JOIN members m ON m.id=oa.member_id WHERE oa.role='ketua_utama' AND oa.active=TRUE AND m.status='active'`).Scan(&activeCount); err != nil {
 			return Officer{}, err
 		}
 		if activeCount <= 1 {
 			return Officer{}, errLastActiveKetuaUtama
 		}
 	}
-	if _, err := tx.Exec(`UPDATE users SET full_name=$1,role=$2,active=$3,updated_at=CURRENT_TIMESTAMP WHERE id=$4`, name, role, *req.Active, id); err != nil {
+	if _, err := tx.Exec(`UPDATE officer_appointments SET role=$1,active=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$3`, role, *req.Active, id); err != nil {
 		return Officer{}, err
 	}
 	updated := current
-	updated.FullName, updated.Role, updated.Active = name, role, *req.Active
+	updated.Role, updated.Active = role, *req.Active
+	if current.Role != updated.Role || current.Active != updated.Active {
+		if err := syncOfficerNotifications(tx, updated.UserID, updated.Role, updated.Active); err != nil {
+			return Officer{}, err
+		}
+	}
 	if current.Role != role {
 		if err := insertOfficerAudit(tx, actor, updated, "role_changed", current.Role, role, nil, nil); err != nil {
 			return Officer{}, err
@@ -335,14 +389,16 @@ func (s *Server) resetOfficerPasswordByID(actor User, id, password string) error
 	}
 	defer func() { _ = tx.Rollback() }()
 	var target Officer
-	err = tx.QueryRow(`SELECT id,full_name,email,role,active,must_change_password,created_at,updated_at FROM users WHERE id=$1 AND role <> 'member'`+rowLockClause(s.db), id).Scan(&target.ID, &target.FullName, &target.Email, &target.Role, &target.Active, &target.MustChangePassword, &target.CreatedAt, &target.UpdatedAt)
+	err = scanOfficer(tx.QueryRow(`SELECT oa.id,u.id,m.id,m.member_no,m.full_name,u.email,oa.role,oa.active,u.must_change_password,oa.created_at,oa.updated_at
+		FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE
+		WHERE oa.id=$1`+rowLockClause(s.db), id), &target)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errOfficerNotFound
 	}
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE users SET password_hash=$1,must_change_password=TRUE,updated_at=CURRENT_TIMESTAMP WHERE id=$2`, string(hash), id); err != nil {
+	if _, err := tx.Exec(`UPDATE users SET password_hash=$1,must_change_password=TRUE,updated_at=CURRENT_TIMESTAMP WHERE id=$2`, string(hash), target.UserID); err != nil {
 		return err
 	}
 	if err := insertOfficerAudit(tx, actor, target, "password_reset", target.Role, target.Role, nil, nil); err != nil {
@@ -356,8 +412,16 @@ func insertOfficerAudit(tx *sql.Tx, actor User, target Officer, action, oldRole,
 	if actorName == "" {
 		actorName = actor.Email
 	}
-	_, err := tx.Exec(`INSERT INTO officer_audit_events (id,actor_id,actor_name,target_id,target_name,action,old_role,new_role,old_active,new_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, newID(), actor.ID, actorName, target.ID, target.FullName, action, oldRole, newRole, oldActive, newActive)
+	_, err := tx.Exec(`INSERT INTO officer_audit_events (id,actor_id,actor_member_id,actor_member_no,actor_name,target_id,target_member_id,target_member_no,target_name,target_appointment_id,action,old_role,new_role,old_active,new_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, newID(), actor.ID, actor.MemberID.String, actor.MemberNo, actorName, target.UserID, target.MemberID, target.MemberNo, target.FullName, target.ID, action, oldRole, newRole, oldActive, newActive)
 	return err
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanOfficer(row rowScanner, officer *Officer) error {
+	return row.Scan(&officer.ID, &officer.UserID, &officer.MemberID, &officer.MemberNo, &officer.FullName, &officer.Email, &officer.Role, &officer.Active, &officer.MustChangePassword, &officer.CreatedAt, &officer.UpdatedAt)
 }
 
 func boolPointer(value bool) *bool { return &value }

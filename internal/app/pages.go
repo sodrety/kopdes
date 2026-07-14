@@ -152,16 +152,12 @@ func (s *Server) homePage(c *gin.Context) {
 		c.Redirect(http.StatusSeeOther, "/password/change")
 		return
 	}
-	if user.Role == "member" {
-		if err := s.validateMemberSession(tokenUser, user); err != nil {
-			s.clearAuthCookie(c)
-			c.Redirect(http.StatusSeeOther, "/login")
-			return
-		}
-		c.Redirect(http.StatusSeeOther, "/member/dashboard")
+	if err := s.validateMemberSession(tokenUser, user); err != nil {
+		s.clearAuthCookie(c)
+		c.Redirect(http.StatusSeeOther, "/login")
 		return
 	}
-	c.Redirect(http.StatusSeeOther, "/admin/dashboard")
+	c.Redirect(http.StatusSeeOther, "/member/dashboard")
 }
 
 func (s *Server) adminDashboardPage(c *gin.Context) {

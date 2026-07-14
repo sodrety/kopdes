@@ -60,6 +60,31 @@ func TestConfigFromEnvSetsHTTPTimeoutDefaults(t *testing.T) {
 	}
 }
 
+func TestConfigFromEnvLoadsMemberBackedOfficerBootstrap(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://postgres:password@localhost:5432/kopdes?sslmode=disable")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("KETUA_UTAMA_MEMBER_ID", "member-ketua")
+	t.Setenv("LEGACY_OFFICER_MEMBER_MAPPINGS", `{"legacy@coop.test":"member-manager"}`)
+
+	cfg, err := app.ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("ConfigFromEnv returned error: %v", err)
+	}
+	if cfg.KetuaUtamaMemberID != "member-ketua" || cfg.LegacyOfficerMemberMappings["legacy@coop.test"] != "member-manager" {
+		t.Fatalf("unexpected Officer bootstrap config: %+v", cfg)
+	}
+}
+
+func TestConfigFromEnvRejectsInvalidLegacyOfficerMapping(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://postgres:password@localhost:5432/kopdes?sslmode=disable")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("LEGACY_OFFICER_MEMBER_MAPPINGS", `null`)
+
+	if _, err := app.ConfigFromEnv(); err == nil {
+		t.Fatal("expected null legacy Officer mapping to be rejected")
+	}
+}
+
 func TestConfigFromEnvSetsObservabilityDefaults(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://postgres:password@localhost:5432/kopdes?sslmode=disable")
 	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")

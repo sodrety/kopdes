@@ -39,10 +39,13 @@ func main() {
 	}
 	defer db.Close()
 
+	if err := app.PrepareLegacyOfficerMappings(db, cfg.LegacyOfficerMemberMappings); err != nil {
+		log.Fatal(err)
+	}
 	if err := app.Migrate(db); err != nil {
 		log.Fatal(err)
 	}
-	if err := app.EnsureKetuaUtamaUser(db, cfg.KetuaUtamaName, cfg.KetuaUtamaEmail, cfg.KetuaUtamaPassword); err != nil {
+	if err := app.EnsureKetuaUtamaUser(db, cfg.KetuaUtamaMemberID, cfg.KetuaUtamaEmail, cfg.KetuaUtamaPassword); err != nil {
 		log.Fatal(err)
 	}
 
