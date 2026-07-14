@@ -436,6 +436,42 @@ func TestTokenIsRejectedAfterUserRecordChanges(t *testing.T) {
 	assertError(t, rec.Body.Bytes(), "UNAUTHORIZED", "Invalid authentication token")
 }
 
+func TestBrowserPageInvalidAuthTokenRedirectsToLogin(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_token", Value: "not-a-token"})
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect status 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if location := rec.Header().Get("Location"); location != "/login" {
+		t.Fatalf("expected redirect to /login, got %q", location)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 || cookies[0].Name != "auth_token" || cookies[0].MaxAge != -1 {
+		t.Fatalf("expected invalid auth cookie to be cleared, got %+v", cookies)
+	}
+}
+
+func TestAPIInvalidCookieAuthTokenStillReturnsJSONUnauthorized(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_token", Value: "not-a-token"})
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertError(t, rec.Body.Bytes(), "UNAUTHORIZED", "Invalid authentication token")
+}
+
 func TestStatusFilterTreatsSQLInjectionPayloadAsLiteralValue(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
@@ -677,6 +713,160 @@ func TestAdminDashboardRequiresValidAdminToken(t *testing.T) {
 		}
 		assertError(t, rec.Body.Bytes(), "FORBIDDEN", "Insufficient role")
 	})
+}
+
+func TestBrowserPageWithInsufficientRoleRedirectsToLogin(t *testing.T) {
+	fixture := newTestFixture(t)
+	memberCookie := fixture.browserLogin(t, "member@coop.test", "password")
+
+	t.Run("regular browser request", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+		req.AddCookie(memberCookie)
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("expected redirect status 303, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if location := rec.Header().Get("Location"); location != "/login" {
+			t.Fatalf("expected redirect to /login, got %q", location)
+		}
+		cookies := rec.Result().Cookies()
+		if len(cookies) == 0 || cookies[0].Name != "auth_token" || cookies[0].MaxAge != -1 {
+			t.Fatalf("expected incompatible auth cookie to be cleared, got %+v", cookies)
+		}
+	})
+
+	t.Run("htmx browser request", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+		req.Header.Set("HX-Request", "true")
+		req.AddCookie(memberCookie)
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("expected status 204, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if redirect := rec.Header().Get("HX-Redirect"); redirect != "/login" {
+			t.Fatalf("expected HX-Redirect to /login, got %q", redirect)
+		}
+	})
+}
+
+func TestBrowserAPIInteractionsRedirectExpiredSessionsToLogin(t *testing.T) {
+	fixture := newTestFixture(t)
+
+	t.Run("htmx form submission", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/members", strings.NewReader("member_no=M-EXPIRED"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNoContent || rec.Header().Get("HX-Redirect") != "/login" {
+			t.Fatalf("expected HTMX redirect to login, got status=%d redirect=%q body=%s", rec.Code, rec.Header().Get("HX-Redirect"), rec.Body.String())
+		}
+	})
+
+	t.Run("download navigation", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/admin/exports/loans.csv", nil)
+		req.Header.Set("Sec-Fetch-Mode", "navigate")
+		req.Header.Set("Sec-Fetch-Dest", "document")
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/login" {
+			t.Fatalf("expected download navigation redirect to login, got status=%d location=%q body=%s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+		}
+	})
+}
+
+func TestStandardBrowserFormsRedirectOrRenderHTML(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+
+	t.Run("successful submission redirects", func(t *testing.T) {
+		body := "member_no=M-FORM-001&full_name=Form+Member&join_date=2026-07-13&status=active"
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/members", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "http://example.com")
+		req.AddCookie(adminCookie)
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusSeeOther || !strings.HasPrefix(rec.Header().Get("Location"), "/admin/members/") {
+			t.Fatalf("expected member page redirect, got status=%d location=%q body=%s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+		}
+	})
+
+	t.Run("failed submission renders localized page", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/members", strings.NewReader("member_no="))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set("Referer", "http://example.com/admin/members/new")
+		req.AddCookie(adminCookie)
+		req.AddCookie(&http.Cookie{Name: "kopdes_lang", Value: "id"})
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+			t.Fatalf("expected HTML validation page, got status=%d content-type=%q body=%s", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+		}
+		if body := rec.Body.String(); !strings.Contains(body, "Permintaan tidak dapat diselesaikan") || !strings.Contains(body, `href="/admin/members/new"`) {
+			t.Fatalf("expected localized error page with safe return link, got %s", body)
+		}
+	})
+}
+
+func TestUnknownBrowserRouteRendersLocalizedErrorPage(t *testing.T) {
+	fixture := newTestFixture(t)
+	req := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
+	req.Header.Set("Accept", "text/html")
+	req.AddCookie(&http.Cookie{Name: "kopdes_lang", Value: "id"})
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("expected HTML 404 page, got status=%d content-type=%q body=%s", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "Halaman yang diminta tidak ditemukan") || !strings.Contains(body, "<!doctype html>") {
+		t.Fatalf("expected localized browser error page instead of JSON, got %s", body)
+	}
+}
+
+func TestUnknownOrUnsupportedAPIRouteKeepsJSONContract(t *testing.T) {
+	fixture := newTestFixture(t)
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		status int
+		code   string
+	}{
+		{name: "unknown route", method: http.MethodGet, path: "/api/does-not-exist", status: http.StatusNotFound, code: "NOT_FOUND"},
+		{name: "unsupported method", method: http.MethodDelete, path: "/api/auth/login", status: http.StatusMethodNotAllowed, code: "METHOD_NOT_ALLOWED"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req.Header.Set("Accept", "application/json")
+			rec := httptest.NewRecorder()
+
+			fixture.server.ServeHTTP(rec, req)
+
+			if rec.Code != tt.status || !strings.Contains(rec.Header().Get("Content-Type"), "application/json") {
+				t.Fatalf("expected JSON status %d, got status=%d content-type=%q body=%s", tt.status, rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+			}
+			assertError(t, rec.Body.Bytes(), tt.code, map[string]string{"NOT_FOUND": "Page not found", "METHOD_NOT_ALLOWED": "Method not allowed"}[tt.code])
+		})
+	}
 }
 
 func TestAdminCanUseBrowserLoginAndSeeDashboardPage(t *testing.T) {
