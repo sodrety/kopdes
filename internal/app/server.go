@@ -74,30 +74,32 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	})
 
 	admin := router.Group("/api/admin")
-	admin.Use(server.requireRole("admin"))
-	admin.GET("/dashboard", server.adminDashboard)
-	admin.GET("/reports", server.adminReports)
-	admin.POST("/members", server.createMember)
-	admin.GET("/members", server.listMembers)
-	admin.GET("/members/:id", server.getMember)
-	admin.POST("/members/:id/user", server.createMemberUser)
-	admin.POST("/savings", server.recordSaving)
-	admin.GET("/savings", server.adminSavings)
-	admin.GET("/withdrawal-requests", server.adminWithdrawalRequests)
-	admin.POST("/withdrawal-requests/:id/approve", server.approveWithdrawalRequest)
-	admin.POST("/withdrawal-requests/:id/reject", server.rejectWithdrawalRequest)
-	admin.GET("/loan-requests", server.adminLoanRequests)
-	admin.POST("/loan-requests/:id/approve", server.approveLoanRequest)
-	admin.POST("/loan-requests/:id/reject", server.rejectLoanRequest)
-	admin.GET("/loans", server.adminLoans)
-	admin.GET("/loans/:id", server.adminLoanDetail)
-	admin.POST("/loans/:id/start-date", server.correctLoanStartDate)
-	admin.POST("/loans/:id/repayments", server.recordLoanRepayment)
-	admin.GET("/exports/savings.csv", server.exportSavingsCSV)
-	admin.GET("/exports/withdrawal-requests.csv", server.exportWithdrawalRequestsCSV)
-	admin.GET("/exports/loans.csv", server.exportLoansCSV)
-	admin.GET("/loans/:id/export.pdf", server.exportLoanPDF)
-	admin.GET("/exports/repayments.csv", server.exportRepaymentsCSV)
+	admin.GET("/dashboard", server.requirePermission(PermissionDashboardView), server.adminDashboard)
+	admin.GET("/reports", server.requirePermission(PermissionReportsView), server.adminReports)
+	admin.POST("/members", server.requirePermission(PermissionMembersManage), server.createMember)
+	admin.GET("/members", server.requirePermission(PermissionMembersView), server.listMembers)
+	admin.GET("/members/:id", server.requirePermission(PermissionMembersView), server.getMember)
+	admin.POST("/members/:id/user", server.requirePermission(PermissionMembersManage), server.createMemberUser)
+	admin.POST("/savings", server.requirePermission(PermissionSavingsRecord), server.recordSaving)
+	admin.GET("/savings", server.requirePermission(PermissionSavingsView), server.adminSavings)
+	admin.GET("/withdrawal-requests", server.requirePermission(PermissionRequestsView), server.adminWithdrawalRequests)
+	admin.POST("/withdrawal-requests/:id/approve", server.requirePermission(PermissionRequestsDecide), server.approveWithdrawalRequest)
+	admin.POST("/withdrawal-requests/:id/reject", server.requirePermission(PermissionRequestsDecide), server.rejectWithdrawalRequest)
+	admin.GET("/loan-requests", server.requirePermission(PermissionRequestsView), server.adminLoanRequests)
+	admin.POST("/loan-requests/:id/approve", server.requirePermission(PermissionRequestsDecide), server.approveLoanRequest)
+	admin.POST("/loan-requests/:id/reject", server.requirePermission(PermissionRequestsDecide), server.rejectLoanRequest)
+	admin.GET("/loans", server.requirePermission(PermissionLoansView), server.adminLoans)
+	admin.GET("/loans/:id", server.requirePermission(PermissionLoansView), server.adminLoanDetail)
+	admin.POST("/loans/:id/repayments", server.requirePermission(PermissionRepaymentsRecord), server.recordLoanRepayment)
+	admin.GET("/exports/savings.csv", server.requirePermission(PermissionReportsView), server.exportSavingsCSV)
+	admin.GET("/exports/withdrawal-requests.csv", server.requirePermission(PermissionReportsView), server.exportWithdrawalRequestsCSV)
+	admin.GET("/exports/loans.csv", server.requirePermission(PermissionReportsView), server.exportLoansCSV)
+	admin.GET("/loans/:id/export.pdf", server.requirePermission(PermissionReportsView), server.exportLoanPDF)
+	admin.GET("/exports/repayments.csv", server.requirePermission(PermissionReportsView), server.exportRepaymentsCSV)
+	admin.GET("/officers", server.requirePermission(PermissionOfficersManage), server.listOfficers)
+	admin.POST("/officers", server.requirePermission(PermissionOfficersManage), server.createOfficer)
+	admin.POST("/officers/:id/update", server.requirePermission(PermissionOfficersManage), server.updateOfficer)
+	admin.POST("/officers/:id/reset-password", server.requirePermission(PermissionOfficersManage), server.resetOfficerPassword)
 
 	member := router.Group("/api/member")
 	member.Use(server.requireRole("member"))
@@ -106,27 +108,35 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	member.GET("/savings/summary", server.memberSavingSummary)
 	member.POST("/withdrawal-requests", server.submitWithdrawalRequest)
 	member.GET("/withdrawal-requests", server.memberWithdrawalRequests)
+	member.POST("/withdrawal-requests/:id/cancel", server.cancelWithdrawalRequest)
 	member.GET("/dashboard", server.memberDashboard)
 	member.POST("/loan-requests", server.submitLoanRequest)
 	member.GET("/loan-requests", server.memberLoanRequests)
+	member.POST("/loan-requests/:id/cancel", server.cancelLoanRequest)
 	member.GET("/loans/active", server.memberActiveLoan)
 	member.GET("/loans/outstanding", server.memberOutstandingLoans)
 	member.GET("/repayments", server.memberRepayments)
+	router.POST("/api/account/password", server.requireAuthenticated(), server.changePassword)
+	router.GET("/api/notifications", server.requireAuthenticated(), server.listNotifications)
+	router.POST("/api/notifications/:id/read", server.requireAuthenticated(), server.markNotificationRead)
+	router.GET("/password/change", server.requireAuthenticated(), server.passwordChangePage)
+	router.GET("/notifications", server.requireAuthenticated(), server.notificationsPage)
 
-	router.GET("/admin/dashboard", server.requireRole("admin"), server.adminDashboardPage)
-	router.GET("/admin/reports", server.requireRole("admin"), server.adminReportsPage)
-	router.GET("/admin/reports/balance", server.requireRole("admin"), server.adminBalanceReportPage)
-	router.GET("/admin/reports/profit-loss", server.requireRole("admin"), server.adminProfitLossReportPage)
-	router.GET("/admin/members", server.requireRole("admin"), server.adminMembersPage)
-	router.GET("/admin/members/new", server.requireRole("admin"), server.adminMemberNewPage)
-	router.GET("/admin/members/:id", server.requireRole("admin"), server.adminMemberDetailPage)
-	router.GET("/admin/savings", server.requireRole("admin"), server.adminSavingsPage)
-	router.GET("/admin/savings/new", server.requireRole("admin"), server.adminSavingNewPage)
-	router.GET("/admin/withdrawal-requests", server.requireRole("admin"), server.adminWithdrawalRequestsPage)
-	router.GET("/admin/loan-requests", server.requireRole("admin"), server.adminLoanRequestsPage)
-	router.GET("/admin/loans", server.requireRole("admin"), server.adminLoansPage)
-	router.GET("/admin/loans/:id", server.requireRole("admin"), server.adminLoanDetailPage)
-	router.GET("/admin/repayments", server.requireRole("admin"), server.adminRepaymentsPage)
+	router.GET("/admin/dashboard", server.requirePermission(PermissionDashboardView), server.adminDashboardPage)
+	router.GET("/admin/reports", server.requirePermission(PermissionReportsView), server.adminReportsPage)
+	router.GET("/admin/reports/balance", server.requirePermission(PermissionReportsView), server.adminBalanceReportPage)
+	router.GET("/admin/reports/profit-loss", server.requirePermission(PermissionReportsView), server.adminProfitLossReportPage)
+	router.GET("/admin/members", server.requirePermission(PermissionMembersView), server.adminMembersPage)
+	router.GET("/admin/members/new", server.requirePermission(PermissionMembersManage), server.adminMemberNewPage)
+	router.GET("/admin/members/:id", server.requirePermission(PermissionMembersView), server.adminMemberDetailPage)
+	router.GET("/admin/savings", server.requirePermission(PermissionSavingsView), server.adminSavingsPage)
+	router.GET("/admin/savings/new", server.requirePermission(PermissionSavingsRecord), server.adminSavingNewPage)
+	router.GET("/admin/withdrawal-requests", server.requirePermission(PermissionRequestsView), server.adminWithdrawalRequestsPage)
+	router.GET("/admin/loan-requests", server.requirePermission(PermissionRequestsView), server.adminLoanRequestsPage)
+	router.GET("/admin/loans", server.requirePermission(PermissionLoansView), server.adminLoansPage)
+	router.GET("/admin/loans/:id", server.requirePermission(PermissionLoansView), server.adminLoanDetailPage)
+	router.GET("/admin/repayments", server.requirePermission(PermissionRepaymentsView), server.adminRepaymentsPage)
+	router.GET("/admin/officers", server.requirePermission(PermissionOfficersManage), server.adminOfficersPage)
 	router.GET("/member/dashboard", server.requireRole("member"), server.memberDashboardPage)
 	router.GET("/member/profile", server.requireRole("member"), server.memberProfilePage)
 	router.GET("/member/withdrawal-requests", server.requireRole("member"), server.memberWithdrawalRequestsPage)
@@ -236,6 +246,9 @@ func (s *Server) login(c *gin.Context) {
 	if user.Role == "member" {
 		redirectPath = "/member/dashboard"
 	}
+	if user.MustChangePassword {
+		redirectPath = "/password/change"
+	}
 
 	if isHTMXRequest(c) {
 		s.setAuthCookie(c, token)
@@ -250,9 +263,11 @@ func (s *Server) login(c *gin.Context) {
 	}
 
 	userBody := gin.H{
-		"id":    user.ID,
-		"email": user.Email,
-		"role":  user.Role,
+		"id":                   user.ID,
+		"email":                user.Email,
+		"role":                 user.Role,
+		"full_name":            user.FullName,
+		"must_change_password": user.MustChangePassword,
 	}
 	if user.MemberID.Valid {
 		userBody["member_id"] = user.MemberID.String
@@ -301,50 +316,17 @@ func (s *Server) adminDashboard(c *gin.Context) {
 
 func (s *Server) requireRole(role string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenValue := bearerToken(c.GetHeader("Authorization"))
-		usesBearerToken := tokenValue != ""
-		if tokenValue == "" {
-			if cookie, err := c.Cookie("auth_token"); err == nil {
-				tokenValue = cookie
-			}
-		}
-		if tokenValue == "" {
-			s.respondUnauthorized(c, usesBearerToken, "Authentication token is required", false)
-			return
-		}
-
-		tokenUser, err := ParseToken(s.cfg.JWTSecret, tokenValue)
-		if err != nil {
-			s.respondUnauthorized(c, usesBearerToken, "Invalid authentication token", true)
-			return
-		}
-		user, err := s.validateSessionUser(tokenUser)
-		if err != nil {
-			s.respondUnauthorized(c, usesBearerToken, "Invalid authentication token", true)
+		user, ok := s.authenticateRequest(c)
+		if !ok {
 			return
 		}
 		if user.Role != role {
-			if shouldRedirectAuthFailure(c, usesBearerToken) {
-				s.clearAuthCookie(c)
-				if isHTMXRequest(c) {
-					respondHXRedirect(c, "/login")
-				} else {
-					c.Redirect(http.StatusSeeOther, "/login")
-				}
-				c.Abort()
-				return
-			}
 			respondError(c, http.StatusForbidden, "FORBIDDEN", "Insufficient role")
 			c.Abort()
 			return
 		}
-		if role == "member" {
-			if err := s.validateMemberSession(tokenUser, user); err != nil {
-				s.respondUnauthorized(c, usesBearerToken, "Invalid authentication token", true)
-				return
-			}
-		}
 		c.Set("user", user)
+		s.decorateAuthenticatedContext(c, user)
 		c.Next()
 	}
 }
@@ -424,7 +406,7 @@ func (s *Server) validateSessionUser(tokenUser User) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
-	if current.Role != tokenUser.Role || !strings.EqualFold(current.Email, tokenUser.Email) {
+	if !current.Active || current.Role != tokenUser.Role || !strings.EqualFold(current.Email, tokenUser.Email) {
 		return User{}, ErrUnauthorized
 	}
 	return current, nil

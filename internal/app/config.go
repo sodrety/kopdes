@@ -8,40 +8,42 @@ import (
 )
 
 type Config struct {
-	Address         string
-	DatabaseDriver  string
-	DatabaseURL     string
-	JWTSecret       string
-	AdminEmail      string
-	AdminPassword   string
-	AppEnv          string
-	ServiceName     string
-	ServiceVersion  string
-	MetricsEnabled  bool
-	TracingEnabled  bool
-	TracingExporter string
-	TracingEndpoint string
-	TracingInsecure bool
-	CookieSecure    bool
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
+	Address            string
+	DatabaseDriver     string
+	DatabaseURL        string
+	JWTSecret          string
+	KetuaUtamaName     string
+	KetuaUtamaEmail    string
+	KetuaUtamaPassword string
+	AppEnv             string
+	ServiceName        string
+	ServiceVersion     string
+	MetricsEnabled     bool
+	TracingEnabled     bool
+	TracingExporter    string
+	TracingEndpoint    string
+	TracingInsecure    bool
+	CookieSecure       bool
+	ReadTimeout        time.Duration
+	WriteTimeout       time.Duration
+	IdleTimeout        time.Duration
 }
 
 func ConfigFromEnv() (Config, error) {
 	appEnv := envOrDefault("APP_ENV", "development")
 	cfg := Config{
-		Address:        envOrDefault("APP_ADDRESS", ":8080"),
-		DatabaseDriver: envOrDefault("DATABASE_DRIVER", "pgx"),
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		JWTSecret:      os.Getenv("JWT_SECRET"),
-		AdminEmail:     os.Getenv("ADMIN_EMAIL"),
-		AdminPassword:  os.Getenv("ADMIN_PASSWORD"),
-		AppEnv:         appEnv,
-		ServiceName:    envOrDefault("SERVICE_NAME", "kopdes"),
-		ServiceVersion: envOrDefault("SERVICE_VERSION", "development"),
-		MetricsEnabled: !isFalsey(os.Getenv("METRICS_ENABLED")),
-		TracingEnabled: isTruthy(os.Getenv("TRACING_ENABLED")),
+		Address:            envOrDefault("APP_ADDRESS", ":8080"),
+		DatabaseDriver:     envOrDefault("DATABASE_DRIVER", "pgx"),
+		DatabaseURL:        os.Getenv("DATABASE_URL"),
+		JWTSecret:          os.Getenv("JWT_SECRET"),
+		KetuaUtamaName:     os.Getenv("KETUA_UTAMA_NAME"),
+		KetuaUtamaEmail:    os.Getenv("KETUA_UTAMA_EMAIL"),
+		KetuaUtamaPassword: os.Getenv("KETUA_UTAMA_PASSWORD"),
+		AppEnv:             appEnv,
+		ServiceName:        envOrDefault("SERVICE_NAME", "kopdes"),
+		ServiceVersion:     envOrDefault("SERVICE_VERSION", "development"),
+		MetricsEnabled:     !isFalsey(os.Getenv("METRICS_ENABLED")),
+		TracingEnabled:     isTruthy(os.Getenv("TRACING_ENABLED")),
 		TracingExporter: strings.ToLower(strings.TrimSpace(envOrDefault(
 			"TRACING_EXPORTER",
 			envOrDefault("OTEL_TRACES_EXPORTER", "stdout"),

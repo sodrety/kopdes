@@ -106,6 +106,20 @@ func pageData(c *gin.Context, title, active, heading, description string, values
 	values["Active"] = active
 	values["Heading"] = heading
 	values["Description"] = description
+	if user, ok := currentUser(c); ok {
+		values["CurrentUser"] = user
+		values["Role"] = user.Role
+	}
+	if permissions, ok := c.Get("permissions"); ok {
+		values["Permissions"] = permissions
+	} else {
+		values["Permissions"] = map[string]bool{}
+	}
+	if count, ok := c.Get("unread_notifications"); ok {
+		values["UnreadNotifications"] = count
+	} else {
+		values["UnreadNotifications"] = 0
+	}
 	return values
 }
 
@@ -132,6 +146,10 @@ func (s *Server) homePage(c *gin.Context) {
 	if err != nil {
 		s.clearAuthCookie(c)
 		c.Redirect(http.StatusSeeOther, "/login")
+		return
+	}
+	if user.MustChangePassword {
+		c.Redirect(http.StatusSeeOther, "/password/change")
 		return
 	}
 	if user.Role == "member" {

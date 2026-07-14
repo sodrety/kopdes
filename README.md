@@ -40,11 +40,12 @@ TRACING_ENABLED=false
 TRACING_EXPORTER=stdout
 TRACING_ENDPOINT=
 TRACING_INSECURE=false
-ADMIN_EMAIL=admin@coop.test
-ADMIN_PASSWORD=password
+KETUA_UTAMA_NAME="Ketua Utama"
+KETUA_UTAMA_EMAIL=ketua-utama@coop.test
+KETUA_UTAMA_PASSWORD=password
 ```
 
-When `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set, the app creates the admin user if it does not already exist.
+When all three `KETUA_UTAMA_*` values are set, the app creates the initial Ketua Utama if it does not already exist. Ketua Utama can then create the other Officer accounts in the application.
 `APP_ENV=staging` or `APP_ENV=production` enables secure auth cookies by default. Set `COOKIE_SECURE` explicitly to override that default.
 
 ## Run

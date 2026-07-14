@@ -42,7 +42,7 @@ func main() {
 	if err := app.Migrate(db); err != nil {
 		log.Fatal(err)
 	}
-	if err := app.EnsureAdminUser(db, cfg.AdminEmail, cfg.AdminPassword); err != nil {
+	if err := app.EnsureKetuaUtamaUser(db, cfg.KetuaUtamaName, cfg.KetuaUtamaEmail, cfg.KetuaUtamaPassword); err != nil {
 		log.Fatal(err)
 	}
 

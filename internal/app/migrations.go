@@ -176,6 +176,10 @@ var migrations = []migration{
 		Version: 11,
 		Name:    "enforce_maximum_loan_tenor",
 	},
+	{
+		Version: 12,
+		Name:    "add_officer_hierarchy_and_approvals",
+	},
 }
 
 func Migrate(db *sql.DB) error {
@@ -216,7 +220,7 @@ func migrationApplied(db *sql.DB, version int) (bool, error) {
 
 func applyMigration(db *sql.DB, migration migration) error {
 	isSQLite := strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
-	if isSQLite && migration.Version == 9 {
+	if isSQLite && (migration.Version == 9 || migration.Version == 12) {
 		conn, err := db.Conn(context.Background())
 		if err != nil {
 			return err
@@ -281,6 +285,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 			return err
 		}
 	}
+	if migration.Version == 12 {
+		if err := addOfficerHierarchyAndApprovals(tx, isSQLite); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`,
 		migration.Version,
@@ -289,6 +298,263 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 		return err
 	}
 	return tx.Commit()
+}
+
+func addOfficerHierarchyAndApprovals(tx *sql.Tx, isSQLite bool) error {
+	if isSQLite {
+		if err := rebuildSQLiteUsersForOfficers(tx); err != nil {
+			return fmt.Errorf("rebuild sqlite users: %w", err)
+		}
+		if err := rebuildSQLiteLoanRequestsForApprovals(tx); err != nil {
+			return fmt.Errorf("rebuild sqlite loan requests: %w", err)
+		}
+		if err := rebuildSQLiteWithdrawalRequestsForApprovals(tx); err != nil {
+			return fmt.Errorf("rebuild sqlite withdrawal requests: %w", err)
+		}
+	} else if err := alterPostgresForOfficerApprovals(tx); err != nil {
+		return fmt.Errorf("alter postgres officer approvals: %w", err)
+	}
+
+	statements := []string{
+		`CREATE TABLE loan_request_approvals (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			stage TEXT NOT NULL CHECK (stage IN ('manager', 'ketua_i', 'ketua_ii', 'ketua_utama')),
+			decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
+			officer_id TEXT NOT NULL,
+			officer_name TEXT NOT NULL,
+			officer_role TEXT NOT NULL CHECK (officer_role IN ('manager', 'ketua_i', 'ketua_ii', 'ketua_utama')),
+			note TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (request_id, stage),
+			FOREIGN KEY (request_id) REFERENCES loan_requests(id),
+			FOREIGN KEY (officer_id) REFERENCES users(id)
+		)`,
+		`CREATE INDEX idx_loan_request_approvals_request ON loan_request_approvals(request_id, created_at)`,
+		`CREATE TABLE withdrawal_request_approvals (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			stage TEXT NOT NULL CHECK (stage IN ('manager', 'ketua_i', 'ketua_ii', 'ketua_utama')),
+			decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
+			officer_id TEXT NOT NULL,
+			officer_name TEXT NOT NULL,
+			officer_role TEXT NOT NULL CHECK (officer_role IN ('manager', 'ketua_i', 'ketua_ii', 'ketua_utama')),
+			note TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (request_id, stage),
+			FOREIGN KEY (request_id) REFERENCES withdrawal_requests(id),
+			FOREIGN KEY (officer_id) REFERENCES users(id)
+		)`,
+		`CREATE INDEX idx_withdrawal_request_approvals_request ON withdrawal_request_approvals(request_id, created_at)`,
+		`CREATE TABLE withdrawal_reservations (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL UNIQUE,
+			member_id TEXT NOT NULL,
+			amount INTEGER NOT NULL CHECK (amount > 0),
+			status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'released', 'consumed')),
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (request_id) REFERENCES withdrawal_requests(id),
+			FOREIGN KEY (member_id) REFERENCES members(id)
+		)`,
+		`CREATE INDEX idx_withdrawal_reservations_member_status ON withdrawal_reservations(member_id, status)`,
+		`CREATE TABLE officer_audit_events (
+			id TEXT PRIMARY KEY,
+			actor_id TEXT NOT NULL,
+			actor_name TEXT NOT NULL,
+			target_id TEXT NOT NULL,
+			target_name TEXT NOT NULL,
+			action TEXT NOT NULL CHECK (action IN ('created', 'role_changed', 'activated', 'deactivated', 'password_reset')),
+			old_role TEXT NOT NULL DEFAULT '',
+			new_role TEXT NOT NULL DEFAULT '',
+			old_active BOOLEAN NULL,
+			new_active BOOLEAN NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (actor_id) REFERENCES users(id),
+			FOREIGN KEY (target_id) REFERENCES users(id)
+		)`,
+		`CREATE INDEX idx_officer_audit_events_target ON officer_audit_events(target_id, created_at)`,
+		`CREATE TABLE notification_events (
+			id TEXT PRIMARY KEY,
+			event_type TEXT NOT NULL,
+			request_type TEXT NOT NULL DEFAULT '',
+			request_id TEXT NOT NULL DEFAULT '',
+			payload TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE notifications (
+			id TEXT PRIMARY KEY,
+			event_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			title_key TEXT NOT NULL,
+			body_key TEXT NOT NULL,
+			link TEXT NOT NULL DEFAULT '',
+			is_read BOOLEAN NOT NULL DEFAULT FALSE,
+			resolved_at TIMESTAMP NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (event_id) REFERENCES notification_events(id),
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
+		`CREATE INDEX idx_notifications_user_state ON notifications(user_id, resolved_at, is_read, created_at)`,
+		`INSERT INTO withdrawal_reservations (id, request_id, member_id, amount, status)
+		 SELECT 'migration-' || id, id, member_id, amount, 'active' FROM withdrawal_requests WHERE status = 'pending'`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	if !isSQLite {
+		for _, table := range []string{
+			"loan_request_approvals",
+			"withdrawal_request_approvals",
+			"withdrawal_reservations",
+			"officer_audit_events",
+			"notification_events",
+			"notifications",
+		} {
+			if _, err := tx.Exec(`ALTER TABLE ` + table + ` ENABLE ROW LEVEL SECURITY`); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func rebuildSQLiteUsersForOfficers(tx *sql.Tx) error {
+	statements := []string{
+		`CREATE TABLE users_v12 (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			role TEXT NOT NULL CHECK (role IN ('member', 'manager', 'ketua_i', 'ketua_ii', 'ketua_utama')),
+			member_id TEXT NULL,
+			full_name TEXT NOT NULL DEFAULT '',
+			active BOOLEAN NOT NULL DEFAULT TRUE,
+			must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`INSERT INTO users_v12 (id, email, password_hash, role, member_id, full_name, active, must_change_password, created_at, updated_at)
+		 SELECT id, email, password_hash, CASE WHEN role = 'admin' THEN 'manager' ELSE role END, member_id,
+		 CASE WHEN role = 'admin' THEN email ELSE '' END, TRUE, FALSE, created_at, updated_at FROM users`,
+		`DROP TABLE users`,
+		`ALTER TABLE users_v12 RENAME TO users`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rebuildSQLiteLoanRequestsForApprovals(tx *sql.Tx) error {
+	statements := []string{
+		`DROP TRIGGER IF EXISTS loan_requests_duration_insert`,
+		`DROP TRIGGER IF EXISTS loan_requests_duration_update`,
+		`CREATE TABLE loan_requests_v12 (
+			id TEXT PRIMARY KEY,
+			member_id TEXT NOT NULL,
+			requested_amount INTEGER NOT NULL CHECK (requested_amount > 0),
+			duration_months INTEGER NOT NULL CHECK (duration_months > 0),
+			purpose TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+			current_approval_stage TEXT NULL CHECK (current_approval_stage IS NULL OR current_approval_stage IN ('manager', 'ketua_i', 'ketua_ii', 'ketua_utama')),
+			proposed_approved_amount INTEGER NULL CHECK (proposed_approved_amount IS NULL OR proposed_approved_amount > 0),
+			proposed_duration_months INTEGER NULL CHECK (proposed_duration_months IS NULL OR proposed_duration_months BETWEEN 1 AND 120),
+			proposed_start_date TEXT NOT NULL DEFAULT '',
+			proposed_interest_rate_bps INTEGER NULL CHECK (proposed_interest_rate_bps IS NULL OR proposed_interest_rate_bps BETWEEN 0 AND 1000),
+			reviewed_by TEXT NULL,
+			reviewed_at TIMESTAMP NULL,
+			rejection_reason TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (member_id) REFERENCES members(id),
+			FOREIGN KEY (reviewed_by) REFERENCES users(id)
+		)`,
+		`INSERT INTO loan_requests_v12 (id, member_id, requested_amount, duration_months, purpose, status, current_approval_stage, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at)
+		 SELECT id, member_id, requested_amount, duration_months, purpose, status, CASE WHEN status = 'pending' THEN 'manager' ELSE NULL END, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM loan_requests`,
+		`DROP TABLE loan_requests`,
+		`ALTER TABLE loan_requests_v12 RENAME TO loan_requests`,
+		`CREATE UNIQUE INDEX idx_loan_requests_one_pending_per_member ON loan_requests(member_id) WHERE status = 'pending'`,
+		`CREATE TRIGGER loan_requests_duration_insert BEFORE INSERT ON loan_requests WHEN NEW.duration_months < 1 OR NEW.duration_months > 120 BEGIN SELECT RAISE(ABORT, 'loan request duration out of range'); END`,
+		`CREATE TRIGGER loan_requests_duration_update BEFORE UPDATE OF duration_months ON loan_requests WHEN NEW.duration_months < 1 OR NEW.duration_months > 120 BEGIN SELECT RAISE(ABORT, 'loan request duration out of range'); END`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rebuildSQLiteWithdrawalRequestsForApprovals(tx *sql.Tx) error {
+	statements := []string{
+		`CREATE TABLE withdrawal_requests_v12 (
+			id TEXT PRIMARY KEY,
+			member_id TEXT NOT NULL,
+			amount INTEGER NOT NULL CHECK (amount > 0),
+			note TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+			current_approval_stage TEXT NULL CHECK (current_approval_stage IS NULL OR current_approval_stage IN ('manager', 'ketua_i', 'ketua_ii', 'ketua_utama')),
+			reviewed_by TEXT NULL,
+			reviewed_at TIMESTAMP NULL,
+			rejection_reason TEXT NOT NULL DEFAULT '',
+			saving_record_id TEXT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (member_id) REFERENCES members(id),
+			FOREIGN KEY (reviewed_by) REFERENCES users(id),
+			FOREIGN KEY (saving_record_id) REFERENCES saving_records(id)
+		)`,
+		`INSERT INTO withdrawal_requests_v12 (id, member_id, amount, note, status, current_approval_stage, reviewed_by, reviewed_at, rejection_reason, saving_record_id, created_at, updated_at)
+		 SELECT id, member_id, amount, note, status, CASE WHEN status = 'pending' THEN 'manager' ELSE NULL END, reviewed_by, reviewed_at, rejection_reason, saving_record_id, created_at, updated_at FROM withdrawal_requests`,
+		`DROP TABLE withdrawal_requests`,
+		`ALTER TABLE withdrawal_requests_v12 RENAME TO withdrawal_requests`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func alterPostgresForOfficerApprovals(tx *sql.Tx) error {
+	statements := []string{
+		`ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE`,
+		`ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`,
+		`UPDATE users SET role = 'manager', full_name = CASE WHEN full_name = '' THEN email ELSE full_name END WHERE role = 'admin'`,
+		`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('member', 'manager', 'ketua_i', 'ketua_ii', 'ketua_utama'))`,
+		`ALTER TABLE loan_requests ADD COLUMN current_approval_stage TEXT NULL`,
+		`ALTER TABLE loan_requests ADD COLUMN proposed_approved_amount INTEGER NULL`,
+		`ALTER TABLE loan_requests ADD COLUMN proposed_duration_months INTEGER NULL`,
+		`ALTER TABLE loan_requests ADD COLUMN proposed_start_date TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE loan_requests ADD COLUMN proposed_interest_rate_bps INTEGER NULL`,
+		`ALTER TABLE loan_requests DROP CONSTRAINT IF EXISTS loan_requests_status_check`,
+		`ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled'))`,
+		`ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_approval_stage_check CHECK (current_approval_stage IS NULL OR current_approval_stage IN ('manager', 'ketua_i', 'ketua_ii', 'ketua_utama'))`,
+		`ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_proposed_amount_check CHECK (proposed_approved_amount IS NULL OR proposed_approved_amount > 0)`,
+		`ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_proposed_duration_check CHECK (proposed_duration_months IS NULL OR proposed_duration_months BETWEEN 1 AND 120)`,
+		`ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_proposed_rate_check CHECK (proposed_interest_rate_bps IS NULL OR proposed_interest_rate_bps BETWEEN 0 AND 1000)`,
+		`UPDATE loan_requests SET current_approval_stage = CASE WHEN status = 'pending' THEN 'manager' ELSE NULL END`,
+		`ALTER TABLE withdrawal_requests ADD COLUMN current_approval_stage TEXT NULL`,
+		`ALTER TABLE withdrawal_requests DROP CONSTRAINT IF EXISTS withdrawal_requests_status_check`,
+		`ALTER TABLE withdrawal_requests ADD CONSTRAINT withdrawal_requests_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled'))`,
+		`ALTER TABLE withdrawal_requests ADD CONSTRAINT withdrawal_requests_approval_stage_check CHECK (current_approval_stage IS NULL OR current_approval_stage IN ('manager', 'ketua_i', 'ketua_ii', 'ketua_utama'))`,
+		`UPDATE withdrawal_requests SET current_approval_stage = CASE WHEN status = 'pending' THEN 'manager' ELSE NULL END`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func enforceMaximumLoanTenor(tx *sql.Tx, isSQLite bool) error {

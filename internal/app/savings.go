@@ -77,6 +77,10 @@ func (s *Server) recordSaving(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Withdrawals can only use Simpanan Sukarela")
 		return
 	}
+	if errors.Is(err, errDirectWithdrawalNotAllowed) {
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Sukarela withdrawals must use the approval chain")
+		return
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", "Member not found")
 		return
@@ -128,9 +132,10 @@ func (s *Server) memberSavingSummary(c *gin.Context) {
 }
 
 var (
-	errInvalidSaving             = errors.New("invalid saving")
-	errInactiveSavingMember      = errors.New("inactive saving member")
-	errInsufficientSavingBalance = errors.New("insufficient saving balance")
+	errInvalidSaving              = errors.New("invalid saving")
+	errInactiveSavingMember       = errors.New("inactive saving member")
+	errInsufficientSavingBalance  = errors.New("insufficient saving balance")
+	errDirectWithdrawalNotAllowed = errors.New("direct withdrawal not allowed")
 )
 
 func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecord, error) {
@@ -140,6 +145,9 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 	recordDate := strings.TrimSpace(req.RecordDate)
 	if recordType == "" {
 		recordType = "deposit"
+	}
+	if recordType == "withdrawal" {
+		return SavingRecord{}, errDirectWithdrawalNotAllowed
 	}
 	if memberID == "" || !validSavingType(recordType) || !validSavingCategory(category) || req.Amount <= 0 || recordDate == "" {
 		return SavingRecord{}, errInvalidSaving
@@ -223,7 +231,7 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 }
 
 func validSavingType(recordType string) bool {
-	return recordType == "deposit" || recordType == "withdrawal"
+	return recordType == "deposit"
 }
 
 func validSavingCategory(category string) bool {
@@ -334,12 +342,13 @@ func (s *Server) latestSavingsByMember(memberID string, limit int) ([]SavingReco
 }
 
 type SavingSummary struct {
-	TotalDeposit    int `json:"total_deposit"`
-	TotalWithdrawal int `json:"total_withdrawal"`
-	CurrentBalance  int `json:"current_balance"`
-	PokokBalance    int `json:"pokok_balance"`
-	WajibBalance    int `json:"wajib_balance"`
-	SukarelaBalance int `json:"sukarela_balance"`
+	TotalDeposit               int `json:"total_deposit"`
+	TotalWithdrawal            int `json:"total_withdrawal"`
+	CurrentBalance             int `json:"current_balance"`
+	PokokBalance               int `json:"pokok_balance"`
+	WajibBalance               int `json:"wajib_balance"`
+	SukarelaBalance            int `json:"sukarela_balance"`
+	AvailableWithdrawalBalance int `json:"available_withdrawal_balance"`
 }
 
 func (s SavingSummary) BalanceForCategory(category string) int {
@@ -356,7 +365,16 @@ func (s SavingSummary) BalanceForCategory(category string) int {
 }
 
 func (s *Server) savingSummary(memberID string) (SavingSummary, error) {
-	return savingSummary(s.db, memberID)
+	summary, err := savingSummary(s.db, memberID)
+	if err != nil {
+		return SavingSummary{}, err
+	}
+	var reserved int
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM withdrawal_reservations WHERE member_id=$1 AND status='active'`, memberID).Scan(&reserved); err != nil {
+		return SavingSummary{}, err
+	}
+	summary.AvailableWithdrawalBalance = summary.SukarelaBalance - reserved
+	return summary, nil
 }
 
 type savingSummaryQuerier interface {
@@ -380,5 +398,6 @@ func savingSummary(q savingSummaryQuerier, memberID string) (SavingSummary, erro
 		return SavingSummary{}, err
 	}
 	summary.CurrentBalance = summary.TotalDeposit - summary.TotalWithdrawal
+	summary.AvailableWithdrawalBalance = summary.SukarelaBalance
 	return summary, nil
 }

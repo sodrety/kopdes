@@ -10,29 +10,29 @@ import (
 )
 
 type LoanRequest struct {
-	ID              string `json:"id"`
-	MemberID        string `json:"member_id"`
-	RequestedAmount int    `json:"requested_amount"`
-	DurationMonths  int    `json:"duration_months"`
-	Purpose         string `json:"purpose"`
-	Status          string `json:"status"`
-	RejectionReason string `json:"rejection_reason,omitempty"`
-	CreatedAt       string `json:"created_at,omitempty"`
-	UpdatedAt       string `json:"updated_at,omitempty"`
+	ID                      string            `json:"id"`
+	MemberID                string            `json:"member_id"`
+	RequestedAmount         int               `json:"requested_amount"`
+	DurationMonths          int               `json:"duration_months"`
+	Purpose                 string            `json:"purpose"`
+	Status                  string            `json:"status"`
+	CurrentApprovalStage    string            `json:"current_approval_stage,omitempty"`
+	ProposedApprovedAmount  int               `json:"proposed_approved_amount,omitempty"`
+	ProposedDurationMonths  int               `json:"proposed_duration_months,omitempty"`
+	ProposedStartDate       string            `json:"proposed_start_date,omitempty"`
+	ProposedInterestRateBPS int               `json:"proposed_interest_rate_bps,omitempty"`
+	RejectionReason         string            `json:"rejection_reason,omitempty"`
+	LatestDecision          *ApprovalDecision `json:"latest_decision,omitempty"`
+	CreatedAt               string            `json:"created_at,omitempty"`
+	UpdatedAt               string            `json:"updated_at,omitempty"`
 }
 
 type AdminLoanRequest struct {
-	ID              string `json:"id"`
-	MemberID        string `json:"member_id"`
-	MemberNo        string `json:"member_no"`
-	FullName        string `json:"full_name"`
-	RequestedAmount int    `json:"requested_amount"`
-	DurationMonths  int    `json:"duration_months"`
-	Purpose         string `json:"purpose"`
-	Status          string `json:"status"`
-	RejectionReason string `json:"rejection_reason,omitempty"`
-	CreatedAt       string `json:"created_at,omitempty"`
-	UpdatedAt       string `json:"updated_at,omitempty"`
+	LoanRequest
+	MemberNo        string             `json:"member_no"`
+	FullName        string             `json:"full_name"`
+	ApprovalHistory []ApprovalDecision `json:"approval_history"`
+	CanDecide       bool               `json:"can_decide"`
 }
 
 type loanRequestInput struct {
@@ -98,10 +98,14 @@ func (s *Server) memberLoanRequests(c *gin.Context) {
 }
 
 func (s *Server) adminLoanRequests(c *gin.Context) {
+	user, _ := currentUser(c)
 	requests, err := s.loanRequestsForAdmin(c.Query("status"))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
+	}
+	for index := range requests {
+		requests[index].CanDecide = requests[index].Status == "pending" && requests[index].CurrentApprovalStage == user.Role
 	}
 	c.JSON(http.StatusOK, gin.H{"loan_requests": requests})
 }
@@ -119,13 +123,17 @@ func (s *Server) rejectLoanRequest(c *gin.Context) {
 		return
 	}
 
-	loanRequest, err := s.rejectLoanRequestByID(c.Param("id"), user.ID, req)
+	loanRequest, err := s.rejectLoanRequestByID(c.Param("id"), user, req)
 	if errors.Is(err, errInvalidLoanRejection) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Rejection reason is required")
 		return
 	}
 	if errors.Is(err, errLoanRequestNotPending) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Only pending loan requests can be rejected")
+		return
+	}
+	if errors.Is(err, errWrongApprovalStage) {
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(languageFromRequest(c), "error_wrong_approval_stage"))
 		return
 	}
 	if errors.Is(err, errLoanRequestNotFound) {
@@ -186,15 +194,16 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 	}
 
 	loanRequest := LoanRequest{
-		ID:              newID(),
-		MemberID:        member.ID,
-		RequestedAmount: req.RequestedAmount,
-		DurationMonths:  req.DurationMonths,
-		Purpose:         strings.TrimSpace(req.Purpose),
-		Status:          "pending",
+		ID:                   newID(),
+		MemberID:             member.ID,
+		RequestedAmount:      req.RequestedAmount,
+		DurationMonths:       req.DurationMonths,
+		Purpose:              strings.TrimSpace(req.Purpose),
+		Status:               "pending",
+		CurrentApprovalStage: approvalStageManager,
 	}
 	_, err = tx.Exec(
-		`INSERT INTO loan_requests (id, member_id, requested_amount, duration_months, purpose, status) VALUES ($1, $2, $3, $4, $5, 'pending')`,
+		`INSERT INTO loan_requests (id, member_id, requested_amount, duration_months, purpose, status, current_approval_stage) VALUES ($1, $2, $3, $4, $5, 'pending', 'manager')`,
 		loanRequest.ID,
 		loanRequest.MemberID,
 		loanRequest.RequestedAmount,
@@ -205,6 +214,9 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 		if isUniqueViolation(err) {
 			return LoanRequest{}, errPendingLoanRequestExists
 		}
+		return LoanRequest{}, err
+	}
+	if err := createStageNotification(tx, "loan", loanRequest.ID, approvalStageManager, "/admin/loan-requests"); err != nil {
 		return LoanRequest{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -218,7 +230,7 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 
 func (s *Server) loanRequestsByMember(memberID string) ([]LoanRequest, error) {
 	rows, err := s.db.Query(
-		`SELECT id, member_id, requested_amount, duration_months, purpose, status, rejection_reason, created_at, updated_at
+		`SELECT id, member_id, requested_amount, duration_months, purpose, status, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_interest_rate_bps,0), rejection_reason, created_at, updated_at
 		FROM loan_requests
 		WHERE member_id = $1
 		ORDER BY created_at DESC`,
@@ -227,22 +239,33 @@ func (s *Server) loanRequestsByMember(memberID string) ([]LoanRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var requests []LoanRequest
 	for rows.Next() {
 		var request LoanRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedInterestRateBPS, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt); err != nil {
 			return nil, err
 		}
 		requests = append(requests, request)
 	}
-	return requests, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range requests {
+		requests[index].LatestDecision, err = latestApprovalDecision(s.db, "loan_request_approvals", requests[index].ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return requests, nil
 }
 
 func (s *Server) loanRequestsForAdmin(status string) ([]AdminLoanRequest, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.rejection_reason, lr.created_at, lr.updated_at
+	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_interest_rate_bps,0), lr.rejection_reason, lr.created_at, lr.updated_at
 		FROM loan_requests lr
 		INNER JOIN members m ON m.id = lr.member_id`
 	args := []any{}
@@ -256,27 +279,42 @@ func (s *Server) loanRequestsForAdmin(status string) ([]AdminLoanRequest, error)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var requests []AdminLoanRequest
 	for rows.Next() {
 		var request AdminLoanRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedInterestRateBPS, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt); err != nil {
 			return nil, err
 		}
 		requests = append(requests, request)
 	}
-	return requests, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range requests {
+		requests[index].ApprovalHistory, err = approvalHistory(s.db, "loan_request_approvals", requests[index].ID, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return requests, nil
 }
 
-func (s *Server) rejectLoanRequestByID(requestID, adminID string, req rejectLoanInput) (LoanRequest, error) {
+func (s *Server) rejectLoanRequestByID(requestID string, officer User, req rejectLoanInput) (LoanRequest, error) {
 	reason := strings.TrimSpace(req.RejectionReason)
 	if reason == "" {
 		return LoanRequest{}, errInvalidLoanRejection
 	}
-
-	var status string
-	err := s.db.QueryRow(`SELECT status FROM loan_requests WHERE id = $1`, requestID).Scan(&status)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return LoanRequest{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var status, stage, memberID string
+	err = tx.QueryRow(`SELECT status,COALESCE(current_approval_stage,''),member_id FROM loan_requests WHERE id = $1`+rowLockClause(s.db), requestID).Scan(&status, &stage, &memberID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanRequest{}, errLoanRequestNotFound
 	}
@@ -286,28 +324,104 @@ func (s *Server) rejectLoanRequestByID(requestID, adminID string, req rejectLoan
 	if status != "pending" {
 		return LoanRequest{}, errLoanRequestNotPending
 	}
-
-	if _, err := s.db.Exec(
+	if stage != officer.Role {
+		return LoanRequest{}, errWrongApprovalStage
+	}
+	if err := insertApprovalDecision(tx, "loan_request_approvals", requestID, officer, "rejected", "", reason); err != nil {
+		return LoanRequest{}, err
+	}
+	result, err := tx.Exec(
 		`UPDATE loan_requests
-		SET status = 'rejected', reviewed_by = $1, reviewed_at = CURRENT_TIMESTAMP, rejection_reason = $2, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $3 AND status = 'pending'`,
-		adminID,
+		SET status = 'rejected', current_approval_stage=NULL, reviewed_by = $1, reviewed_at = CURRENT_TIMESTAMP, rejection_reason = $2, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $3 AND status = 'pending' AND current_approval_stage=$4`,
+		officer.ID,
 		reason,
 		requestID,
-	); err != nil {
+		officer.Role,
+	)
+	if err != nil {
+		return LoanRequest{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return LoanRequest{}, errLoanRequestNotPending
+	}
+	if err := resolveRequestNotifications(tx, "loan", requestID); err != nil {
+		return LoanRequest{}, err
+	}
+	if err := createMemberOutcomeNotification(tx, "loan", requestID, memberID, "rejected", "/member/loan-requests"); err != nil {
+		return LoanRequest{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return LoanRequest{}, err
 	}
 
 	return s.loanRequestByID(requestID)
 }
 
+func (s *Server) cancelLoanRequest(c *gin.Context) {
+	member, ok := s.profileMember(c)
+	if !ok {
+		return
+	}
+	request, err := s.cancelLoanRequestByID(c.Param("id"), member.ID)
+	if errors.Is(err, errLoanRequestNotFound) {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_loan_request_not_found"))
+		return
+	}
+	if errors.Is(err, errLoanRequestNotPending) {
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_loan_request_not_pending"))
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	respondOKOrHXRedirect(c, "/member/loan-requests", request)
+}
+
+func (s *Server) cancelLoanRequestByID(requestID, memberID string) (LoanRequest, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return LoanRequest{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var status string
+	err = tx.QueryRow(`SELECT status FROM loan_requests WHERE id=$1 AND member_id=$2`+rowLockClause(s.db), requestID, memberID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return LoanRequest{}, errLoanRequestNotFound
+	}
+	if err != nil {
+		return LoanRequest{}, err
+	}
+	if status != "pending" {
+		return LoanRequest{}, errLoanRequestNotPending
+	}
+	result, err := tx.Exec(`UPDATE loan_requests SET status='cancelled',current_approval_stage=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND member_id=$2 AND status='pending'`, requestID, memberID)
+	if err != nil {
+		return LoanRequest{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return LoanRequest{}, errLoanRequestNotPending
+	}
+	if err := resolveRequestNotifications(tx, "loan", requestID); err != nil {
+		return LoanRequest{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return LoanRequest{}, err
+	}
+	return s.loanRequestByID(requestID)
+}
+
 func (s *Server) loanRequestByID(id string) (LoanRequest, error) {
 	var request LoanRequest
 	err := s.db.QueryRow(
-		`SELECT id, member_id, requested_amount, duration_months, purpose, status, rejection_reason, created_at, updated_at
+		`SELECT id, member_id, requested_amount, duration_months, purpose, status, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_interest_rate_bps,0), rejection_reason, created_at, updated_at
 		FROM loan_requests
 		WHERE id = $1`,
 		id,
-	).Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt)
+	).Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedInterestRateBPS, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt)
+	if err == nil {
+		request.LatestDecision, err = latestApprovalDecision(s.db, "loan_request_approvals", request.ID)
+	}
 	return request, err
 }

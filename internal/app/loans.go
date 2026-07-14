@@ -62,6 +62,12 @@ type approveLoanInput struct {
 	StartDate           string `json:"start_date" form:"start_date"`
 	InterestRateBPS     *int   `json:"interest_rate_bps" form:"interest_rate_bps"`
 	InterestRatePercent string `json:"-" form:"interest_rate_percent"`
+	Note                string `json:"note" form:"note"`
+}
+
+type LoanApprovalResult struct {
+	Request LoanRequest `json:"loan_request"`
+	Loan    *Loan       `json:"loan,omitempty"`
 }
 
 type correctLoanStartDateInput struct {
@@ -137,7 +143,6 @@ func loanOverdue(nextDueDate string, remainingBalance int) bool {
 }
 
 func (s *Server) approveLoanRequest(c *gin.Context) {
-	lang := languageFromRequest(c)
 	user, ok := currentUser(c)
 	if !ok {
 		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication token is required")
@@ -146,37 +151,41 @@ func (s *Server) approveLoanRequest(c *gin.Context) {
 
 	var req approveLoanInput
 	if err := c.ShouldBind(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_loan_approval"))
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid loan approval")
 		return
 	}
 	if req.InterestRatePercent != "" {
 		rate, err := parseInterestRatePercent(req.InterestRatePercent)
 		if err != nil {
-			respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_approval_fields"))
+			respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Approved amount, duration months, start date, and a valid interest rate are required")
 			return
 		}
 		req.InterestRateBPS = &rate
 	}
 
-	loan, err := s.approveLoanRequestByID(c.Param("id"), user.ID, req)
+	result, err := s.approveLoanRequestByID(c.Param("id"), user, req)
 	if errors.Is(err, errInvalidLoanApproval) || errors.Is(err, errInvalidLoanApprovalCalculated) {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_approval_fields"))
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Approved amount, duration months, start date, and a valid interest rate are required")
 		return
 	}
 	if errors.Is(err, errInvalidLoanStartDate) {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_start_date_range"))
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Loan start date must be between the request date and today")
 		return
 	}
 	if errors.Is(err, errApprovedAmountExceedsRequest) {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_approved_amount_exceeds_request"))
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Approved amount cannot exceed requested amount")
 		return
 	}
 	if errors.Is(err, errLoanRequestNotPending) {
-		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_loan_request_not_pending"))
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Only pending loan requests can be approved")
+		return
+	}
+	if errors.Is(err, errWrongApprovalStage) {
+		respondError(c, http.StatusForbidden, "FORBIDDEN", "This request is waiting for another Officer Role")
 		return
 	}
 	if errors.Is(err, errMemberAlreadyHasActiveLoan) {
-		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_member_active_loan"))
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Member already has an active loan")
 		return
 	}
 	if errors.Is(err, errLoanRequestNotFound) {
@@ -188,7 +197,11 @@ func (s *Server) approveLoanRequest(c *gin.Context) {
 		return
 	}
 
-	respondCreatedOrHXRedirect(c, "/admin/loans", loan)
+	redirect := "/admin/loan-requests"
+	if result.Loan != nil {
+		redirect = "/admin/loans"
+	}
+	respondOKOrHXRedirect(c, redirect, result)
 }
 
 func (s *Server) adminLoanDetail(c *gin.Context) {
@@ -307,94 +320,147 @@ func (s *Server) adminLoans(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"loans": loans})
 }
 
-func (s *Server) approveLoanRequestByID(requestID, adminID string, req approveLoanInput) (Loan, error) {
-	rate := defaultLoanInterestRateBPS
-	if req.InterestRateBPS != nil {
-		rate = *req.InterestRateBPS
-	}
-	startDate := strings.TrimSpace(req.StartDate)
-	if req.ApprovedAmount <= 0 || req.DurationMonths <= 0 || req.DurationMonths > maxLoanDurationMonths || startDate == "" || rate < 0 || rate > maxLoanInterestRateBPS {
-		return Loan{}, errInvalidLoanApproval
-	}
-	start, err := parseLoanDate(startDate)
-	if err != nil || start.After(time.Now().In(jakartaLocation)) {
-		return Loan{}, errInvalidLoanStartDate
-	}
-	calc, err := calculateLoanSchedule(int64(req.ApprovedAmount), req.DurationMonths, rate, startDate)
-	if err != nil {
-		return Loan{}, errInvalidLoanApprovalCalculated
-	}
-	monthlyInstallment := int(calc.Installments[0].ScheduledAmount)
-
+func (s *Server) approveLoanRequestByID(requestID string, officer User, req approveLoanInput) (LoanApprovalResult, error) {
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return Loan{}, err
+		return LoanApprovalResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var request struct {
-		MemberID        string
-		RequestedAmount int
-		Status          string
-		CreatedAt       string
+		MemberID                string
+		RequestedAmount         int
+		Status                  string
+		Stage                   string
+		CreatedAt               string
+		ProposedApprovedAmount  int
+		ProposedDurationMonths  int
+		ProposedStartDate       string
+		ProposedInterestRateBPS int
 	}
 	err = tx.QueryRow(
-		`SELECT member_id, requested_amount, status, created_at FROM loan_requests WHERE id = $1`+rowLockClause(s.db),
+		`SELECT member_id,requested_amount,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_interest_rate_bps,0) FROM loan_requests WHERE id = $1`+rowLockClause(s.db),
 		requestID,
-	).Scan(&request.MemberID, &request.RequestedAmount, &request.Status, &request.CreatedAt)
+	).Scan(&request.MemberID, &request.RequestedAmount, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedInterestRateBPS)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Loan{}, errLoanRequestNotFound
+		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
 	if err != nil {
-		return Loan{}, err
+		return LoanApprovalResult{}, err
 	}
 	if request.Status != "pending" {
-		return Loan{}, errLoanRequestNotPending
+		return LoanApprovalResult{}, errLoanRequestNotPending
 	}
+	if request.Stage != officer.Role {
+		return LoanApprovalResult{}, errWrongApprovalStage
+	}
+
+	if officer.Role == approvalStageManager {
+		rate := defaultLoanInterestRateBPS
+		if req.InterestRateBPS != nil {
+			rate = *req.InterestRateBPS
+		}
+		startDate := strings.TrimSpace(req.StartDate)
+		if req.ApprovedAmount <= 0 || req.DurationMonths <= 0 || req.DurationMonths > maxLoanDurationMonths || startDate == "" || rate < 0 || rate > maxLoanInterestRateBPS {
+			return LoanApprovalResult{}, errInvalidLoanApproval
+		}
+		start, parseErr := parseLoanDate(startDate)
+		if parseErr != nil || start.After(time.Now().In(jakartaLocation)) {
+			return LoanApprovalResult{}, errInvalidLoanStartDate
+		}
+		if req.ApprovedAmount > request.RequestedAmount {
+			return LoanApprovalResult{}, errApprovedAmountExceedsRequest
+		}
+		requestTime, parseErr := parseDatabaseTime(request.CreatedAt)
+		if parseErr != nil || start.Before(time.Date(requestTime.In(jakartaLocation).Year(), requestTime.In(jakartaLocation).Month(), requestTime.In(jakartaLocation).Day(), 0, 0, 0, 0, jakartaLocation)) {
+			return LoanApprovalResult{}, errInvalidLoanStartDate
+		}
+		if _, err := calculateLoanSchedule(int64(req.ApprovedAmount), req.DurationMonths, rate, startDate); err != nil {
+			return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
+		}
+		request.ProposedApprovedAmount = req.ApprovedAmount
+		request.ProposedDurationMonths = req.DurationMonths
+		request.ProposedStartDate = startDate
+		request.ProposedInterestRateBPS = rate
+		if _, err := tx.Exec(`UPDATE loan_requests SET proposed_approved_amount=$1,proposed_duration_months=$2,proposed_start_date=$3,proposed_interest_rate_bps=$4,updated_at=CURRENT_TIMESTAMP WHERE id=$5 AND status='pending' AND current_approval_stage='manager'`, req.ApprovedAmount, req.DurationMonths, startDate, rate, requestID); err != nil {
+			return LoanApprovalResult{}, err
+		}
+	}
+	if request.ProposedApprovedAmount <= 0 || request.ProposedDurationMonths <= 0 || request.ProposedStartDate == "" {
+		return LoanApprovalResult{}, errInvalidLoanApproval
+	}
+	if err := insertApprovalDecision(tx, "loan_request_approvals", requestID, officer, "approved", req.Note, ""); err != nil {
+		return LoanApprovalResult{}, err
+	}
+	if err := resolveRequestNotifications(tx, "loan", requestID); err != nil {
+		return LoanApprovalResult{}, err
+	}
+
+	nextStage := nextApprovalStage(officer.Role)
+	if nextStage != "" {
+		result, err := tx.Exec(`UPDATE loan_requests SET current_approval_stage=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='pending' AND current_approval_stage=$3`, nextStage, requestID, officer.Role)
+		if err != nil {
+			return LoanApprovalResult{}, err
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return LoanApprovalResult{}, errLoanRequestNotPending
+		}
+		if err := createStageNotification(tx, "loan", requestID, nextStage, "/admin/loan-requests"); err != nil {
+			return LoanApprovalResult{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return LoanApprovalResult{}, err
+		}
+		updated, err := s.loanRequestByID(requestID)
+		return LoanApprovalResult{Request: updated}, err
+	}
+
 	var lockedMemberID string
 	if err = tx.QueryRow(`SELECT id FROM members WHERE id = $1`+rowLockClause(s.db), request.MemberID).Scan(&lockedMemberID); err != nil {
-		return Loan{}, err
-	}
-	if req.ApprovedAmount > request.RequestedAmount {
-		return Loan{}, errApprovedAmountExceedsRequest
-	}
-	requestTime, parseErr := parseDatabaseTime(request.CreatedAt)
-	if parseErr != nil || start.Before(time.Date(requestTime.In(jakartaLocation).Year(), requestTime.In(jakartaLocation).Month(), requestTime.In(jakartaLocation).Day(), 0, 0, 0, 0, jakartaLocation)) {
-		return Loan{}, errInvalidLoanStartDate
+		return LoanApprovalResult{}, err
 	}
 
 	var activeLoanID string
 	err = tx.QueryRow(`SELECT id FROM loans WHERE member_id = $1 AND status <> 'cancelled' AND remaining_balance > 0 LIMIT 1`, request.MemberID).Scan(&activeLoanID)
 	if err == nil {
-		return Loan{}, errMemberAlreadyHasActiveLoan
+		return LoanApprovalResult{}, errMemberAlreadyHasActiveLoan
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return Loan{}, err
+		return LoanApprovalResult{}, err
 	}
+	calc, err := calculateLoanSchedule(int64(request.ProposedApprovedAmount), request.ProposedDurationMonths, request.ProposedInterestRateBPS, request.ProposedStartDate)
+	if err != nil {
+		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
+	}
+	monthlyInstallment := int(calc.Installments[0].ScheduledAmount)
 
 	loan := Loan{
 		ID:                 newID(),
 		LoanRequestID:      requestID,
 		MemberID:           request.MemberID,
-		ApprovedAmount:     req.ApprovedAmount,
-		DurationMonths:     req.DurationMonths,
+		ApprovedAmount:     request.ProposedApprovedAmount,
+		DurationMonths:     request.ProposedDurationMonths,
 		MonthlyInstallment: monthlyInstallment,
-		RemainingBalance:   int(calc.TotalObligation), StartDate: startDate, InterestRateBPS: rate, TotalInterest: int(calc.TotalInterest), TotalObligation: int(calc.TotalObligation), NextDueDate: calc.Installments[0].DueDate, FinalDueDate: calc.Installments[len(calc.Installments)-1].DueDate,
+		RemainingBalance:   int(calc.TotalObligation), StartDate: request.ProposedStartDate, InterestRateBPS: request.ProposedInterestRateBPS, TotalInterest: int(calc.TotalInterest), TotalObligation: int(calc.TotalObligation), NextDueDate: calc.Installments[0].DueDate, FinalDueDate: calc.Installments[len(calc.Installments)-1].DueDate,
 		Status:     "active",
-		ApprovedBy: adminID,
+		ApprovedBy: officer.ID,
 	}
 
-	if _, err := tx.Exec(
+	result, err := tx.Exec(
 		`UPDATE loan_requests
-		SET status = 'approved', reviewed_by = $1, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $2 AND status = 'pending'`,
-		adminID,
+		SET status = 'approved', current_approval_stage=NULL, reviewed_by = $1, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2 AND status = 'pending' AND current_approval_stage='ketua_utama'`,
+		officer.ID,
 		requestID,
-	); err != nil {
-		return Loan{}, err
+	)
+	if err != nil {
+		return LoanApprovalResult{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return LoanApprovalResult{}, errLoanRequestNotPending
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO loans (id, loan_request_id, member_id, approved_amount, duration_months, monthly_installment, remaining_balance, status, approved_by, start_date, interest_rate_bps, total_interest, total_obligation, next_due_date, final_due_date)
@@ -410,20 +476,30 @@ func (s *Server) approveLoanRequestByID(requestID, adminID string, req approveLo
 		loan.StartDate, loan.InterestRateBPS, loan.TotalInterest, loan.TotalObligation, loan.NextDueDate, loan.FinalDueDate,
 	); err != nil {
 		if isUniqueViolation(err) {
-			return Loan{}, errMemberAlreadyHasActiveLoan
+			return LoanApprovalResult{}, errMemberAlreadyHasActiveLoan
 		}
-		return Loan{}, err
+		return LoanApprovalResult{}, err
 	}
 	for _, installment := range calc.Installments {
 		if _, err := tx.Exec(`INSERT INTO loan_installments (id,loan_id,installment_no,due_date,scheduled_amount,paid_amount) VALUES ($1,$2,$3,$4,$5,0)`, newID(), loan.ID, installment.Number, installment.DueDate, installment.ScheduledAmount); err != nil {
-			return Loan{}, err
+			return LoanApprovalResult{}, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return Loan{}, err
+	if err := createMemberOutcomeNotification(tx, "loan", requestID, request.MemberID, "approved", "/member/loan-requests"); err != nil {
+		return LoanApprovalResult{}, err
 	}
-
-	return s.loanByID(loan.ID)
+	if err := tx.Commit(); err != nil {
+		return LoanApprovalResult{}, err
+	}
+	createdLoan, err := s.loanByID(loan.ID)
+	if err != nil {
+		return LoanApprovalResult{}, err
+	}
+	updated, err := s.loanRequestByID(requestID)
+	if err != nil {
+		return LoanApprovalResult{}, err
+	}
+	return LoanApprovalResult{Request: updated, Loan: &createdLoan}, nil
 }
 
 func (s *Server) loanByID(id string) (Loan, error) {

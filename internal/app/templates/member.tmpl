@@ -197,13 +197,14 @@
 {{template "member-shell-start" .}}
     <section class="summary-grid">
 {{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" (nominal .Summary.SukarelaBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "available_withdrawal_balance") "Value" (nominal .Summary.AvailableWithdrawalBalance))}}
 {{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance))}}
     </section>
     <section class="two-column">
       <article class="panel">
         <h2>{{t .Lang "submit_withdrawal_request"}}</h2>
         <form method="post" action="/api/member/withdrawal-requests" hx-post="/api/member/withdrawal-requests" hx-target="#withdrawal-request-error" hx-swap="innerHTML">
-          <label>{{t .Lang "amount"}} <input name="amount" type="number" min="1" max="{{.Summary.SukarelaBalance}}" required></label>
+          <label>{{t .Lang "amount"}} <input name="amount" type="number" min="1" max="{{.Summary.AvailableWithdrawalBalance}}" required></label>
           <label>{{t .Lang "note"}} <input name="note"></label>
           <button type="submit">{{t .Lang "submit_withdrawal_request"}}</button>
         </form>
@@ -219,6 +220,7 @@
               <th>{{t $.Lang "status"}}</th>
               <th>{{t $.Lang "note"}}</th>
               <th>{{t $.Lang "rejection_reason"}}</th>
+              <th>{{t $.Lang "review"}}</th>
             </tr>
           </thead>
           <tbody>
@@ -228,6 +230,7 @@
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>{{.Note}}</td>
               <td>{{.RejectionReason}}</td>
+              <td>{{if .CurrentApprovalStage}}{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}{{end}}{{if .LatestDecision}}<div>{{t $.Lang (printf "role_%s" .LatestDecision.OfficerRole)}} — {{t $.Lang (printf "status_%s" .LatestDecision.Decision)}} — {{.LatestDecision.CreatedAt}}{{if .LatestDecision.Note}} · {{.LatestDecision.Note}}{{end}}{{if .LatestDecision.Reason}} · {{.LatestDecision.Reason}}{{end}}</div>{{end}}{{if eq .Status "pending"}}<form method="post" action="/api/member/withdrawal-requests/{{.ID}}/cancel" hx-post="/api/member/withdrawal-requests/{{.ID}}/cancel"><button class="button-secondary" type="submit">{{t $.Lang "cancel"}}</button></form>{{end}}</td>
             </tr>
             {{end}}
           </tbody>
@@ -284,6 +287,7 @@
               <th>{{t $.Lang "duration"}}</th>
               <th>{{t $.Lang "status"}}</th>
               <th>{{t $.Lang "purpose"}}</th>
+              <th>{{t $.Lang "review"}}</th>
             </tr>
           </thead>
           <tbody>
@@ -293,6 +297,7 @@
               <td>{{.DurationMonths}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>{{.Purpose}}</td>
+              <td>{{if .CurrentApprovalStage}}{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}{{end}}{{if .LatestDecision}}<div>{{t $.Lang (printf "role_%s" .LatestDecision.OfficerRole)}} — {{t $.Lang (printf "status_%s" .LatestDecision.Decision)}} — {{.LatestDecision.CreatedAt}}{{if .LatestDecision.Note}} · {{.LatestDecision.Note}}{{end}}{{if .LatestDecision.Reason}} · {{.LatestDecision.Reason}}{{end}}</div>{{end}}{{if eq .Status "pending"}}<form method="post" action="/api/member/loan-requests/{{.ID}}/cancel" hx-post="/api/member/loan-requests/{{.ID}}/cancel"><button class="button-secondary" type="submit">{{t $.Lang "cancel"}}</button></form>{{end}}</td>
             </tr>
             {{end}}
           </tbody>

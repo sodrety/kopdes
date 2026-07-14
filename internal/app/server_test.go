@@ -45,7 +45,7 @@ func TestAdminCanLoginAndSeeEmptyDashboardSummary(t *testing.T) {
 	if loginResponse.Token == "" {
 		t.Fatal("expected login response to include token")
 	}
-	if loginResponse.User.Email != "admin@coop.test" || loginResponse.User.Role != "admin" {
+	if loginResponse.User.Email != "admin@coop.test" || loginResponse.User.Role != "manager" {
 		t.Fatalf("unexpected login user: %+v", loginResponse.User)
 	}
 
@@ -212,16 +212,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 11 {
-		t.Fatalf("expected eleven tracked migrations, got %d", migrationCount)
+	if migrationCount != 12 {
+		t.Fatalf("expected twelve tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 11`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 12`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "enforce_maximum_loan_tenor" {
-		t.Fatalf("expected latest tenor migration, got %q", latestName)
+	if latestName != "add_officer_hierarchy_and_approvals" {
+		t.Fatalf("expected latest Officer hierarchy migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -529,7 +529,8 @@ func TestAdminMemberPageEscapesMemberSuppliedHTML(t *testing.T) {
 func TestConcurrentWithdrawalsCannotOverdrawSavings(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
-	member := fixture.createMember(t, adminToken, `{"member_no":"M-RACE-SAV","full_name":"Saving Race","join_date":"2026-06-17","status":"active"}`)
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-RACE-SAV","full_name":"Saving Race","join_date":"2026-06-17","status":"active","email":"saving-race@coop.test","password":"secret-password"}`)
+	memberToken := fixture.login(t, "saving-race@coop.test", "secret-password")
 	fixture.recordDeposit(t, adminToken, member.ID, 100000)
 
 	statuses := make(chan int, 2)
@@ -538,15 +539,9 @@ func TestConcurrentWithdrawalsCannotOverdrawSavings(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{
-				"member_id":"`+member.ID+`",
-				"type":"withdrawal",
-				"category":"sukarela",
-				"amount":80000,
-				"record_date":"2026-06-17"
-			}`))
+			req := httptest.NewRequest(http.MethodPost, "/api/member/withdrawal-requests", bytes.NewBufferString(`{"amount":80000}`))
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", "Bearer "+adminToken)
+			req.Header.Set("Authorization", "Bearer "+memberToken)
 			rec := httptest.NewRecorder()
 
 			fixture.server.ServeHTTP(rec, req)
@@ -573,8 +568,12 @@ func TestConcurrentWithdrawalsCannotOverdrawSavings(t *testing.T) {
 	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount ELSE -amount END), 0) FROM saving_records WHERE member_id = $1`, member.ID).Scan(&balance); err != nil {
 		t.Fatalf("query saving balance: %v", err)
 	}
-	if balance != 20000 {
-		t.Fatalf("expected balance 20000 after one withdrawal, got %d", balance)
+	if balance != 100000 {
+		t.Fatalf("expected financial balance unchanged before final approval, got %d", balance)
+	}
+	var reserved int
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM withdrawal_reservations WHERE member_id=$1 AND status='active'`, member.ID).Scan(&reserved); err != nil || reserved != 80000 {
+		t.Fatalf("expected one 80000 reservation, got %d err=%v", reserved, err)
 	}
 }
 
@@ -701,6 +700,12 @@ func TestAdminDashboardRequiresValidAdminToken(t *testing.T) {
 	})
 
 	t.Run("member token", func(t *testing.T) {
+		if _, err := fixture.db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ('member-profile-id','AUTH-MEMBER','Auth Member','2026-01-01','active')`); err != nil {
+			t.Fatalf("seed member profile: %v", err)
+		}
+		if _, err := fixture.db.Exec(`UPDATE users SET member_id='member-profile-id' WHERE id='member-user-id'`); err != nil {
+			t.Fatalf("link member profile: %v", err)
+		}
 		memberToken := fixture.login(t, "member@coop.test", "password")
 		req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard", nil)
 		req.Header.Set("Authorization", "Bearer "+memberToken)
@@ -711,7 +716,7 @@ func TestAdminDashboardRequiresValidAdminToken(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "FORBIDDEN", "Insufficient role")
+		assertError(t, rec.Body.Bytes(), "FORBIDDEN", "Insufficient permission")
 	})
 }
 
@@ -1386,6 +1391,12 @@ func TestCreateMemberValidatesRequiredFieldsAndStatus(t *testing.T) {
 
 func TestMemberManagementRequiresAdminRole(t *testing.T) {
 	fixture := newTestFixture(t)
+	if _, err := fixture.db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ('member-role-id','ROLE-MEMBER','Role Member','2026-01-01','active')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.db.Exec(`UPDATE users SET member_id='member-role-id' WHERE id='member-user-id'`); err != nil {
+		t.Fatal(err)
+	}
 	memberToken := fixture.login(t, "member@coop.test", "password")
 
 	t.Run("missing token", func(t *testing.T) {
@@ -1411,7 +1422,7 @@ func TestMemberManagementRequiresAdminRole(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "FORBIDDEN", "Insufficient role")
+		assertError(t, rec.Body.Bytes(), "FORBIDDEN", "Insufficient permission")
 	})
 }
 
@@ -1810,7 +1821,12 @@ func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) 
 	memberToken := fixture.login(t, "withdrawal-member@coop.test", "member-password")
 	fixture.recordDeposit(t, adminToken, member.ID, 300000)
 
-	withdrawalID := fixture.recordSaving(t, adminToken, member.ID, "withdrawal", 125000, "WD-001", "Cash withdrawal")
+	requestID := fixture.createWithdrawalRequest(t, memberToken, 125000, "Cash withdrawal")
+	fixture.approveWithdrawalRequest(t, adminToken, requestID)
+	var withdrawalID string
+	if err := fixture.db.QueryRow(`SELECT saving_record_id FROM withdrawal_requests WHERE id=$1`, requestID).Scan(&withdrawalID); err != nil {
+		t.Fatalf("read approved saving record: %v", err)
+	}
 
 	summaryReq := httptest.NewRequest(http.MethodGet, "/api/member/savings/summary", nil)
 	summaryReq.Header.Set("Authorization", "Bearer "+memberToken)
@@ -1867,17 +1883,9 @@ func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) 
 		t.Fatalf("expected withdrawal in history, got %+v", history.Savings)
 	}
 
-	overReq := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{
-		"member_id":"`+member.ID+`",
-		"type":"withdrawal",
-		"category":"sukarela",
-		"amount":200000,
-		"record_date":"2026-06-16",
-		"reference_no":"WD-OVER",
-		"note":"Too much"
-	}`))
+	overReq := httptest.NewRequest(http.MethodPost, "/api/member/withdrawal-requests", bytes.NewBufferString(`{"amount":200000,"note":"Too much"}`))
 	overReq.Header.Set("Content-Type", "application/json")
-	overReq.Header.Set("Authorization", "Bearer "+adminToken)
+	overReq.Header.Set("Authorization", "Bearer "+memberToken)
 	overRec := httptest.NewRecorder()
 
 	fixture.server.ServeHTTP(overRec, overReq)
@@ -1885,7 +1893,7 @@ func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) 
 	if overRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected over-withdrawal status 400, got %d: %s", overRec.Code, overRec.Body.String())
 	}
-	assertError(t, overRec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Withdrawal cannot exceed current saving balance")
+	assertError(t, overRec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Withdrawal cannot exceed Simpanan Sukarela balance")
 
 	summaryAfterRejectReq := httptest.NewRequest(http.MethodGet, "/api/member/savings/summary", nil)
 	summaryAfterRejectReq.Header.Set("Authorization", "Bearer "+memberToken)
@@ -2282,7 +2290,8 @@ func TestAdminProfitLossReportMimicsKopkarlytaReport(t *testing.T) {
 	memberToken := fixture.login(t, "profit-loss-member@coop.test", "member-password")
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "pokok", 100000, "PL-POK", "Pendapatan simpanan")
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 300000, "PL-SUK", "Pendapatan sukarela")
-	fixture.recordSavingInCategory(t, adminToken, member.ID, "withdrawal", "sukarela", 75000, "PL-COST", "Biaya penarikan")
+	withdrawalID := fixture.createWithdrawalRequest(t, memberToken, 75000, "Biaya penarikan")
+	fixture.approveWithdrawalRequest(t, adminToken, withdrawalID)
 	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 240000, 6), 240000, 6)
 	fixture.recordRepayment(t, adminToken, loan.ID, 40000)
 
@@ -2387,13 +2396,14 @@ func TestProfitLossPeriodFilterChangesTotalsAndExports(t *testing.T) {
 	memberToken := fixture.login(t, "profit-filter@coop.test", "member-password")
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "pokok", 100000, "PLF-OLD", "Old income")
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 250000, "PLF-NEW", "Filtered income")
-	fixture.recordSavingInCategory(t, adminToken, member.ID, "withdrawal", "sukarela", 50000, "PLF-COST", "Filtered cost")
+	withdrawalID := fixture.createWithdrawalRequest(t, memberToken, 50000, "Filtered cost")
+	fixture.approveWithdrawalRequest(t, adminToken, withdrawalID)
 	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 300000, 6), 300000, 6)
 	fixture.recordRepayment(t, adminToken, loan.ID, 75000)
 	if _, err := fixture.db.Exec(`UPDATE saving_records SET record_date = '2026-01-10' WHERE reference_no = 'PLF-OLD'`); err != nil {
 		t.Fatalf("move old saving out of selected period: %v", err)
 	}
-	if _, err := fixture.db.Exec(`UPDATE saving_records SET record_date = '2026-02-10' WHERE reference_no IN ('PLF-NEW', 'PLF-COST')`); err != nil {
+	if _, err := fixture.db.Exec(`UPDATE saving_records SET record_date = '2026-02-10' WHERE reference_no = 'PLF-NEW' OR id=(SELECT saving_record_id FROM withdrawal_requests WHERE id=$1)`, withdrawalID); err != nil {
 		t.Fatalf("move saving records into selected period: %v", err)
 	}
 	if _, err := fixture.db.Exec(`UPDATE loan_repayments SET record_date = '2026-02-11' WHERE loan_id = $1`, loan.ID); err != nil {
@@ -2495,22 +2505,14 @@ func TestMemberCanRequestPenarikanAndAdminApproveCreatesSukarelaWithdrawal(t *te
 		t.Fatalf("unexpected admin withdrawal requests: %+v", adminList.WithdrawalRequests)
 	}
 
-	approveReq := httptest.NewRequest(http.MethodPost, "/api/admin/withdrawal-requests/"+created.ID+"/approve", nil)
-	approveReq.Header.Set("Authorization", "Bearer "+adminToken)
-	approveRec := httptest.NewRecorder()
-
-	fixture.server.ServeHTTP(approveRec, approveReq)
-
-	if approveRec.Code != http.StatusOK {
-		t.Fatalf("expected withdrawal approval status 200, got %d: %s", approveRec.Code, approveRec.Body.String())
-	}
+	fixture.approveWithdrawalRequest(t, adminToken, created.ID)
 	var approved struct {
 		ID             string `json:"id"`
 		Status         string `json:"status"`
 		SavingRecordID string `json:"saving_record_id"`
 	}
-	if err := json.Unmarshal(approveRec.Body.Bytes(), &approved); err != nil {
-		t.Fatalf("decode approved withdrawal request: %v", err)
+	if err := fixture.db.QueryRow(`SELECT id,status,saving_record_id FROM withdrawal_requests WHERE id=$1`, created.ID).Scan(&approved.ID, &approved.Status, &approved.SavingRecordID); err != nil {
+		t.Fatalf("read approved withdrawal request: %v", err)
 	}
 	if approved.ID != created.ID || approved.Status != "approved" || approved.SavingRecordID == "" {
 		t.Fatalf("unexpected approved withdrawal request: %+v", approved)
@@ -2608,7 +2610,7 @@ func TestPenarikanValidationAndRejectionKeepsBalances(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected wajib withdrawal status 400, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Withdrawals can only use Simpanan Sukarela")
+		assertError(t, rec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Sukarela withdrawals must use the approval chain")
 	})
 
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 200000, "SUK-REJ", "Sukarela for reject")
@@ -2904,6 +2906,12 @@ func TestAdminCanListPendingLoanRequestsForReview(t *testing.T) {
 
 func TestAdminLoanRequestReviewRequiresAdminRole(t *testing.T) {
 	fixture := newTestFixture(t)
+	if _, err := fixture.db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ('loan-role-id','LOAN-ROLE','Loan Role Member','2026-01-01','active')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.db.Exec(`UPDATE users SET member_id='loan-role-id' WHERE id='member-user-id'`); err != nil {
+		t.Fatal(err)
+	}
 	memberToken := fixture.login(t, "member@coop.test", "password")
 
 	t.Run("missing token", func(t *testing.T) {
@@ -2928,7 +2936,7 @@ func TestAdminLoanRequestReviewRequiresAdminRole(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "FORBIDDEN", "Insufficient role")
+		assertError(t, rec.Body.Bytes(), "FORBIDDEN", "Insufficient permission")
 	})
 }
 
@@ -3623,7 +3631,8 @@ func TestAdminDashboardAggregatesOperationalTotals(t *testing.T) {
 	fixture.createMember(t, adminToken, `{"member_no":"M-0033","full_name":"Dashboard Inactive","join_date":"2026-06-16","status":"inactive"}`)
 	memberToken := fixture.login(t, "dashboard-active@coop.test", "member-password")
 	fixture.recordSaving(t, adminToken, active.ID, "deposit", 1000000, "DASH-DEP", "Dashboard deposit")
-	fixture.recordSaving(t, adminToken, active.ID, "withdrawal", 200000, "DASH-WD", "Dashboard withdrawal")
+	withdrawalID := fixture.createWithdrawalRequest(t, memberToken, 200000, "Dashboard withdrawal")
+	fixture.approveWithdrawalRequest(t, adminToken, withdrawalID)
 	activeLoan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 600000, 6), 600000, 6)
 	fixture.recordRepayment(t, adminToken, activeLoan.ID, 150000)
 
@@ -3743,12 +3752,36 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	rec := httptest.NewRecorder()
 	fixture.server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("approve scheduled loan: %d %s", rec.Code, rec.Body.String())
 	}
 	var loan testLoan
-	if err := json.Unmarshal(rec.Body.Bytes(), &loan); err != nil {
-		t.Fatal(err)
+	for _, credentials := range []struct{ email, password string }{
+		{"ketua-i@coop.test", "password"},
+		{"ketua-ii@coop.test", "password"},
+		{"ketua-utama@coop.test", "password"},
+	} {
+		token := fixture.login(t, credentials.email, credentials.password)
+		approvalReq := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(`{}`))
+		approvalReq.Header.Set("Content-Type", "application/json")
+		approvalReq.Header.Set("Authorization", "Bearer "+token)
+		approvalRec := httptest.NewRecorder()
+		fixture.server.ServeHTTP(approvalRec, approvalReq)
+		if approvalRec.Code != http.StatusOK {
+			t.Fatalf("advance scheduled loan: %d %s", approvalRec.Code, approvalRec.Body.String())
+		}
+		var result struct {
+			Loan *testLoan `json:"loan"`
+		}
+		if err := json.Unmarshal(approvalRec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Loan != nil {
+			loan = *result.Loan
+		}
+	}
+	if loan.ID == "" {
+		t.Fatal("expected Ketua Utama approval to create the scheduled loan")
 	}
 	if loan.RemainingBalance != 933750 {
 		t.Fatalf("expected obligation 933750, got %+v", loan)
@@ -3806,14 +3839,11 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	correctReq.Header.Set("HX-Request", "true")
 	correctRec := httptest.NewRecorder()
 	fixture.server.ServeHTTP(correctRec, correctReq)
-	if correctRec.Code != http.StatusNoContent {
-		t.Fatalf("correct date: %d %s", correctRec.Code, correctRec.Body.String())
-	}
-	if redirect := correctRec.Header().Get("HX-Redirect"); redirect != "/admin/loans/"+loan.ID {
-		t.Fatalf("expected correction HX redirect, got %q", redirect)
+	if correctRec.Code != http.StatusNotFound {
+		t.Fatalf("expected routine start-date correction route to be removed, got %d %s", correctRec.Code, correctRec.Body.String())
 	}
 	var audits int
-	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loan_start_date_audits WHERE loan_id=$1`, loan.ID).Scan(&audits); err != nil || audits != 1 {
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loan_start_date_audits WHERE loan_id=$1`, loan.ID).Scan(&audits); err != nil || audits != 0 {
 		t.Fatalf("audit count=%d err=%v", audits, err)
 	}
 
@@ -3847,8 +3877,8 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	lockedReq.Header.Set("HX-Request", "true")
 	lockedRec := httptest.NewRecorder()
 	fixture.server.ServeHTTP(lockedRec, lockedReq)
-	if lockedRec.Code != http.StatusBadRequest || !strings.Contains(lockedRec.Body.String(), "tidak dapat diubah setelah ada angsuran") {
-		t.Fatalf("expected correction lock, got %d %s", lockedRec.Code, lockedRec.Body.String())
+	if lockedRec.Code != http.StatusNotFound {
+		t.Fatalf("expected correction route to remain unavailable, got %d %s", lockedRec.Code, lockedRec.Body.String())
 	}
 	var total int
 	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND remaining_balance>0`, member.ID).Scan(&total); err != nil || total != 932750 {
@@ -3930,6 +3960,9 @@ func newTestFixtureWithConfig(t *testing.T, cfg app.Config) testFixture {
 	if err := app.EnsureAdminUser(db, "admin@coop.test", "password"); err != nil {
 		t.Fatalf("seed admin: %v", err)
 	}
+	seedUser(t, db, "ketua-i-user-id", "ketua-i@coop.test", "password", "ketua_i")
+	seedUser(t, db, "ketua-ii-user-id", "ketua-ii@coop.test", "password", "ketua_ii")
+	seedUser(t, db, "ketua-utama-user-id", "ketua-utama@coop.test", "password", "ketua_utama")
 	seedUser(t, db, "member-user-id", "member@coop.test", "password", "member")
 
 	return testFixture{server: app.NewServer(cfg, db), db: db}
@@ -4136,6 +4169,25 @@ func (f testFixture) createWithdrawalRequest(t *testing.T, memberToken string, a
 	return response.ID
 }
 
+func (f testFixture) approveWithdrawalRequest(t *testing.T, managerToken, requestID string) {
+	t.Helper()
+	for _, token := range []string{
+		managerToken,
+		f.login(t, "ketua-i@coop.test", "password"),
+		f.login(t, "ketua-ii@coop.test", "password"),
+		f.login(t, "ketua-utama@coop.test", "password"),
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/withdrawal-requests/"+requestID+"/approve", bytes.NewBufferString(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		f.server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected withdrawal approval status 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+}
+
 type testLoan struct {
 	ID                 string `json:"id"`
 	LoanRequestID      string `json:"loan_request_id"`
@@ -4162,24 +4214,41 @@ type testRepayment struct {
 func (f testFixture) approveLoanRequest(t *testing.T, adminToken, requestID string, approvedAmount, durationMonths int) testLoan {
 	t.Helper()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(`{
-		"approved_amount":`+strconv.Itoa(approvedAmount)+`,
-		"duration_months":`+strconv.Itoa(durationMonths)+`,
-		"start_date":"`+time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")+`"
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+adminToken)
-	rec := httptest.NewRecorder()
+	managerBody := `{
+		"approved_amount":` + strconv.Itoa(approvedAmount) + `,
+		"duration_months":` + strconv.Itoa(durationMonths) + `,
+		"start_date":"` + time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02") + `"
+	}`
+	stages := []struct {
+		token string
+		body  string
+	}{
+		{adminToken, managerBody},
+		{f.login(t, "ketua-i@coop.test", "password"), `{}`},
+		{f.login(t, "ketua-ii@coop.test", "password"), `{}`},
+		{f.login(t, "ketua-utama@coop.test", "password"), `{}`},
+	}
 
-	f.server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected approve loan request status 201, got %d: %s", rec.Code, rec.Body.String())
+	var response struct {
+		Loan *testLoan `json:"loan"`
 	}
-	var response testLoan
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode loan approval response: %v", err)
+	for _, stage := range stages {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(stage.body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+stage.token)
+		rec := httptest.NewRecorder()
+		f.server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected approve loan request status 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode loan approval response: %v", err)
+		}
 	}
-	return response
+	if response.Loan == nil {
+		t.Fatal("expected final approval to create loan")
+	}
+	return *response.Loan
 }
 
 func (f testFixture) rejectLoanRequest(t *testing.T, adminToken, requestID, reason string) struct {

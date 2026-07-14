@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -12,12 +14,17 @@ import (
 )
 
 type User struct {
-	ID       string
-	Email    string
-	Role     string
-	MemberID sql.NullString
+	ID                 string
+	Email              string
+	Role               string
+	MemberID           sql.NullString
+	FullName           string
+	Active             bool
+	MustChangePassword bool
 }
 
+// EnsureAdminUser is retained for compatibility with existing deployments and
+// test fixtures. Legacy Admin users are Managers in the Officer model.
 func EnsureAdminUser(db *sql.DB, email, password string) error {
 	if email == "" || password == "" {
 		return nil
@@ -38,10 +45,44 @@ func EnsureAdminUser(db *sql.DB, email, password string) error {
 	}
 
 	_, err = db.Exec(
-		`INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, $3, 'admin')`,
+		`INSERT INTO users (id, email, password_hash, role, full_name, active, must_change_password) VALUES ($1, $2, $3, 'manager', $4, TRUE, FALSE)`,
 		newID(),
 		email,
 		string(hash),
+		email,
+	)
+	return err
+}
+
+func EnsureKetuaUtamaUser(db *sql.DB, fullName, email, password string) error {
+	fullName = strings.TrimSpace(fullName)
+	email = strings.ToLower(strings.TrimSpace(email))
+	if fullName == "" && email == "" && password == "" {
+		return nil
+	}
+	if fullName == "" || email == "" || password == "" {
+		return errors.New("KETUA_UTAMA_NAME, KETUA_UTAMA_EMAIL, and KETUA_UTAMA_PASSWORD must be provided together")
+	}
+
+	var existingRole string
+	err := db.QueryRow(`SELECT role FROM users WHERE email = $1`, email).Scan(&existingRole)
+	if err == nil {
+		if existingRole != "ketua_utama" {
+			return fmt.Errorf("bootstrap email already belongs to role %s", existingRole)
+		}
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(
+		`INSERT INTO users (id, email, password_hash, role, full_name, active, must_change_password) VALUES ($1, $2, $3, 'ketua_utama', $4, TRUE, FALSE)`,
+		newID(), email, string(hash), fullName,
 	)
 	return err
 }
@@ -53,10 +94,12 @@ func CreateMemberUser(db *sql.DB, email, password, memberID string) (User, error
 	}
 
 	user := User{
-		ID:       newID(),
-		Email:    email,
-		Role:     "member",
-		MemberID: sql.NullString{String: memberID, Valid: true},
+		ID:                 newID(),
+		Email:              email,
+		Role:               "member",
+		MemberID:           sql.NullString{String: memberID, Valid: true},
+		Active:             true,
+		MustChangePassword: false,
 	}
 	_, err = db.Exec(
 		`INSERT INTO users (id, email, password_hash, role, member_id) VALUES ($1, $2, $3, 'member', $4)`,
@@ -75,14 +118,17 @@ func AuthenticateUser(db *sql.DB, email, password string) (User, error) {
 	var user User
 	var passwordHash string
 	err := db.QueryRow(
-		`SELECT id, email, password_hash, role, member_id FROM users WHERE email = $1`,
+		`SELECT id, email, password_hash, role, member_id, full_name, active, must_change_password FROM users WHERE email = $1`,
 		email,
-	).Scan(&user.ID, &user.Email, &passwordHash, &user.Role, &user.MemberID)
+	).Scan(&user.ID, &user.Email, &passwordHash, &user.Role, &user.MemberID, &user.FullName, &user.Active, &user.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrInvalidCredentials
 	}
 	if err != nil {
 		return User{}, err
+	}
+	if !user.Active {
+		return User{}, ErrInvalidCredentials
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
 		return User{}, ErrInvalidCredentials
@@ -93,9 +139,9 @@ func AuthenticateUser(db *sql.DB, email, password string) (User, error) {
 func UserByID(db *sql.DB, id string) (User, error) {
 	var user User
 	err := db.QueryRow(
-		`SELECT id, email, role, member_id FROM users WHERE id = $1`,
+		`SELECT id, email, role, member_id, full_name, active, must_change_password FROM users WHERE id = $1`,
 		id,
-	).Scan(&user.ID, &user.Email, &user.Role, &user.MemberID)
+	).Scan(&user.ID, &user.Email, &user.Role, &user.MemberID, &user.FullName, &user.Active, &user.MustChangePassword)
 	return user, err
 }
 

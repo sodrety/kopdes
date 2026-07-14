@@ -560,12 +560,7 @@
               {{end}}
             </select>
           </label>
-          <label>{{t .Lang "type"}}
-            <select name="type" onchange="this.form.querySelector('[data-saving-submit]').textContent = this.value === 'withdrawal' ? this.dataset.withdrawalText : this.dataset.depositText" data-deposit-text="{{t .Lang "record_deposit"}}" data-withdrawal-text="{{t .Lang "record_withdrawal"}}">
-              <option value="deposit">{{t .Lang "deposit"}}</option>
-              <option value="withdrawal">{{t .Lang "withdrawal"}}</option>
-            </select>
-          </label>
+          <input type="hidden" name="type" value="deposit">
           <label>{{t .Lang "saving_category"}}
             <select name="category" required>
               <option value="pokok">{{t .Lang "simpanan_pokok"}}</option>
@@ -736,8 +731,6 @@
         <h2>{{t .Lang "installment_schedule"}}</h2>
         {{if .Installments}}{{template "table-open" .}}<thead><tr><th>#</th><th>{{t $.Lang "due_date"}}</th><th>{{t $.Lang "scheduled_amount"}}</th><th>{{t $.Lang "paid_amount"}}</th><th>{{t $.Lang "unpaid_amount"}}</th></tr></thead><tbody>{{range .Installments}}<tr><td>{{.InstallmentNo}}</td><td>{{.DueDate}}</td><td>{{nominal .ScheduledAmount}}</td><td>{{nominal .PaidAmount}}</td><td>{{nominal (sub .ScheduledAmount .PaidAmount)}}</td></tr>{{end}}</tbody>{{template "table-close" .}}{{else}}{{template "empty-state" (t .Lang "no_installments")}}{{end}}
       </section>
-      {{if .CanCorrectStartDate}}<section class="panel"><h2>{{t .Lang "correct_start_date"}}</h2><form method="post" action="/api/admin/loans/{{.Loan.ID}}/start-date" hx-post="/api/admin/loans/{{.Loan.ID}}/start-date"><label>{{t .Lang "start_date"}} <input type="date" name="start_date" value="{{.Loan.StartDate}}" required></label><button type="submit">{{t .Lang "save"}}</button></form></section>{{end}}
-      <section class="panel"><h2>{{t .Lang "start_date_history"}}</h2>{{if .Audits}}{{template "table-open" .}}<thead><tr><th>{{t $.Lang "old_date"}}</th><th>{{t $.Lang "new_date"}}</th><th>{{t $.Lang "changed_by"}}</th><th>{{t $.Lang "date"}}</th></tr></thead><tbody>{{range .Audits}}<tr><td>{{.OldStartDate}}</td><td>{{.NewStartDate}}</td><td>{{.ChangedBy}}</td><td>{{.CreatedAt}}</td></tr>{{end}}</tbody>{{template "table-close" .}}{{else}}{{template "empty-state" (t .Lang "no_start_date_changes")}}{{end}}</section>
 {{template "admin-shell-end" .}}
 {{end}}
 
@@ -764,17 +757,21 @@
               <td>{{template "member-table-cell" .}}</td>
               <td>{{nominal .Amount}}</td>
               <td>{{.Note}}</td>
-              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}{{if .CurrentApprovalStage}}<small>{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}</small>{{end}}</td>
               <td class="review-cell">
+                {{if and (eq .CurrentApprovalStage $.Role) (index $.Permissions "requests.decide")}}
                 <div class="table-actions">
                   <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                    <input name="note" placeholder="{{t $.Lang "approval_note_optional"}}" aria-label="{{t $.Lang "approval_note_optional"}}">
                     <button type="submit">{{t $.Lang "approve"}}</button>
                   </form>
                 </div>
                 <form class="inline-rejection-form" method="post" action="/api/admin/withdrawal-requests/{{.ID}}/reject" hx-post="/api/admin/withdrawal-requests/{{.ID}}/reject" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
-                  <input name="rejection_reason" placeholder="{{t $.Lang "rejection_reason"}}" aria-label="{{t $.Lang "rejection_reason"}}">
+                  <input name="rejection_reason" placeholder="{{t $.Lang "rejection_reason"}}" aria-label="{{t $.Lang "rejection_reason"}}" required>
                   <button class="button-secondary" type="submit">{{t $.Lang "reject"}}</button>
                 </form>
+                {{else}}<span>{{t $.Lang "read_only"}}</span>{{end}}
+                {{if .ApprovalHistory}}<details><summary>{{t $.Lang "approval_history"}}</summary><ol>{{range .ApprovalHistory}}<li>{{t $.Lang (printf "role_%s" .OfficerRole)}} — {{t $.Lang (printf "status_%s" .Decision)}} — {{.OfficerName}} — {{.CreatedAt}}{{if .Note}} · {{.Note}}{{end}}{{if .Reason}} · {{.Reason}}{{end}}</li>{{end}}</ol></details>{{end}}
               </td>
             </tr>
             {{end}}
@@ -811,22 +808,30 @@
               <td>{{nominal .RequestedAmount}}</td>
               <td>{{.DurationMonths}} {{t $.Lang "months"}}</td>
               <td>{{.Purpose}}</td>
-              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}{{if .CurrentApprovalStage}}<small>{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}</small>{{end}}</td>
               <td>{{.CreatedAt}}</td>
               <td class="review-cell">
+                {{if and (eq .CurrentApprovalStage $.Role) (index $.Permissions "requests.decide")}}
                 <form class="inline-approval-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/approve" hx-post="/api/admin/loan-requests/{{.ID}}/approve" hx-target="#loan-review-error" hx-swap="innerHTML">
+                  {{if eq $.Role "manager"}}
                   <label>{{t $.Lang "approved_amount"}} <input name="approved_amount" type="number" min="1" value="{{.RequestedAmount}}" aria-label="{{t $.Lang "approved_amount"}}"></label>
                   <label>{{t $.Lang "duration"}} <input name="duration_months" type="number" min="1" max="120" value="{{.DurationMonths}}" aria-label="{{t $.Lang "duration_months"}}"></label>
                   <label>{{t $.Lang "start_date"}} <input name="start_date" type="date" required aria-label="{{t $.Lang "start_date"}}"></label>
                   <label>{{t $.Lang "monthly_interest_rate"}} <input name="interest_rate_percent" type="number" min="0.00" max="10.00" step="0.01" value="1.00" required aria-label="{{t $.Lang "monthly_interest_rate"}}"></label>
+                  {{else}}
+                  <p>{{t $.Lang "locked_terms"}}: Rp {{nominal .ProposedApprovedAmount}} · {{.ProposedDurationMonths}} {{t $.Lang "months"}} · {{.ProposedStartDate}} · {{rate .ProposedInterestRateBPS}}</p>
+                  {{end}}
+                  <label>{{t $.Lang "approval_note_optional"}} <input name="note" aria-label="{{t $.Lang "approval_note_optional"}}"></label>
                   <div class="table-actions">
                     <button type="submit">{{t $.Lang "approve"}}</button>
                   </div>
                 </form>
                 <form class="inline-rejection-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/reject" hx-post="/api/admin/loan-requests/{{.ID}}/reject" hx-target="#loan-review-error" hx-swap="innerHTML">
-                  <label>{{t $.Lang "rejection_reason"}} <input name="rejection_reason" aria-label="{{t $.Lang "rejection_reason"}}" placeholder="{{t $.Lang "rejection_reason"}}"></label>
+                  <label>{{t $.Lang "rejection_reason"}} <input name="rejection_reason" aria-label="{{t $.Lang "rejection_reason"}}" placeholder="{{t $.Lang "rejection_reason"}}" required></label>
                   <button class="button-secondary" type="submit">{{t $.Lang "reject"}}</button>
                 </form>
+                {{else}}<span>{{t $.Lang "read_only"}}</span>{{end}}
+                {{if .ApprovalHistory}}<details><summary>{{t $.Lang "approval_history"}}</summary><ol>{{range .ApprovalHistory}}<li>{{t $.Lang (printf "role_%s" .OfficerRole)}} — {{t $.Lang (printf "status_%s" .Decision)}} — {{.OfficerName}} — {{.CreatedAt}}{{if .Note}} · {{.Note}}{{end}}{{if .Reason}} · {{.Reason}}{{end}}</li>{{end}}</ol></details>{{end}}
               </td>
             </tr>
             {{end}}

@@ -1,0 +1,98 @@
+{{define "password-change"}}
+{{if eq .Role "member"}}{{template "member-shell-start" .}}{{else}}{{template "admin-shell-start" .}}{{end}}
+  <section class="panel form-panel">
+    <form method="post" action="/api/account/password" hx-post="/api/account/password" hx-target="#password-change-error" hx-swap="innerHTML">
+      <label>{{t .Lang "new_password"}}<input type="password" name="password" minlength="8" autocomplete="new-password" required></label>
+      <button type="submit">{{t .Lang "change_password"}}</button>
+    </form>
+    {{template "form-error" (dict "ID" "password-change-error")}}
+  </section>
+{{if eq .Role "member"}}{{template "member-shell-end" .}}{{else}}{{template "admin-shell-end" .}}{{end}}
+{{end}}
+
+{{define "notifications"}}
+{{if eq .Role "member"}}{{template "member-shell-start" .}}{{else}}{{template "admin-shell-start" .}}{{end}}
+  <section class="panel">
+    <div class="stack-list">
+      {{range .Notifications}}
+      <article class="summary-row {{if not .IsRead}}notification-unread{{end}}">
+        <div>
+          <strong>{{.Title}}</strong>
+          <p>{{.Body}}</p>
+          <small>{{.CreatedAt}}</small>
+        </div>
+        <div class="inline-actions">
+          {{if .Link}}<a class="button-link button-link-secondary" href="{{.Link}}">{{t $.Lang "view"}}</a>{{end}}
+          {{if not .IsRead}}
+          <form method="post" action="/api/notifications/{{.ID}}/read" hx-post="/api/notifications/{{.ID}}/read">
+            <button class="button-secondary" type="submit">{{t $.Lang "mark_read"}}</button>
+          </form>
+          {{end}}
+        </div>
+      </article>
+      {{else}}
+      {{template "empty-state" (t .Lang "no_notifications")}}
+      {{end}}
+    </div>
+  </section>
+{{if eq .Role "member"}}{{template "member-shell-end" .}}{{else}}{{template "admin-shell-end" .}}{{end}}
+{{end}}
+
+{{define "admin-officers"}}
+{{template "admin-shell-start" .}}
+  <section class="content-grid content-grid-two">
+    <article class="panel form-panel">
+      <h2>{{t .Lang "create_officer"}}</h2>
+      <form method="post" action="/api/admin/officers" hx-post="/api/admin/officers" hx-target="#officer-error" hx-swap="innerHTML">
+        <label>{{t .Lang "full_name"}}<input name="full_name" required></label>
+        <label>{{t .Lang "email"}}<input type="email" name="email" autocomplete="off" required></label>
+        <label>{{t .Lang "officer_role"}}
+          <select name="role" required>
+            <option value="manager">{{t .Lang "role_manager"}}</option>
+            <option value="ketua_i">{{t .Lang "role_ketua_i"}}</option>
+            <option value="ketua_ii">{{t .Lang "role_ketua_ii"}}</option>
+            <option value="ketua_utama">{{t .Lang "role_ketua_utama"}}</option>
+          </select>
+        </label>
+        <label>{{t .Lang "temporary_password"}}<input type="password" name="password" minlength="8" autocomplete="new-password" required></label>
+        <button type="submit">{{t .Lang "create_officer"}}</button>
+      </form>
+      {{template "form-error" (dict "ID" "officer-error")}}
+    </article>
+    <article class="panel">
+      <h2>{{t .Lang "officers"}}</h2>
+      <div class="stack-list">
+        {{range .Officers}}
+        <article class="summary-row">
+          <div><strong>{{.FullName}}</strong><p>{{.Email}} · {{t $.Lang (printf "role_%s" .Role)}}</p></div>
+          <form method="post" action="/api/admin/officers/{{.ID}}/update" hx-post="/api/admin/officers/{{.ID}}/update" hx-target="#officer-error" hx-swap="innerHTML">
+            <input name="full_name" value="{{.FullName}}" aria-label="{{t $.Lang "full_name"}}" required>
+            <select name="role" aria-label="{{t $.Lang "officer_role"}}">
+              <option value="manager" {{if eq .Role "manager"}}selected{{end}}>{{t $.Lang "role_manager"}}</option>
+              <option value="ketua_i" {{if eq .Role "ketua_i"}}selected{{end}}>{{t $.Lang "role_ketua_i"}}</option>
+              <option value="ketua_ii" {{if eq .Role "ketua_ii"}}selected{{end}}>{{t $.Lang "role_ketua_ii"}}</option>
+              <option value="ketua_utama" {{if eq .Role "ketua_utama"}}selected{{end}}>{{t $.Lang "role_ketua_utama"}}</option>
+            </select>
+            <select name="active" aria-label="{{t $.Lang "status"}}">
+              <option value="true" {{if .Active}}selected{{end}}>{{t $.Lang "active"}}</option>
+              <option value="false" {{if not .Active}}selected{{end}}>{{t $.Lang "inactive"}}</option>
+            </select>
+            <button class="button-secondary" type="submit">{{t $.Lang "save"}}</button>
+          </form>
+          <form method="post" action="/api/admin/officers/{{.ID}}/reset-password" hx-post="/api/admin/officers/{{.ID}}/reset-password" hx-target="#officer-error" hx-swap="innerHTML">
+            <input type="password" name="password" minlength="8" autocomplete="new-password" placeholder="{{t $.Lang "temporary_password"}}" required>
+            <button class="button-secondary" type="submit">{{t $.Lang "reset_password"}}</button>
+          </form>
+        </article>
+        {{else}}{{template "empty-state" (t .Lang "no_officers")}}{{end}}
+      </div>
+    </article>
+  </section>
+  <section class="panel">
+    <h2>{{t .Lang "officer_audit_history"}}</h2>
+    <div class="table-wrap"><table data-enhanced-table><thead><tr><th>{{t .Lang "date"}}</th><th>{{t .Lang "actor"}}</th><th>{{t .Lang "officer"}}</th><th>{{t .Lang "action"}}</th></tr></thead><tbody>
+      {{range .Audits}}<tr><td>{{.CreatedAt}}</td><td>{{.ActorName}}</td><td>{{.TargetName}}</td><td>{{t $.Lang (printf "audit_%s" .Action)}}</td></tr>{{else}}<tr><td colspan="4">{{t .Lang "no_audit_events"}}</td></tr>{{end}}
+    </tbody></table></div>
+  </section>
+{{template "admin-shell-end" .}}
+{{end}}
