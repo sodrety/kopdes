@@ -1,0 +1,32 @@
+{{define "error-page"}}
+<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} - KKSUK PD Dharma Jaya</title>
+{{template "asset-head" .}}
+</head>
+<body class="auth-page">
+{{template "toast-root" .}}
+  <main class="auth-card">
+    <section class="auth-visual" aria-label="KKSUK PD Dharma Jaya">
+      <img src="/static/images/lambang-koperasi.png" alt="" width="150" height="146">
+      <div>
+        <span>KKSUK PD Dharma Jaya</span>
+        <strong>{{t .Lang "cooperative_system"}}</strong>
+      </div>
+    </section>
+    <section class="auth-form-panel">
+{{template "brand-mark" .}}
+      {{template "language-form" .}}
+      <p class="eyebrow">{{t .Lang "error_code"}} {{.Status}}</p>
+      <h1>{{t .Lang "error_page_heading"}}</h1>
+      <p class="form-error-message">{{.Message}}</p>
+      <a class="button-link" href="{{.BackPath}}">{{t .Lang "go_back"}}</a>
+    </section>
+  </main>
+{{template "toast-script" .}}
+</body>
+</html>
+{{end}}

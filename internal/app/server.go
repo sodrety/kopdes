@@ -42,6 +42,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	}
 
 	router := gin.New()
+	router.HandleMethodNotAllowed = true
 	router.Use(gin.Recovery())
 	router.Use(server.requestID())
 	if cfg.TracingEnabled {
@@ -65,6 +66,12 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.POST("/language", server.setLanguage)
 	router.POST("/api/auth/login", server.login)
 	router.POST("/logout", server.logout)
+	router.NoRoute(func(c *gin.Context) {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", "Page not found")
+	})
+	router.NoMethod(func(c *gin.Context) {
+		respondError(c, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
+	})
 
 	admin := router.Group("/api/admin")
 	admin.Use(server.requireRole("admin"))
@@ -153,7 +160,7 @@ func (s *Server) requireSameOriginForCookieMutations() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		respondError(c, http.StatusForbidden, "FORBIDDEN", "Same-origin browser request is required")
+		respondJSONError(c, http.StatusForbidden, "FORBIDDEN", "Same-origin browser request is required")
 		c.Abort()
 	}
 }
@@ -295,44 +302,72 @@ func (s *Server) adminDashboard(c *gin.Context) {
 func (s *Server) requireRole(role string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenValue := bearerToken(c.GetHeader("Authorization"))
+		usesBearerToken := tokenValue != ""
 		if tokenValue == "" {
 			if cookie, err := c.Cookie("auth_token"); err == nil {
 				tokenValue = cookie
 			}
 		}
 		if tokenValue == "" {
-			respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication token is required")
-			c.Abort()
+			s.respondUnauthorized(c, usesBearerToken, "Authentication token is required", false)
 			return
 		}
 
 		tokenUser, err := ParseToken(s.cfg.JWTSecret, tokenValue)
 		if err != nil {
-			respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid authentication token")
-			c.Abort()
+			s.respondUnauthorized(c, usesBearerToken, "Invalid authentication token", true)
 			return
 		}
 		user, err := s.validateSessionUser(tokenUser)
 		if err != nil {
-			respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid authentication token")
-			c.Abort()
+			s.respondUnauthorized(c, usesBearerToken, "Invalid authentication token", true)
 			return
 		}
 		if user.Role != role {
+			if shouldRedirectAuthFailure(c, usesBearerToken) {
+				s.clearAuthCookie(c)
+				if isHTMXRequest(c) {
+					respondHXRedirect(c, "/login")
+				} else {
+					c.Redirect(http.StatusSeeOther, "/login")
+				}
+				c.Abort()
+				return
+			}
 			respondError(c, http.StatusForbidden, "FORBIDDEN", "Insufficient role")
 			c.Abort()
 			return
 		}
 		if role == "member" {
 			if err := s.validateMemberSession(tokenUser, user); err != nil {
-				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid authentication token")
-				c.Abort()
+				s.respondUnauthorized(c, usesBearerToken, "Invalid authentication token", true)
 				return
 			}
 		}
 		c.Set("user", user)
 		c.Next()
 	}
+}
+
+func (s *Server) respondUnauthorized(c *gin.Context, usesBearerToken bool, message string, clearCookie bool) {
+	if shouldRedirectAuthFailure(c, usesBearerToken) {
+		if clearCookie {
+			s.clearAuthCookie(c)
+		}
+		if isHTMXRequest(c) {
+			respondHXRedirect(c, "/login")
+		} else {
+			c.Redirect(http.StatusSeeOther, "/login")
+		}
+		c.Abort()
+		return
+	}
+	respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", message)
+	c.Abort()
+}
+
+func shouldRedirectAuthFailure(c *gin.Context, usesBearerToken bool) bool {
+	return !usesBearerToken && wantsBrowserResponse(c)
 }
 
 const (
@@ -429,6 +464,14 @@ func respondError(c *gin.Context, status int, code, message string) {
 		c.Data(status, "text/html; charset=utf-8", []byte(body))
 		return
 	}
+	if wantsBrowserDocument(c) {
+		respondBrowserError(c, status, code, message)
+		return
+	}
+	respondJSONError(c, status, code, message)
+}
+
+func respondJSONError(c *gin.Context, status int, code, message string) {
 	c.JSON(status, errorBody{Error: errorDetail{Code: code, Message: message}})
 }
 
@@ -438,6 +481,55 @@ func isHTMXRequest(c *gin.Context) bool {
 
 func isBrowserFormRequest(c *gin.Context) bool {
 	return strings.Contains(c.GetHeader("Content-Type"), "application/x-www-form-urlencoded")
+}
+
+func wantsBrowserResponse(c *gin.Context) bool {
+	return isHTMXRequest(c) || wantsBrowserDocument(c)
+}
+
+func wantsBrowserDocument(c *gin.Context) bool {
+	if isBrowserFormRequest(c) || !strings.HasPrefix(c.Request.URL.Path, "/api/") {
+		return true
+	}
+	if strings.EqualFold(c.GetHeader("Sec-Fetch-Mode"), "navigate") || strings.EqualFold(c.GetHeader("Sec-Fetch-Dest"), "document") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(c.GetHeader("Accept")), "text/html")
+}
+
+func respondBrowserError(c *gin.Context, status int, code, message string) {
+	lang := languageFromRequest(c)
+	backPath := browserErrorBackPath(c)
+	data := gin.H{
+		"Lang":        lang,
+		"Title":       translate(lang, "error_page_title"),
+		"Status":      status,
+		"Code":        code,
+		"Message":     localizedErrorMessage(c, message),
+		"BackPath":    backPath,
+		"CurrentPath": backPath,
+	}
+	var body strings.Builder
+	if err := pageTemplates.ExecuteTemplate(&body, "error-page", data); err != nil {
+		c.Data(status, "text/plain; charset=utf-8", []byte(localizedErrorMessage(c, message)))
+		return
+	}
+	c.Data(status, "text/html; charset=utf-8", []byte(body.String()))
+}
+
+func browserErrorBackPath(c *gin.Context) string {
+	if c.Request.URL.Path == "/api/auth/login" {
+		return "/login"
+	}
+	referer := c.GetHeader("Referer")
+	if referer == "" {
+		return "/"
+	}
+	parsed, err := url.Parse(referer)
+	if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Host, c.Request.Host) || parsed.Path == "" {
+		return "/"
+	}
+	return parsed.RequestURI()
 }
 
 func respondHXRedirect(c *gin.Context, path string) {
@@ -450,12 +542,20 @@ func respondCreatedOrHXRedirect(c *gin.Context, redirectPath string, body any) {
 		respondHXRedirect(c, redirectPath)
 		return
 	}
+	if isBrowserFormRequest(c) {
+		c.Redirect(http.StatusSeeOther, redirectPath)
+		return
+	}
 	c.JSON(http.StatusCreated, body)
 }
 
 func respondOKOrHXRedirect(c *gin.Context, redirectPath string, body any) {
 	if isHTMXRequest(c) {
 		respondHXRedirect(c, redirectPath)
+		return
+	}
+	if isBrowserFormRequest(c) {
+		c.Redirect(http.StatusSeeOther, redirectPath)
 		return
 	}
 	c.JSON(http.StatusOK, body)
