@@ -442,6 +442,8 @@
                 <th>{{t $.Lang "name"}}</th>
                 <th>{{t $.Lang "member_type"}}</th>
                 <th>{{t $.Lang "status"}}</th>
+                <th>{{t $.Lang "login"}}</th>
+                <th>{{t $.Lang "officer"}}</th>
               </tr>
             </thead>
             <tbody>
@@ -451,6 +453,8 @@
                 <td>{{.FullName}}</td>
                 <td>{{.MemberTypeLabel}}</td>
                 <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
+                <td>{{if .HasLogin}}{{if .LoginActive}}{{t $.Lang "active"}}{{else}}{{t $.Lang "inactive"}}{{end}}{{else}}{{t $.Lang "login_missing"}}{{end}}</td>
+                <td>{{if .OfficerRole}}{{t $.Lang (printf "role_%s" .OfficerRole)}}{{if not .OfficerActive}} · {{t $.Lang "inactive"}}{{end}}{{else}}{{t $.Lang "not_an_officer"}}{{end}}</td>
               </tr>
               {{end}}
             </tbody>
@@ -622,6 +626,78 @@
         <div><span>{{t .Lang "member_type"}}</span><strong>{{.Member.MemberTypeLabel}}</strong></div>
         <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .Member.Status}}</strong></div>
       </section>
+      {{if or (index .Permissions "members.manage") (index .Permissions "officers.manage")}}
+      <section class="content-grid content-grid-two">
+        {{if index .Permissions "members.manage"}}
+        <article class="panel form-panel">
+          <h2>{{t .Lang "account_access"}}</h2>
+          {{if .Member.HasLogin}}
+          <form method="post" action="/api/admin/members/{{.Member.ID}}/user/update" hx-post="/api/admin/members/{{.Member.ID}}/user/update" hx-target="#member-account-error" hx-swap="innerHTML">
+            <label>{{t .Lang "login_email"}} <input name="email" type="email" value="{{.Member.LoginEmail}}" required></label>
+            <label>{{t .Lang "login_status"}}
+              <select name="active">
+                <option value="true" {{if .Member.LoginActive}}selected{{end}}>{{t .Lang "active"}}</option>
+                <option value="false" {{if not .Member.LoginActive}}selected{{end}}>{{t .Lang "inactive"}}</option>
+              </select>
+            </label>
+            <button type="submit">{{t .Lang "save_account"}}</button>
+          </form>
+          <p class="field-help">{{if .Member.MustChangePassword}}{{t .Lang "password_change_required"}}{{else}}{{t .Lang "password_ready"}}{{end}}</p>
+          <form method="post" action="/api/admin/members/{{.Member.ID}}/user/reset-password" hx-post="/api/admin/members/{{.Member.ID}}/user/reset-password" hx-target="#member-account-error" hx-swap="innerHTML">
+            <label>{{t .Lang "temporary_password"}} <input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+            <button class="button-secondary" type="submit">{{t .Lang "reset_password"}}</button>
+          </form>
+          {{else}}
+          <p>{{t .Lang "login_missing"}}</p>
+          <form method="post" action="/api/admin/members/{{.Member.ID}}/user" hx-post="/api/admin/members/{{.Member.ID}}/user" hx-target="#member-account-error" hx-swap="innerHTML">
+            <label>{{t .Lang "login_email"}} <input name="email" type="email" required></label>
+            <label>{{t .Lang "temporary_password"}} <input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+            <button type="submit">{{t .Lang "create_login"}}</button>
+          </form>
+          {{end}}
+          {{template "form-error" (dict "ID" "member-account-error")}}
+        </article>
+        {{end}}
+        {{if index .Permissions "officers.manage"}}<article class="panel form-panel">
+          <h2>{{t .Lang "officer_appointment"}}</h2>
+          {{if .Member.OfficerID}}
+          <form method="post" action="/api/admin/officers/{{.Member.OfficerID}}/update" hx-post="/api/admin/officers/{{.Member.OfficerID}}/update" hx-target="#member-officer-error" hx-swap="innerHTML">
+            <label>{{t .Lang "officer_role"}}
+              <select name="role" required>
+                <option value="manager" {{if eq .Member.OfficerRole "manager"}}selected{{end}}>{{t $.Lang "role_manager"}}</option>
+                <option value="ketua_i" {{if eq .Member.OfficerRole "ketua_i"}}selected{{end}}>{{t $.Lang "role_ketua_i"}}</option>
+                <option value="ketua_ii" {{if eq .Member.OfficerRole "ketua_ii"}}selected{{end}}>{{t $.Lang "role_ketua_ii"}}</option>
+                <option value="ketua_utama" {{if eq .Member.OfficerRole "ketua_utama"}}selected{{end}}>{{t $.Lang "role_ketua_utama"}}</option>
+              </select>
+            </label>
+            <label>{{t .Lang "status"}}
+              <select name="active">
+                <option value="true" {{if .Member.OfficerActive}}selected{{end}}>{{t $.Lang "active"}}</option>
+                <option value="false" {{if not .Member.OfficerActive}}selected{{end}}>{{t $.Lang "inactive"}}</option>
+              </select>
+            </label>
+            <button type="submit">{{t .Lang "save"}}</button>
+          </form>
+          {{else if .Member.HasLogin}}
+          <form method="post" action="/api/admin/officers" hx-post="/api/admin/officers" hx-target="#member-officer-error" hx-swap="innerHTML">
+            <input type="hidden" name="member_id" value="{{.Member.ID}}">
+            <label>{{t .Lang "officer_role"}}
+              <select name="role" required>
+                <option value="manager">{{t $.Lang "role_manager"}}</option>
+                <option value="ketua_i">{{t $.Lang "role_ketua_i"}}</option>
+                <option value="ketua_ii">{{t $.Lang "role_ketua_ii"}}</option>
+                <option value="ketua_utama">{{t $.Lang "role_ketua_utama"}}</option>
+              </select>
+            </label>
+            <button type="submit">{{t .Lang "assign_officer"}}</button>
+          </form>
+          {{else}}
+          <p>{{t .Lang "create_login_before_officer"}}</p>
+          {{end}}
+          {{template "form-error" (dict "ID" "member-officer-error")}}
+        </article>{{end}}
+      </section>
+      {{end}}
       {{if index .Permissions "members.manage"}}
       <section class="panel narrow-panel">
         <h2>{{t .Lang "change_member_type"}}</h2>

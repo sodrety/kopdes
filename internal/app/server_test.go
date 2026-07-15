@@ -791,7 +791,7 @@ func TestStandardBrowserFormsRedirectOrRenderHTML(t *testing.T) {
 	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
 
 	t.Run("successful submission redirects", func(t *testing.T) {
-		body := "member_no=M-FORM-001&full_name=Form+Member&join_date=2026-07-13&status=active"
+		body := "member_no=M-FORM-001&full_name=Form+Member&join_date=2026-07-13&status=active&email=form-member%40coop.test&password=member-password"
 		req := httptest.NewRequest(http.MethodPost, "/api/admin/members", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("Origin", "http://example.com")
@@ -1183,7 +1183,9 @@ func TestAdminCanCreateAndViewMember(t *testing.T) {
 		"phone":"08123456789",
 		"address":"Jakarta",
 		"join_date":"2026-06-15",
-		"status":"active"
+		"status":"active",
+		"email":"siti@coop.test",
+		"password":"member-password"
 	}`)
 	createReq := httptest.NewRequest(http.MethodPost, "/api/admin/members", createBody)
 	createReq.Header.Set("Content-Type", "application/json")
@@ -1361,7 +1363,7 @@ func TestCreateMemberRejectsDuplicateMemberNumber(t *testing.T) {
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	fixture.createMember(t, adminToken, `{"member_no":"M-0003","full_name":"Dewi Lestari","join_date":"2026-06-15","status":"active"}`)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/members", bytes.NewBufferString(`{"member_no":"M-0003","full_name":"Dewi Other","join_date":"2026-06-16","status":"active"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/members", bytes.NewBufferString(`{"member_no":"M-0003","full_name":"Dewi Other","join_date":"2026-06-16","status":"active","email":"dewi-other@coop.test","password":"member-password"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	rec := httptest.NewRecorder()
@@ -1378,7 +1380,7 @@ func TestCreateMemberValidatesRequiredFieldsAndStatus(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/members", bytes.NewBufferString(`{"member_no":"M-0004","full_name":"Rina","join_date":"2026-06-15","status":"archived"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/members", bytes.NewBufferString(`{"member_no":"M-0004","full_name":"Rina","join_date":"2026-06-15","status":"archived","email":"rina@coop.test","password":"member-password"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	rec := httptest.NewRecorder()
@@ -4107,6 +4109,22 @@ func (f testFixture) createMember(t *testing.T, adminToken, body string) struct 
 	Status   string `json:"status"`
 } {
 	t.Helper()
+	var payload map[string]any
+	hadEmail := false
+	if err := json.Unmarshal([]byte(body), &payload); err == nil {
+		memberNo, _ := payload["member_no"].(string)
+		email, _ := payload["email"].(string)
+		hadEmail = strings.TrimSpace(email) != ""
+		if strings.TrimSpace(email) == "" {
+			payload["email"] = strings.ToLower(memberNo) + "@test.local"
+			payload["password"] = "member-password"
+			encoded, encodeErr := json.Marshal(payload)
+			if encodeErr != nil {
+				t.Fatalf("encode test member: %v", encodeErr)
+			}
+			body = string(encoded)
+		}
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/members", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -4130,6 +4148,17 @@ func (f testFixture) createMember(t *testing.T, adminToken, body string) struct 
 	if created.ID == "" {
 		t.Fatal("expected created member id")
 	}
+	if _, err := f.db.Exec(`UPDATE users SET must_change_password=FALSE WHERE member_id=$1`, created.ID); err != nil {
+		t.Fatalf("mark test member password as established: %v", err)
+	}
+	if !hadEmail {
+		if _, err := f.db.Exec(`DELETE FROM users WHERE member_id=$1 AND id<>'member-user-id'`, created.ID); err != nil {
+			t.Fatalf("remove generated test login: %v", err)
+		}
+		if _, err := f.db.Exec(`UPDATE users SET member_id=$1,full_name=$2 WHERE id='member-user-id'`, created.ID, created.FullName); err != nil {
+			t.Fatalf("link shared test login: %v", err)
+		}
+	}
 	return created
 }
 
@@ -4144,6 +4173,9 @@ func (f testFixture) createMemberUser(t *testing.T, adminToken, memberID, email,
 	f.server.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected member user status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := f.db.Exec(`UPDATE users SET must_change_password=FALSE WHERE member_id=$1`, memberID); err != nil {
+		t.Fatalf("mark test member password as established: %v", err)
 	}
 }
 

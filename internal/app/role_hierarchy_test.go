@@ -269,7 +269,11 @@ func TestOfficerPermissionsForcedPasswordChangeAndImmediateSessionInvalidation(t
 	}
 
 	member := fixture.createMember(t, managerToken, `{"member_no":"OFF-001","full_name":"New Manager","join_date":"2026-07-01","status":"active"}`)
-	response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/officers", ketuaUtamaToken, `{"member_id":"`+member.ID+`","email":"new-manager@coop.test","role":"manager","password":"temporary123"}`)
+	if _, err := fixture.db.Exec(`UPDATE users SET must_change_password=TRUE WHERE member_id=$1`, member.ID); err != nil {
+		t.Fatalf("mark officer member password temporary: %v", err)
+	}
+	memberEmail := "member@coop.test"
+	response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/officers", ketuaUtamaToken, `{"member_id":"`+member.ID+`","role":"manager"}`)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create officer: %d: %s", response.Code, response.Body.String())
 	}
@@ -279,7 +283,7 @@ func TestOfficerPermissionsForcedPasswordChangeAndImmediateSessionInvalidation(t
 	if err := json.Unmarshal(response.Body.Bytes(), &officer); err != nil || officer.ID == "" {
 		t.Fatalf("decode officer: %v body=%s", err, response.Body.String())
 	}
-	newToken := fixture.login(t, "new-manager@coop.test", "temporary123")
+	newToken := fixture.login(t, memberEmail, "password")
 	response = hierarchyRequest(fixture, http.MethodGet, "/api/admin/dashboard", newToken, "")
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("temporary password should gate dashboard, got %d", response.Code)
@@ -302,7 +306,7 @@ func TestOfficerPermissionsForcedPasswordChangeAndImmediateSessionInvalidation(t
 	if response = hierarchyRequest(fixture, http.MethodPost, "/api/admin/officers/"+officer.ID+"/update", ketuaUtamaToken, `{"full_name":"New Manager","role":"manager","active":true}`); response.Code != http.StatusOK {
 		t.Fatalf("reactivate officer: %d: %s", response.Code, response.Body.String())
 	}
-	managerSession := fixture.login(t, "new-manager@coop.test", "permanent123")
+	managerSession := fixture.login(t, memberEmail, "permanent123")
 	if response = hierarchyRequest(fixture, http.MethodPost, "/api/admin/officers/"+officer.ID+"/update", ketuaUtamaToken, `{"full_name":"New Manager","role":"ketua_i","active":true}`); response.Code != http.StatusOK {
 		t.Fatalf("change Officer Role: %d: %s", response.Code, response.Body.String())
 	}

@@ -59,6 +59,7 @@ var (
 	errInvalidTemporaryPassword = errors.New("invalid temporary password")
 	errMemberAlreadyOfficer     = errors.New("member already has an Officer Appointment")
 	errInactiveOfficerMember    = errors.New("Officer Member must be active")
+	errMemberLoginRequired      = errors.New("member login is required")
 )
 
 func (s *Server) listOfficers(c *gin.Context) {
@@ -105,7 +106,7 @@ func (s *Server) createOfficer(c *gin.Context) {
 		return
 	}
 	officer, err := s.insertOfficer(actor, req)
-	if errors.Is(err, errInvalidOfficer) || errors.Is(err, errInvalidTemporaryPassword) || errors.Is(err, errInactiveOfficerMember) {
+	if errors.Is(err, errInvalidOfficer) || errors.Is(err, errInvalidTemporaryPassword) || errors.Is(err, errInactiveOfficerMember) || errors.Is(err, errMemberLoginRequired) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid Officer details")
 		return
 	}
@@ -249,7 +250,6 @@ func (s *Server) officerAuditEvents() ([]OfficerAuditEvent, error) {
 
 func (s *Server) insertOfficer(actor User, req createOfficerInput) (Officer, error) {
 	memberID := strings.TrimSpace(req.MemberID)
-	email := strings.ToLower(strings.TrimSpace(req.Email))
 	role := strings.TrimSpace(req.Role)
 	if memberID == "" || !validOfficerRole(role) {
 		return Officer{}, errInvalidOfficer
@@ -279,17 +279,7 @@ func (s *Server) insertOfficer(actor User, req createOfficerInput) (Officer, err
 	var mustChange bool
 	err = tx.QueryRow(`SELECT id,email,must_change_password FROM users WHERE member_id=$1 AND historical_identity=FALSE`, memberID).Scan(&userID, &userEmail, &mustChange)
 	if errors.Is(err, sql.ErrNoRows) {
-		if email == "" || len(req.Password) < 8 {
-			return Officer{}, errInvalidTemporaryPassword
-		}
-		hash, hashErr := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-		if hashErr != nil {
-			return Officer{}, hashErr
-		}
-		userID, userEmail, mustChange = newID(), email, true
-		if _, err := tx.Exec(`INSERT INTO users (id,email,password_hash,role,member_id,full_name,active,must_change_password,historical_identity) VALUES ($1,$2,$3,'member',$4,$5,TRUE,TRUE,FALSE)`, userID, userEmail, string(hash), memberID, name); err != nil {
-			return Officer{}, err
-		}
+		return Officer{}, errMemberLoginRequired
 	} else if err != nil {
 		return Officer{}, err
 	}
