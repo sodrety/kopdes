@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sodrety/kopdes/internal/app"
+	"github.com/xuri/excelize/v2"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -2148,6 +2150,89 @@ func TestAdminCanExportPinjamanAndAngsuranCSV(t *testing.T) {
 		if !strings.Contains(repaymentBody, text) {
 			t.Fatalf("expected angsuran export to include %q, got %s", text, repaymentBody)
 		}
+	}
+}
+
+func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"K-TAG-001","full_name":"Tagihan Member","join_date":"2026-01-01","status":"active","email":"tagihan-member@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "tagihan-member@coop.test", "member-password")
+	requestID := fixture.createLoanRequest(t, memberToken, 1_000_000, 5)
+	start := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60))
+	startDate := start.Format("2006-01-02")
+	statementMonthTime := start.AddDate(0, 1, 0)
+	statementMonth := statementMonthTime.Format("2006-01")
+	recordDate := time.Date(statementMonthTime.Year(), statementMonthTime.Month()+1, 0, 0, 0, 0, 0, statementMonthTime.Location()).Format("2006-01-02")
+	loan := fixture.approveLoanRequestWithStartDate(t, adminToken, requestID, 1_000_000, 5, startDate)
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/api/admin/tagihan/export.xlsx?month="+statementMonth, nil)
+	exportReq.Header.Set("Authorization", "Bearer "+adminToken)
+	exportRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(exportRec, exportReq)
+	if exportRec.Code != http.StatusOK {
+		t.Fatalf("expected Tagihan export status 200, got %d: %s", exportRec.Code, exportRec.Body.String())
+	}
+	workbook, err := excelize.OpenReader(bytes.NewReader(exportRec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("open exported Tagihan workbook: %v", err)
+	}
+	sheet := workbook.GetSheetName(0)
+	rows, err := workbook.GetRows(sheet)
+	if err != nil {
+		t.Fatalf("read exported Tagihan rows: %v", err)
+	}
+	var tagihanExcelRow int
+	var tagihanRow []string
+	for index, row := range rows[1:] {
+		if len(row) > 0 && row[0] == member.ID {
+			tagihanExcelRow = index + 2
+			tagihanRow = row
+			break
+		}
+	}
+	if tagihanExcelRow == 0 {
+		t.Fatalf("expected Tagihan row for member %s, got %#v", member.ID, rows)
+	}
+	if tagihanRow[1] != "K-TAG-001" || tagihanRow[3] != "100000" || tagihanRow[4] != "0" || tagihanRow[5] != "50000" || tagihanRow[6] != "210000" || tagihanRow[8] != "360000" {
+		t.Fatalf("unexpected Tagihan row: %#v, loan=%+v", tagihanRow, loan)
+	}
+	statusCell, err := excelize.CoordinatesToCellName(10, tagihanExcelRow)
+	if err != nil {
+		t.Fatalf("find status cell: %v", err)
+	}
+	if err := workbook.SetCellValue(sheet, statusCell, "paid"); err != nil {
+		t.Fatalf("mark exported row paid: %v", err)
+	}
+	var paidWorkbook bytes.Buffer
+	if err := workbook.Write(&paidWorkbook); err != nil {
+		t.Fatalf("write paid Tagihan workbook: %v", err)
+	}
+	if err := workbook.Close(); err != nil {
+		t.Fatalf("close workbook: %v", err)
+	}
+
+	importResult := fixture.importTagihanWorkbook(t, adminToken, statementMonth, recordDate, paidWorkbook.Bytes())
+	if importResult.Summary.Imported != 1 || importResult.Summary.Invalid != 0 {
+		t.Fatalf("unexpected import summary: %+v", importResult.Summary)
+	}
+	var pokok, sukarela, wajib, repayment int64
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(CASE WHEN category='pokok' THEN amount ELSE 0 END),0), COALESCE(SUM(CASE WHEN category='sukarela' THEN amount ELSE 0 END),0), COALESCE(SUM(CASE WHEN category='wajib' THEN amount ELSE 0 END),0) FROM saving_records WHERE member_id=$1 AND reference_no=$2`, member.ID, "TAGIHAN-"+statementMonth).Scan(&pokok, &sukarela, &wajib); err != nil {
+		t.Fatalf("read Tagihan savings: %v", err)
+	}
+	if pokok != 100_000 || sukarela != 50_000 || wajib != 0 {
+		t.Fatalf("unexpected Tagihan savings pokok=%d sukarela=%d wajib=%d", pokok, sukarela, wajib)
+	}
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM loan_repayments WHERE loan_id=$1 AND reference_no=$2`, loan.ID, "TAGIHAN-"+statementMonth).Scan(&repayment); err != nil {
+		t.Fatalf("read Tagihan repayment: %v", err)
+	}
+	if repayment != 210_000 {
+		t.Fatalf("expected Tagihan repayment 210000, got %d", repayment)
+	}
+
+	secondImport := fixture.importTagihanWorkbook(t, adminToken, statementMonth, recordDate, paidWorkbook.Bytes())
+	if secondImport.Summary.Imported != 0 || secondImport.Summary.Invalid != 0 {
+		t.Fatalf("expected duplicate import to skip, got %+v", secondImport.Summary)
 	}
 }
 
@@ -4386,6 +4471,99 @@ func (f testFixture) approveLoanRequest(t *testing.T, adminToken, requestID stri
 		t.Fatal("expected final approval to create loan")
 	}
 	return *response.Loan
+}
+
+func (f testFixture) approveLoanRequestWithStartDate(t *testing.T, adminToken, requestID string, approvedAmount, durationMonths int, startDate string) testLoan {
+	t.Helper()
+
+	managerBody := `{
+		"approved_amount":` + strconv.Itoa(approvedAmount) + `,
+		"duration_months":` + strconv.Itoa(durationMonths) + `,
+		"start_date":"` + startDate + `"
+	}`
+	stages := []struct {
+		token string
+		body  string
+	}{
+		{adminToken, managerBody},
+		{f.login(t, "ketua-i@coop.test", "password"), `{}`},
+		{f.login(t, "ketua-ii@coop.test", "password"), `{}`},
+		{f.login(t, "ketua-utama@coop.test", "password"), `{}`},
+	}
+
+	var response struct {
+		Loan *testLoan `json:"loan"`
+	}
+	for _, stage := range stages {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(stage.body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+stage.token)
+		rec := httptest.NewRecorder()
+		f.server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected approve loan request status 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode loan approval response: %v", err)
+		}
+	}
+	if response.Loan == nil {
+		t.Fatal("expected final approval to create loan")
+	}
+	return *response.Loan
+}
+
+func (f testFixture) importTagihanWorkbook(t *testing.T, adminToken, statementMonth, recordDate string, workbook []byte) struct {
+	StatementMonth string `json:"statement_month"`
+	RecordDate     string `json:"record_date"`
+	Summary        struct {
+		Imported int `json:"imported"`
+		Skipped  int `json:"skipped"`
+		Invalid  int `json:"invalid"`
+	} `json:"summary"`
+} {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("statement_month", statementMonth); err != nil {
+		t.Fatalf("write statement month field: %v", err)
+	}
+	if err := writer.WriteField("record_date", recordDate); err != nil {
+		t.Fatalf("write record date field: %v", err)
+	}
+	part, err := writer.CreateFormFile("file", "tagihan.xlsx")
+	if err != nil {
+		t.Fatalf("create multipart file: %v", err)
+	}
+	if _, err := part.Write(workbook); err != nil {
+		t.Fatalf("write multipart workbook: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/tagihan/import", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+	f.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected Tagihan import status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		StatementMonth string `json:"statement_month"`
+		RecordDate     string `json:"record_date"`
+		Summary        struct {
+			Imported int `json:"imported"`
+			Skipped  int `json:"skipped"`
+			Invalid  int `json:"invalid"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode Tagihan import response: %v", err)
+	}
+	return response
 }
 
 func (f testFixture) rejectLoanRequest(t *testing.T, adminToken, requestID, reason string) struct {

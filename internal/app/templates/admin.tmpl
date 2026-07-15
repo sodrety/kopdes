@@ -236,6 +236,75 @@
 {{template "admin-shell-end" .}}
 {{end}}
 
+{{define "admin-tagihan"}}
+{{template "admin-shell-start" .}}
+      <section class="panel">
+        <h2>{{t .Lang "generate_tagihan"}}</h2>
+        <form class="filter-form" method="get" action="/admin/tagihan">
+          <label>{{t .Lang "statement_month"}}
+            <input type="month" name="month" value="{{.StatementMonth}}" required>
+          </label>
+          <button type="submit">{{t .Lang "apply_filters"}}</button>
+          <a class="button-link" href="/api/admin/tagihan/export.xlsx?month={{.StatementMonth}}">{{t .Lang "export_xlsx"}}</a>
+        </form>
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "import_tagihan"}}</h2>
+        <form class="filter-form" method="post" action="/api/admin/tagihan/import" enctype="multipart/form-data">
+          <label>{{t .Lang "statement_month"}}
+            <input type="month" name="statement_month" value="{{.StatementMonth}}" required>
+          </label>
+          <label>{{t .Lang "record_date"}}
+            <input type="date" name="record_date" value="{{.DefaultDate}}">
+          </label>
+          <label>{{t .Lang "xlsx_file"}}
+            <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+          </label>
+          <button type="submit">{{t .Lang "import_tagihan"}}</button>
+        </form>
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "tagihan_preview"}}</h2>
+        {{if .Rows}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "member_id"}}</th>
+              <th>{{t $.Lang "member_no"}}</th>
+              <th>{{t $.Lang "full_name"}}</th>
+              <th>{{t $.Lang "simpanan_pokok"}}</th>
+              <th>{{t $.Lang "simpanan_wajib"}}</th>
+              <th>{{t $.Lang "simpanan_sukarela"}}</th>
+              <th>{{t $.Lang "pinjaman_reguler"}}</th>
+              <th>{{t $.Lang "pinjaman_non_reguler"}}</th>
+              <th>{{t $.Lang "total_tagihan"}}</th>
+              <th>{{t $.Lang "status"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Rows}}
+            <tr>
+              <td>{{.MemberID}}</td>
+              <td>{{.MemberNo}}</td>
+              <td>{{.FullName}}</td>
+              <td>{{nominal .SimpananPokok}}</td>
+              <td>{{nominal .SimpananWajib}}</td>
+              <td>{{nominal .SimpananSukarela}}</td>
+              <td>{{nominal .PinjamanReguler}}</td>
+              <td>{{nominal .PinjamanNonReguler}}</td>
+              <td>{{nominal .Total}}</td>
+              <td>{{.Status}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_tagihan_rows")}}
+        {{end}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
 {{define "admin-balance-report"}}
 {{template "admin-shell-start" .}}
       <section class="balance-report-card">

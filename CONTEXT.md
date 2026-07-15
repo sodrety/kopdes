@@ -132,6 +132,14 @@ _Avoid_: Withdrawal from **Simpanan Pokok** or **Simpanan Wajib**, payout, disbu
 The amount of a pending **Penarikan** excluded from the Member's **Available Withdrawal Balance** until the request is rejected or finally approved.
 _Avoid_: Saving Record, completed withdrawal
 
+**Tagihan**:
+A monthly company-facing collection statement for **Karyawan** **Members** that lists expected **Saving Records** and **Repayment Records** to be verified after the company returns the result.
+_Avoid_: In-app payment, payroll processing, proof that money was received
+
+**Tagihan Statement Month**:
+The calendar month whose final day is the cutoff for expected **Repayment Records** and the default record date for imported paid rows.
+_Avoid_: Import month, export date
+
 **Loan Request**:
 A **Member** request for cooperative financing that is pending, approved, or rejected.
 _Also called in UI_: Permintaan Pinjaman
@@ -214,6 +222,11 @@ _Avoid_: Requested Amount, total loan
 An optional external identifier copied from the manual verification source.
 _Avoid_: Transaction ID when the system did not process the transaction
 
+**Member Identifier**:
+The system-generated identifier used to match imported statement rows to **Members**.
+_Also called in UI_: Member ID
+_Avoid_: Name, NPP when a system identifier is available
+
 **Status Label**:
 A Bahasa UI label for an internal workflow state.
 _Examples_: Menunggu, Disetujui, Ditolak, Selesai
@@ -281,6 +294,31 @@ _Avoid_: Renaming stable internal enum values only to match display text
 - A **Withdrawal Reservation** reduces **Available Withdrawal Balance** without changing **Saving Balance**.
 - **Rejection** releases the **Withdrawal Reservation**, while **Final Approval** replaces it with a withdrawal **Saving Record**.
 - **Cancellation** releases the **Withdrawal Reservation**.
+- A **Tagihan** is prepared for **Karyawan** **Members** only.
+- **Tagihan** eligibility uses the **Member**'s current **Member Type** at generation time.
+- A **Tagihan** may include expected **Saving Records** and expected **Repayment Records**.
+- A **Tagihan** row includes the **Member Identifier** used to match imported rows to **Members**.
+- A generated **Tagihan** includes a row-level status column for the returned paid or unpaid result.
+- A blank returned **Tagihan** row status means the row is not ready to import.
+- **Tagihan** import follows the same **Operational Permissions** required to manually create the resulting **Saving Records** and **Repayment Records**.
+- A generated **Tagihan** includes only **Members** with at least one positive expected amount.
+- A generated **Tagihan** uses explicit row columns for identity, expected **Simpanan** amounts, expected Regular and non-Regular **Repayment Record** amounts, total amount, and row status.
+- A generated **Tagihan** uses fixed expected **Simpanan Pokok** of Rp100.000, **Simpanan Wajib** of Rp0, and **Simpanan Sukarela** of Rp50.000 until the cooperative confirms a different amount.
+- A paid **Tagihan** row creates **Saving Records** only for non-zero expected **Simpanan** amounts.
+- A **Tagihan** separates expected **Repayment Records** for **Regular Loan** obligations from expected **Repayment Records** for non-Regular **Loan Types**.
+- A **Tagihan** may aggregate expected **Repayment Records** from more than one unpaid **Loan** while preserving the Regular versus non-Regular **Loan Type** split.
+- A paid **Tagihan** row preserves the Regular versus non-Regular **Loan Type** split when creating **Repayment Records**.
+- A generated **Tagihan** includes unpaid **Installment Schedule** amounts due on or before the **Tagihan Statement Month** cutoff.
+- A **Tagihan** is a generated statement, not a durable obligation snapshot.
+- A returned **Tagihan** marks each **Member** row as paid or unpaid as a whole, not each expected **Saving Record** or **Repayment Record** separately.
+- A returned **Tagihan** provides paid or unpaid status only; it does not change the generated expected amounts.
+- Importing a returned **Tagihan** records only amounts still due or still unrecorded at import time.
+- Paid rows imported from a returned **Tagihan** use one officer-confirmed record date for the resulting **Saving Records** and **Repayment Records**, defaulting to the **Tagihan Statement Month**'s final calendar day.
+- **Saving Records** and **Repayment Records** created from **Tagihan** import retain **Tagihan**-derived traceability such as statement month and **Member Identifier**.
+- Importing a returned **Tagihan** must not create duplicate **Saving Records** or **Repayment Records** for a **Member** row that was already recorded for the same statement month.
+- **Tagihan** duplicate prevention uses **Tagihan**-derived traceability for **Saving Records** and recalculated remaining due amounts for **Repayment Records**.
+- Importing a returned **Tagihan** may record valid paid rows while reporting invalid or skipped rows separately.
+- A **Tagihan** does not by itself create **Saving Records**, **Repayment Records**, or change balances.
 - A **Member** may have many **Loan Requests**.
 - Every **Loan Request** has exactly one **Loan Type** selected by its Member before the **Requested Amount** is entered.
 - A Member must explicitly select the **Loan Type** for every new **Loan Request**; new requests do not default to **Regular Loan**.

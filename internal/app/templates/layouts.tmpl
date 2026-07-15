@@ -225,6 +225,7 @@
           <a class="sidebar-link {{if eq .Active "loan-requests"}}active{{end}}" href="/admin/loan-requests" title="{{t .Lang "nav_pinjaman_requests"}}"><i class="sidebar-icon" data-lucide="file-clock"></i><span class="sidebar-label">{{t .Lang "nav_pinjaman_requests"}}</span></a>
           <a class="sidebar-link {{if eq .Active "loans"}}active{{end}}" href="/admin/loans" title="{{t .Lang "nav_pinjaman"}}"><i class="sidebar-icon" data-lucide="landmark"></i><span class="sidebar-label">{{t .Lang "nav_pinjaman"}}</span></a>
           <a class="sidebar-link {{if eq .Active "repayments"}}active{{end}}" href="/admin/repayments" title="{{t .Lang "nav_angsuran"}}"><i class="sidebar-icon" data-lucide="receipt"></i><span class="sidebar-label">{{t .Lang "nav_angsuran"}}</span></a>
+          {{if index .Permissions "savings.record"}}<a class="sidebar-link {{if eq .Active "tagihan"}}active{{end}}" href="/admin/tagihan" title="{{t .Lang "tagihan"}}"><i class="sidebar-icon" data-lucide="file-spreadsheet"></i><span class="sidebar-label">{{t .Lang "tagihan"}}</span></a>{{end}}
         </div>
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_reports"}}</span>
