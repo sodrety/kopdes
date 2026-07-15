@@ -66,8 +66,8 @@ func TestRegularLoanAdminFeePostgresMigrationBackfillsLegacyTotal(t *testing.T) 
 			t.Fatalf("loans.%s retained default %q", column, defaultValue)
 		}
 	}
-	insertPostgresPendingSnapshottedLoanRequest(t, db, "request-overflow", 2147483647, 24, 32087255, 770094120, 2917577767)
-	if _, err := db.Exec(`UPDATE loan_requests SET proposed_total_admin_fee=770094121 WHERE id='request-overflow'`); err == nil {
+	insertPostgresPendingSnapshottedLoanRequest(t, db, "request-overflow", 200000000, 24, 2875000, 69000000, 269000000)
+	if _, err := db.Exec(`UPDATE loan_requests SET proposed_total_admin_fee=69000001 WHERE id='request-overflow'`); err == nil {
 		t.Fatal("PostgreSQL allowed direct mutation of a proposed fee snapshot")
 	}
 	deletePostgresLoanRequestFixture(t, db, "request-overflow")
@@ -409,7 +409,7 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 
 	memberToken := login("borrower-pg@coop.test")
 	grouped := url.Values{
-		"loan_type": {"regular"}, "requested_amount": {"Rp 3.000.000.000"},
+		"loan_type": {"regular"}, "requested_amount": {"Rp 200.000.000"},
 		"duration_months": {"24"}, "purpose": {"PostgreSQL BIGINT end-to-end"},
 	}
 	submitted := request(http.MethodPost, "/api/member/loan-requests", memberToken, "application/x-www-form-urlencoded", grouped.Encode())
@@ -418,12 +418,12 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 	}
 	var requestID string
 	var requestedAmount int64
-	if err := db.QueryRow(`SELECT id,requested_amount FROM loan_requests WHERE member_id='pg-borrower' AND status='pending'`).Scan(&requestID, &requestedAmount); err != nil || requestedAmount != 3_000_000_000 {
+	if err := db.QueryRow(`SELECT id,requested_amount FROM loan_requests WHERE member_id='pg-borrower' AND status='pending'`).Scan(&requestID, &requestedAmount); err != nil || requestedAmount != 200_000_000 {
 		t.Fatalf("grouped PostgreSQL amount=%d err=%v", requestedAmount, err)
 	}
 
 	startDate := time.Now().In(jakartaLocation).Format("2006-01-02")
-	managerPayload := fmt.Sprintf(`{"approved_amount":3000000000,"duration_months":24,"start_date":%q}`, startDate)
+	managerPayload := fmt.Sprintf(`{"approved_amount":200000000,"duration_months":24,"start_date":%q}`, startDate)
 	approveConcurrently := func(email, payload string) {
 		t.Helper()
 		token := login(email)
@@ -462,7 +462,7 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 	if err := db.QueryRow(`SELECT id,approved_amount,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,remaining_balance FROM loans WHERE loan_request_id=$1`, requestID).Scan(&loanID, &approvedAmount, &policy, &monthlyFee, &totalFee, &obligation, &balance); err != nil {
 		t.Fatalf("read final PostgreSQL Loan: %v", err)
 	}
-	if approvedAmount != 3_000_000_000 || policy != regularLoanAdminFeePolicy || monthlyFee != 44_875_000 || totalFee != 1_077_000_000 || obligation != 4_077_000_000 || balance != obligation {
+	if approvedAmount != 200_000_000 || policy != regularLoanAdminFeePolicy || monthlyFee != 2_875_000 || totalFee != 69_000_000 || obligation != 269_000_000 || balance != obligation {
 		t.Fatalf("unexpected PostgreSQL BIGINT terms amount=%d policy=%s monthly=%d total=%d obligation=%d balance=%d", approvedAmount, policy, monthlyFee, totalFee, obligation, balance)
 	}
 	var installmentCount int
@@ -471,7 +471,7 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 		t.Fatalf("PostgreSQL installments count=%d total=%d err=%v", installmentCount, installmentTotal, err)
 	}
 
-	repayment := url.Values{"amount": {"Rp 1.000.000.000"}, "record_date": {startDate}}
+	repayment := url.Values{"amount": {"Rp 100.000.000"}, "record_date": {startDate}}
 	repaid := request(http.MethodPost, "/api/admin/loans/"+loanID+"/repayments", login("manager-pg@coop.test"), "application/x-www-form-urlencoded", repayment.Encode())
 	if repaid.Code != http.StatusSeeOther {
 		t.Fatalf("record grouped PostgreSQL repayment: %d %s", repaid.Code, repaid.Body.String())
@@ -483,7 +483,7 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 	if err := db.QueryRow(`SELECT remaining_balance FROM loans WHERE id=$1`, loanID).Scan(&remaining); err != nil {
 		t.Fatalf("read PostgreSQL balance: %v", err)
 	}
-	if repaymentAmount != 1_000_000_000 || remaining != 3_077_000_000 {
+	if repaymentAmount != 100_000_000 || remaining != 169_000_000 {
 		t.Fatalf("PostgreSQL repayment=%d remaining=%d", repaymentAmount, remaining)
 	}
 

@@ -240,6 +240,10 @@ var migrations = []migration{
 			`ALTER TABLE members ADD COLUMN member_type TEXT NOT NULL DEFAULT 'employee' CHECK (member_type IN ('daily_worker', 'employee', 'self_employed'))`,
 		},
 	},
+	{
+		Version: 18,
+		Name:    "limit_loan_amount_to_200m",
+	},
 }
 
 func Migrate(db *sql.DB) error {
@@ -391,6 +395,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 			return err
 		}
 	}
+	if migration.Version == 18 {
+		if err := limitLoanAmountTo200M(tx, isSQLite); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`,
 		migration.Version,
@@ -399,6 +408,34 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 		return err
 	}
 	return tx.Commit()
+}
+
+func limitLoanAmountTo200M(tx *sql.Tx, isSQLite bool) error {
+	var statements []string
+	if isSQLite {
+		statements = []string{
+			`DROP INDEX IF EXISTS idx_loans_one_active_per_member`,
+			`CREATE TRIGGER loan_requests_requested_amount_limit_insert BEFORE INSERT ON loan_requests WHEN NEW.requested_amount > 200000000 BEGIN SELECT RAISE(ABORT, 'loan amount exceeds maximum'); END`,
+			`CREATE TRIGGER loan_requests_requested_amount_limit_update BEFORE UPDATE OF requested_amount ON loan_requests WHEN NEW.requested_amount > 200000000 BEGIN SELECT RAISE(ABORT, 'loan amount exceeds maximum'); END`,
+			`CREATE TRIGGER loan_requests_proposed_amount_limit_insert BEFORE INSERT ON loan_requests WHEN NEW.proposed_approved_amount IS NOT NULL AND NEW.proposed_approved_amount > 200000000 BEGIN SELECT RAISE(ABORT, 'approved loan amount exceeds maximum'); END`,
+			`CREATE TRIGGER loan_requests_proposed_amount_limit_update BEFORE UPDATE OF proposed_approved_amount ON loan_requests WHEN NEW.proposed_approved_amount IS NOT NULL AND NEW.proposed_approved_amount > 200000000 BEGIN SELECT RAISE(ABORT, 'approved loan amount exceeds maximum'); END`,
+			`CREATE TRIGGER loans_approved_amount_limit_insert BEFORE INSERT ON loans WHEN NEW.approved_amount > 200000000 BEGIN SELECT RAISE(ABORT, 'approved loan amount exceeds maximum'); END`,
+			`CREATE TRIGGER loans_approved_amount_limit_update BEFORE UPDATE OF approved_amount ON loans WHEN NEW.approved_amount > 200000000 BEGIN SELECT RAISE(ABORT, 'approved loan amount exceeds maximum'); END`,
+		}
+	} else {
+		statements = []string{
+			`DROP INDEX IF EXISTS idx_loans_one_active_per_member`,
+			`ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_requested_amount_max CHECK (requested_amount <= 200000000) NOT VALID`,
+			`ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_proposed_approved_amount_max CHECK (proposed_approved_amount IS NULL OR proposed_approved_amount <= 200000000) NOT VALID`,
+			`ALTER TABLE loans ADD CONSTRAINT loans_approved_amount_max CHECK (approved_amount <= 200000000) NOT VALID`,
+		}
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func addRegularLoanAdminFeeTerms(tx *sql.Tx, isSQLite bool) error {

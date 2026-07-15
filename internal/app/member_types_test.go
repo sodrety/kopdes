@@ -46,6 +46,9 @@ func TestMemberTypeMigrationBackfillsExistingMembers(t *testing.T) {
 			t.Fatalf("mark migration %d applied: %v", version, err)
 		}
 	}
+	if _, err := db.Exec(`INSERT INTO schema_migrations (version,name) VALUES (18,'legacy_18')`); err != nil {
+		t.Fatalf("mark unrelated Loan Amount Limit migration applied: %v", err)
+	}
 
 	if err := app.Migrate(db); err != nil {
 		t.Fatalf("apply Member Type migration: %v", err)
