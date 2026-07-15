@@ -39,6 +39,8 @@ type AdminLoan struct {
 	MemberID           string `json:"member_id"`
 	MemberNo           string `json:"member_no"`
 	FullName           string `json:"full_name"`
+	MemberType         string `json:"member_type"`
+	MemberTypeLabel    string `json:"member_type_label"`
 	ApprovedAmount     int    `json:"approved_amount"`
 	DurationMonths     int    `json:"duration_months"`
 	MonthlyInstallment int    `json:"monthly_installment"`
@@ -530,7 +532,7 @@ func (s *Server) activeLoanByMember(memberID string) (Loan, error) {
 
 func (s *Server) loansForAdmin(status string) ([]AdminLoan, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT l.id, l.loan_request_id, l.member_id, m.member_no, m.full_name, l.approved_amount, l.duration_months, l.monthly_installment, l.remaining_balance, l.start_date,l.interest_rate_bps,l.total_interest,l.total_obligation,l.next_due_date,l.final_due_date,l.status, l.approved_at, l.created_at, l.updated_at
+	query := `SELECT l.id, l.loan_request_id, l.member_id, m.member_no, m.full_name, m.member_type, l.approved_amount, l.duration_months, l.monthly_installment, l.remaining_balance, l.start_date,l.interest_rate_bps,l.total_interest,l.total_obligation,l.next_due_date,l.final_due_date,l.status, l.approved_at, l.created_at, l.updated_at
 		FROM loans l
 		INNER JOIN members m ON m.id = l.member_id`
 	args := []any{}
@@ -549,9 +551,10 @@ func (s *Server) loansForAdmin(status string) ([]AdminLoan, error) {
 	var loans []AdminLoan
 	for rows.Next() {
 		var loan AdminLoan
-		if err := rows.Scan(&loan.ID, &loan.LoanRequestID, &loan.MemberID, &loan.MemberNo, &loan.FullName, &loan.ApprovedAmount, &loan.DurationMonths, &loan.MonthlyInstallment, &loan.RemainingBalance, &loan.StartDate, &loan.InterestRateBPS, &loan.TotalInterest, &loan.TotalObligation, &loan.NextDueDate, &loan.FinalDueDate, &loan.Status, &loan.ApprovedAt, &loan.CreatedAt, &loan.UpdatedAt); err != nil {
+		if err := rows.Scan(&loan.ID, &loan.LoanRequestID, &loan.MemberID, &loan.MemberNo, &loan.FullName, &loan.MemberType, &loan.ApprovedAmount, &loan.DurationMonths, &loan.MonthlyInstallment, &loan.RemainingBalance, &loan.StartDate, &loan.InterestRateBPS, &loan.TotalInterest, &loan.TotalObligation, &loan.NextDueDate, &loan.FinalDueDate, &loan.Status, &loan.ApprovedAt, &loan.CreatedAt, &loan.UpdatedAt); err != nil {
 			return nil, err
 		}
+		loan.MemberTypeLabel = memberTypeLabel(loan.MemberType)
 		loan.IsOverdue = loanOverdue(loan.NextDueDate, loan.RemainingBalance)
 		loans = append(loans, loan)
 	}

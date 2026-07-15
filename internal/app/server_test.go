@@ -205,20 +205,27 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 14 {
-		t.Fatalf("expected fourteen tracked migrations, got %d", migrationCount)
+	if migrationCount != 15 {
+		t.Fatalf("expected fifteen tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 14`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 17`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "lock_officer_trigger_function_search_path" {
-		t.Fatalf("expected latest Officer trigger search path migration, got %q", latestName)
+	if latestName != "add_member_type" {
+		t.Fatalf("expected latest Member Type migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
 		t.Fatalf("expected migrated members table to be usable: %v", err)
+	}
+	var memberType string
+	if err := db.QueryRow(`SELECT member_type FROM members WHERE id='migrate-member'`).Scan(&memberType); err != nil {
+		t.Fatalf("read migrated Member Type: %v", err)
+	}
+	if memberType != "employee" {
+		t.Fatalf("expected default Member Type employee, got %q", memberType)
 	}
 }
 
@@ -2086,7 +2093,7 @@ func TestAdminCanExportFilteredSimpananCSV(t *testing.T) {
 		t.Fatalf("expected stable simpanan export filename, got %q", disposition)
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"member_no,member,category,type,amount,date,reference_no,note,recorded_by", "M-EXP-1,Export One,wajib,deposit,100000,2026-06-16,EXP-WJB,Export wajib"} {
+	for _, text := range []string{"member_no,member,Member type,category,type,amount,date,reference_no,note,recorded_by", "M-EXP-1,Export One,Karyawan,wajib,deposit,100000,2026-06-16,EXP-WJB,Export wajib"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected simpanan export to include %q, got %s", text, body)
 		}
@@ -2116,7 +2123,7 @@ func TestAdminCanExportPinjamanAndAngsuranCSV(t *testing.T) {
 		t.Fatalf("expected pinjaman export status 200, got %d: %s", loanRec.Code, loanRec.Body.String())
 	}
 	loanBody := loanRec.Body.String()
-	for _, text := range []string{"member_no,member,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_at", "M-LOAN-EXP,Loan Export,900000,9,109000,881000,active"} {
+	for _, text := range []string{"member_no,member,Member type,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_at", "M-LOAN-EXP,Loan Export,Karyawan,900000,9,109000,881000,active"} {
 		if !strings.Contains(loanBody, text) {
 			t.Fatalf("expected pinjaman export to include %q, got %s", text, loanBody)
 		}
@@ -2132,7 +2139,7 @@ func TestAdminCanExportPinjamanAndAngsuranCSV(t *testing.T) {
 		t.Fatalf("expected angsuran export status 200, got %d: %s", repaymentRec.Code, repaymentRec.Body.String())
 	}
 	repaymentBody := repaymentRec.Body.String()
-	for _, text := range []string{"member_no,member,loan_id,amount,date,reference_no,note", "M-LOAN-EXP,Loan Export," + loan.ID + ",100000,2026-06-16,RPY-TEST,Test repayment"} {
+	for _, text := range []string{"member_no,member,Member type,loan_id,amount,date,reference_no,note", "M-LOAN-EXP,Loan Export,Karyawan," + loan.ID + ",100000,2026-06-16,RPY-TEST,Test repayment"} {
 		if !strings.Contains(repaymentBody, text) {
 			t.Fatalf("expected angsuran export to include %q, got %s", text, repaymentBody)
 		}
@@ -2173,7 +2180,7 @@ func TestAdminCanExportFilteredPenarikanCSV(t *testing.T) {
 		t.Fatalf("expected stable penarikan export filename, got %q", disposition)
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"member_no,member,amount,status,requested_at,reviewed_at,note,review_note,saving_record_id", "M-WD-EXP,Withdrawal Export,100000,pending"} {
+	for _, text := range []string{"member_no,member,Member type,amount,status,requested_at,reviewed_at,note,review_note,saving_record_id", "M-WD-EXP,Withdrawal Export,Karyawan,100000,pending"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected penarikan export to include %q, got %s", text, body)
 		}

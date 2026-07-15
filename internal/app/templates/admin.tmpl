@@ -108,6 +108,7 @@
           <thead>
             <tr>
               <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "member_type"}}</th>
               <th>{{t $.Lang "simpanan_pokok"}}</th>
               <th>{{t $.Lang "simpanan_wajib"}}</th>
               <th>{{t $.Lang "simpanan_sukarela"}}</th>
@@ -118,6 +119,7 @@
             {{range .Reports.SavingsByMember}}
             <tr>
               <td>{{template "member-table-cell" .}}</td>
+              <td>{{.MemberTypeLabel}}</td>
               <td>{{nominal .Pokok}}</td>
               <td>{{nominal .Wajib}}</td>
               <td>{{nominal .Sukarela}}</td>
@@ -137,6 +139,7 @@
           <thead>
             <tr>
               <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "member_type"}}</th>
               <th>{{t $.Lang "status_pending"}}</th>
               <th>{{t $.Lang "status_approved"}}</th>
               <th>{{t $.Lang "status_rejected"}}</th>
@@ -147,6 +150,7 @@
             {{range .Reports.WithdrawalsByMember}}
             <tr>
               <td>{{template "member-table-cell" .}}</td>
+              <td>{{.MemberTypeLabel}}</td>
               <td>{{.Pending}}</td>
               <td>{{.Approved}}</td>
               <td>{{.Rejected}}</td>
@@ -166,6 +170,7 @@
           <thead>
             <tr>
               <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "member_type"}}</th>
               <th>{{t $.Lang "approved_amount"}}</th>
               <th>{{t $.Lang "start_date"}}</th>
               <th>{{t $.Lang "monthly_interest_rate"}}</th>
@@ -181,6 +186,7 @@
             {{range .Reports.Loans}}
             <tr>
               <td>{{template "member-table-cell" .}}</td>
+              <td>{{.MemberTypeLabel}}</td>
               <td>{{nominal .ApprovedAmount}}</td>
               <td>{{.StartDate}}</td>
               <td>{{rate .InterestRateBPS}}</td>
@@ -206,6 +212,7 @@
             <tr>
               <th>{{t $.Lang "date"}}</th>
               <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "member_type"}}</th>
               <th>{{t $.Lang "amount"}}</th>
               <th>{{t $.Lang "reference"}}</th>
             </tr>
@@ -215,6 +222,7 @@
             <tr>
               <td>{{.RecordDate}}</td>
               <td>{{template "member-table-cell" .}}</td>
+              <td>{{.MemberTypeLabel}}</td>
               <td>{{nominal .Amount}}</td>
               <td>{{.ReferenceNo}}</td>
             </tr>
@@ -432,6 +440,7 @@
               <tr>
                 <th>{{t $.Lang "member_no"}}</th>
                 <th>{{t $.Lang "name"}}</th>
+                <th>{{t $.Lang "member_type"}}</th>
                 <th>{{t $.Lang "status"}}</th>
               </tr>
             </thead>
@@ -440,6 +449,7 @@
               <tr>
                 <td><a href="/admin/members/{{.ID}}">{{.MemberNo}}</a></td>
                 <td>{{.FullName}}</td>
+                <td>{{.MemberTypeLabel}}</td>
                 <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               </tr>
               {{end}}
@@ -461,6 +471,13 @@
           <label>{{t .Lang "phone"}} <input name="phone"></label>
           <label>{{t .Lang "address"}} <input name="address"></label>
           <label>{{t .Lang "join_date"}} <input name="join_date" type="date" required></label>
+          <label>{{t .Lang "member_type"}}
+            <select name="member_type">
+              <option value="daily_worker">{{t .Lang "member_type_daily_worker"}}</option>
+              <option value="employee" selected>{{t .Lang "member_type_employee"}}</option>
+              <option value="self_employed">{{t .Lang "member_type_self_employed"}}</option>
+            </select>
+          </label>
           <label>{{t .Lang "status"}}
             <select name="status">
               <option value="active">{{t .Lang "active"}}</option>
@@ -598,8 +615,25 @@
         <div><span>{{t .Lang "phone"}}</span><strong>{{.Member.Phone}}</strong></div>
         <div><span>{{t .Lang "address"}}</span><strong>{{.Member.Address}}</strong></div>
         <div><span>{{t .Lang "join_date"}}</span><strong>{{.Member.JoinDate}}</strong></div>
+        <div><span>{{t .Lang "member_type"}}</span><strong>{{.Member.MemberTypeLabel}}</strong></div>
         <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .Member.Status}}</strong></div>
       </section>
+      {{if index .Permissions "members.manage"}}
+      <section class="panel narrow-panel">
+        <h2>{{t .Lang "change_member_type"}}</h2>
+        <form method="post" action="/api/admin/members/{{.Member.ID}}/type" hx-post="/api/admin/members/{{.Member.ID}}/type" hx-target="#member-type-form-error" hx-swap="innerHTML">
+          <label>{{t .Lang "member_type"}}
+            <select name="member_type">
+              <option value="daily_worker" {{if eq .Member.MemberType "daily_worker"}}selected{{end}}>{{t .Lang "member_type_daily_worker"}}</option>
+              <option value="employee" {{if eq .Member.MemberType "employee"}}selected{{end}}>{{t .Lang "member_type_employee"}}</option>
+              <option value="self_employed" {{if eq .Member.MemberType "self_employed"}}selected{{end}}>{{t .Lang "member_type_self_employed"}}</option>
+            </select>
+          </label>
+          <button type="submit">{{t .Lang "save"}}</button>
+        </form>
+{{template "form-error" (dict "ID" "member-type-form-error")}}
+      </section>
+      {{end}}
       <section class="panel">
         <h2>{{t .Lang "saving_records"}}</h2>
         {{if .Savings}}

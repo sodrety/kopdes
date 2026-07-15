@@ -104,21 +104,25 @@ type ProfitLossPeriod struct {
 }
 
 type SavingsReportRow struct {
-	MemberNo string `json:"member_no"`
-	FullName string `json:"full_name"`
-	Pokok    int    `json:"pokok"`
-	Wajib    int    `json:"wajib"`
-	Sukarela int    `json:"sukarela"`
-	Total    int    `json:"total"`
+	MemberNo        string `json:"member_no"`
+	FullName        string `json:"full_name"`
+	MemberType      string `json:"member_type"`
+	MemberTypeLabel string `json:"member_type_label"`
+	Pokok           int    `json:"pokok"`
+	Wajib           int    `json:"wajib"`
+	Sukarela        int    `json:"sukarela"`
+	Total           int    `json:"total"`
 }
 
 type WithdrawalReportRow struct {
-	MemberNo string `json:"member_no"`
-	FullName string `json:"full_name"`
-	Pending  int    `json:"pending"`
-	Approved int    `json:"approved"`
-	Rejected int    `json:"rejected"`
-	Total    int    `json:"total"`
+	MemberNo        string `json:"member_no"`
+	FullName        string `json:"full_name"`
+	MemberType      string `json:"member_type"`
+	MemberTypeLabel string `json:"member_type_label"`
+	Pending         int    `json:"pending"`
+	Approved        int    `json:"approved"`
+	Rejected        int    `json:"rejected"`
+	Total           int    `json:"total"`
 }
 
 func (s *Server) adminReports(c *gin.Context) {
@@ -596,13 +600,13 @@ func (s *Server) repaymentProgressChart() (ChartSegments, error) {
 
 func (s *Server) savingsReportByMember() ([]SavingsReportRow, error) {
 	rows, err := s.db.Query(
-		`SELECT m.member_no, m.full_name,
+		`SELECT m.member_no, m.full_name, m.member_type,
 			COALESCE(SUM(CASE WHEN sr.category = 'pokok' AND sr.type = 'deposit' THEN sr.amount WHEN sr.category = 'pokok' AND sr.type = 'withdrawal' THEN -sr.amount ELSE 0 END), 0) AS pokok,
 			COALESCE(SUM(CASE WHEN sr.category = 'wajib' AND sr.type = 'deposit' THEN sr.amount WHEN sr.category = 'wajib' AND sr.type = 'withdrawal' THEN -sr.amount ELSE 0 END), 0) AS wajib,
 			COALESCE(SUM(CASE WHEN sr.category = 'sukarela' AND sr.type = 'deposit' THEN sr.amount WHEN sr.category = 'sukarela' AND sr.type = 'withdrawal' THEN -sr.amount ELSE 0 END), 0) AS sukarela
 		FROM members m
 		INNER JOIN saving_records sr ON sr.member_id = m.id
-		GROUP BY m.id, m.member_no, m.full_name
+		GROUP BY m.id, m.member_no, m.full_name, m.member_type
 		ORDER BY m.full_name`,
 	)
 	if err != nil {
@@ -613,9 +617,10 @@ func (s *Server) savingsReportByMember() ([]SavingsReportRow, error) {
 	var reportRows []SavingsReportRow
 	for rows.Next() {
 		var row SavingsReportRow
-		if err := rows.Scan(&row.MemberNo, &row.FullName, &row.Pokok, &row.Wajib, &row.Sukarela); err != nil {
+		if err := rows.Scan(&row.MemberNo, &row.FullName, &row.MemberType, &row.Pokok, &row.Wajib, &row.Sukarela); err != nil {
 			return nil, err
 		}
+		row.MemberTypeLabel = memberTypeLabel(row.MemberType)
 		row.Total = row.Pokok + row.Wajib + row.Sukarela
 		reportRows = append(reportRows, row)
 	}
@@ -624,13 +629,13 @@ func (s *Server) savingsReportByMember() ([]SavingsReportRow, error) {
 
 func (s *Server) withdrawalReportByMember() ([]WithdrawalReportRow, error) {
 	rows, err := s.db.Query(
-		`SELECT m.member_no, m.full_name,
+		`SELECT m.member_no, m.full_name, m.member_type,
 			COALESCE(SUM(CASE WHEN wr.status = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
 			COALESCE(SUM(CASE WHEN wr.status = 'approved' THEN 1 ELSE 0 END), 0) AS approved,
 			COALESCE(SUM(CASE WHEN wr.status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected
 		FROM members m
 		INNER JOIN withdrawal_requests wr ON wr.member_id = m.id
-		GROUP BY m.id, m.member_no, m.full_name
+		GROUP BY m.id, m.member_no, m.full_name, m.member_type
 		ORDER BY m.full_name`,
 	)
 	if err != nil {
@@ -641,9 +646,10 @@ func (s *Server) withdrawalReportByMember() ([]WithdrawalReportRow, error) {
 	var reportRows []WithdrawalReportRow
 	for rows.Next() {
 		var row WithdrawalReportRow
-		if err := rows.Scan(&row.MemberNo, &row.FullName, &row.Pending, &row.Approved, &row.Rejected); err != nil {
+		if err := rows.Scan(&row.MemberNo, &row.FullName, &row.MemberType, &row.Pending, &row.Approved, &row.Rejected); err != nil {
 			return nil, err
 		}
+		row.MemberTypeLabel = memberTypeLabel(row.MemberType)
 		row.Total = row.Pending + row.Approved + row.Rejected
 		reportRows = append(reportRows, row)
 	}
@@ -858,9 +864,9 @@ func (s *Server) exportSavingsCSV(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	writeCSV(c, "simpanan-export.csv", []string{"member_no", "member", "category", "type", "amount", "date", "reference_no", "note", "recorded_by"}, func(w *csv.Writer) error {
+	writeCSV(c, "simpanan-export.csv", []string{"member_no", "member", translate(languageFromRequest(c), "member_type"), "category", "type", "amount", "date", "reference_no", "note", "recorded_by"}, func(w *csv.Writer) error {
 		for _, record := range records {
-			if err := w.Write([]string{record.MemberNo, record.FullName, record.Category, record.Type, strconv.Itoa(record.Amount), record.RecordDate, record.ReferenceNo, record.Note, record.RecordedBy}); err != nil {
+			if err := w.Write([]string{record.MemberNo, record.FullName, record.MemberTypeLabel, record.Category, record.Type, strconv.Itoa(record.Amount), record.RecordDate, record.ReferenceNo, record.Note, record.RecordedBy}); err != nil {
 				return err
 			}
 		}
@@ -874,9 +880,9 @@ func (s *Server) exportWithdrawalRequestsCSV(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	writeCSV(c, "penarikan-export.csv", []string{"member_no", "member", "amount", "status", "requested_at", "reviewed_at", "note", "review_note", "saving_record_id"}, func(w *csv.Writer) error {
+	writeCSV(c, "penarikan-export.csv", []string{"member_no", "member", translate(languageFromRequest(c), "member_type"), "amount", "status", "requested_at", "reviewed_at", "note", "review_note", "saving_record_id"}, func(w *csv.Writer) error {
 		for _, request := range requests {
-			if err := w.Write([]string{request.MemberNo, request.FullName, strconv.Itoa(request.Amount), request.Status, request.CreatedAt, request.ReviewedAt, request.Note, request.RejectionReason, request.SavingRecordID}); err != nil {
+			if err := w.Write([]string{request.MemberNo, request.FullName, request.MemberTypeLabel, strconv.Itoa(request.Amount), request.Status, request.CreatedAt, request.ReviewedAt, request.Note, request.RejectionReason, request.SavingRecordID}); err != nil {
 				return err
 			}
 		}
@@ -890,9 +896,9 @@ func (s *Server) exportLoansCSV(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	writeCSV(c, "pinjaman-export.csv", []string{"member_no", "member", "approved_amount", "duration_months", "monthly_installment", "remaining_balance", "status", "approved_at", "start_date", "interest_rate_bps", "total_interest", "total_obligation", "next_due_date", "final_due_date"}, func(w *csv.Writer) error {
+	writeCSV(c, "pinjaman-export.csv", []string{"member_no", "member", translate(languageFromRequest(c), "member_type"), "approved_amount", "duration_months", "monthly_installment", "remaining_balance", "status", "approved_at", "start_date", "interest_rate_bps", "total_interest", "total_obligation", "next_due_date", "final_due_date"}, func(w *csv.Writer) error {
 		for _, loan := range loans {
-			if err := w.Write([]string{loan.MemberNo, loan.FullName, strconv.Itoa(loan.ApprovedAmount), strconv.Itoa(loan.DurationMonths), strconv.Itoa(loan.MonthlyInstallment), strconv.Itoa(loan.RemainingBalance), loan.Status, loan.ApprovedAt, loan.StartDate, strconv.Itoa(loan.InterestRateBPS), strconv.Itoa(loan.TotalInterest), strconv.Itoa(loan.TotalObligation), loan.NextDueDate, loan.FinalDueDate}); err != nil {
+			if err := w.Write([]string{loan.MemberNo, loan.FullName, loan.MemberTypeLabel, strconv.Itoa(loan.ApprovedAmount), strconv.Itoa(loan.DurationMonths), strconv.Itoa(loan.MonthlyInstallment), strconv.Itoa(loan.RemainingBalance), loan.Status, loan.ApprovedAt, loan.StartDate, strconv.Itoa(loan.InterestRateBPS), strconv.Itoa(loan.TotalInterest), strconv.Itoa(loan.TotalObligation), loan.NextDueDate, loan.FinalDueDate}); err != nil {
 				return err
 			}
 		}
@@ -906,9 +912,9 @@ func (s *Server) exportRepaymentsCSV(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	writeCSV(c, "angsuran-export.csv", []string{"member_no", "member", "loan_id", "amount", "date", "reference_no", "note"}, func(w *csv.Writer) error {
+	writeCSV(c, "angsuran-export.csv", []string{"member_no", "member", translate(languageFromRequest(c), "member_type"), "loan_id", "amount", "date", "reference_no", "note"}, func(w *csv.Writer) error {
 		for _, repayment := range repayments {
-			if err := w.Write([]string{repayment.MemberNo, repayment.FullName, repayment.LoanID, strconv.Itoa(repayment.Amount), repayment.RecordDate, repayment.ReferenceNo, repayment.Note}); err != nil {
+			if err := w.Write([]string{repayment.MemberNo, repayment.FullName, repayment.MemberTypeLabel, repayment.LoanID, strconv.Itoa(repayment.Amount), repayment.RecordDate, repayment.ReferenceNo, repayment.Note}); err != nil {
 				return err
 			}
 		}

@@ -12,6 +12,10 @@ _Avoid_: Bank, payment processor
 A person registered with the cooperative who may hold savings and request loans.
 _Avoid_: Customer, client, borrower as a general replacement
 
+**Member Type**:
+A Member's current classification using the canonical Bahasa label **PHL**, **Karyawan**, or **Mandiri**, defaulting to **Karyawan** when omitted.
+_Avoid_: Officer Role, membership status, translated equivalents of the canonical labels
+
 **Admin Area**:
 The cooperative back-office area available to officers according to their **Officer Role**.
 _Avoid_: Treating Admin as an assignable role or a universally authorized superuser
@@ -187,6 +191,10 @@ _Avoid_: Renaming stable internal enum values only to match display text
 ## Relationships
 
 - A **User** is linked to exactly one **Member**.
+- A **Member** has one current **Member Type**.
+- A **Member Type** may change independently of the **Member**'s active, inactive, or suspended status.
+- A **Member Type** does not change savings, loan, fee, eligibility, or approval rules.
+- Member-based reporting uses the **Member**'s current **Member Type**, including for historical activity.
 - A **Member** has at most one current **User**; a **Historical User Identity** is not a login and does not count as another User.
 - A **User** enters the **Member Area** by default after login.
 - An **Officer** uses an explicit area switch between the **Member Area** and permitted **Admin Area** without changing identity or role.

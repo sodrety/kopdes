@@ -43,8 +43,10 @@ type SavingFilters struct {
 
 type AdminSavingRecord struct {
 	SavingRecord
-	MemberNo string `json:"member_no"`
-	FullName string `json:"full_name"`
+	MemberNo        string `json:"member_no"`
+	FullName        string `json:"full_name"`
+	MemberType      string `json:"member_type"`
+	MemberTypeLabel string `json:"member_type_label"`
 }
 
 func (s *Server) recordSaving(c *gin.Context) {
@@ -250,7 +252,7 @@ func savingFiltersFromQuery(c *gin.Context) SavingFilters {
 
 func (s *Server) savingsForAdmin(filters SavingFilters) ([]AdminSavingRecord, error) {
 	query := strings.Builder{}
-	query.WriteString(`SELECT sr.id, sr.member_id, sr.type, sr.category, sr.amount, sr.record_date, sr.reference_no, sr.note, sr.recorded_by, sr.created_at, m.member_no, m.full_name
+	query.WriteString(`SELECT sr.id, sr.member_id, sr.type, sr.category, sr.amount, sr.record_date, sr.reference_no, sr.note, sr.recorded_by, sr.created_at, m.member_no, m.full_name, m.member_type
 		FROM saving_records sr
 		JOIN members m ON m.id = sr.member_id
 		WHERE 1 = 1`)
@@ -286,9 +288,10 @@ func (s *Server) savingsForAdmin(filters SavingFilters) ([]AdminSavingRecord, er
 	var records []AdminSavingRecord
 	for rows.Next() {
 		var record AdminSavingRecord
-		if err := rows.Scan(&record.ID, &record.MemberID, &record.Type, &record.Category, &record.Amount, &record.RecordDate, &record.ReferenceNo, &record.Note, &record.RecordedBy, &record.CreatedAt, &record.MemberNo, &record.FullName); err != nil {
+		if err := rows.Scan(&record.ID, &record.MemberID, &record.Type, &record.Category, &record.Amount, &record.RecordDate, &record.ReferenceNo, &record.Note, &record.RecordedBy, &record.CreatedAt, &record.MemberNo, &record.FullName, &record.MemberType); err != nil {
 			return nil, err
 		}
+		record.MemberTypeLabel = memberTypeLabel(record.MemberType)
 		records = append(records, record)
 	}
 	return records, rows.Err()
