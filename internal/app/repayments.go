@@ -23,16 +23,18 @@ type LoanRepayment struct {
 }
 
 type AdminLoanRepayment struct {
-	ID          string `json:"id"`
-	LoanID      string `json:"loan_id"`
-	MemberID    string `json:"member_id"`
-	MemberNo    string `json:"member_no"`
-	FullName    string `json:"full_name"`
-	Amount      int    `json:"amount"`
-	RecordDate  string `json:"record_date"`
-	ReferenceNo string `json:"reference_no"`
-	Note        string `json:"note"`
-	CreatedAt   string `json:"created_at,omitempty"`
+	ID              string `json:"id"`
+	LoanID          string `json:"loan_id"`
+	MemberID        string `json:"member_id"`
+	MemberNo        string `json:"member_no"`
+	FullName        string `json:"full_name"`
+	MemberType      string `json:"member_type"`
+	MemberTypeLabel string `json:"member_type_label"`
+	Amount          int    `json:"amount"`
+	RecordDate      string `json:"record_date"`
+	ReferenceNo     string `json:"reference_no"`
+	Note            string `json:"note"`
+	CreatedAt       string `json:"created_at,omitempty"`
 }
 
 type repaymentInput struct {
@@ -291,7 +293,7 @@ func (s *Server) repaymentsByMember(memberID string) ([]LoanRepayment, error) {
 
 func (s *Server) repaymentsForAdmin(filters RepaymentFilters) ([]AdminLoanRepayment, error) {
 	search := strings.TrimSpace(filters.Search)
-	query := `SELECT lr.id, lr.loan_id, lr.member_id, m.member_no, m.full_name, lr.amount, lr.record_date, lr.reference_no, lr.note, lr.created_at
+	query := `SELECT lr.id, lr.loan_id, lr.member_id, m.member_no, m.full_name, m.member_type, lr.amount, lr.record_date, lr.reference_no, lr.note, lr.created_at
 		FROM loan_repayments lr
 		INNER JOIN members m ON m.id = lr.member_id`
 	args := []any{}
@@ -312,9 +314,10 @@ func (s *Server) repaymentsForAdmin(filters RepaymentFilters) ([]AdminLoanRepaym
 	var repayments []AdminLoanRepayment
 	for rows.Next() {
 		var repayment AdminLoanRepayment
-		if err := rows.Scan(&repayment.ID, &repayment.LoanID, &repayment.MemberID, &repayment.MemberNo, &repayment.FullName, &repayment.Amount, &repayment.RecordDate, &repayment.ReferenceNo, &repayment.Note, &repayment.CreatedAt); err != nil {
+		if err := rows.Scan(&repayment.ID, &repayment.LoanID, &repayment.MemberID, &repayment.MemberNo, &repayment.FullName, &repayment.MemberType, &repayment.Amount, &repayment.RecordDate, &repayment.ReferenceNo, &repayment.Note, &repayment.CreatedAt); err != nil {
 			return nil, err
 		}
+		repayment.MemberTypeLabel = memberTypeLabel(repayment.MemberType)
 		repayments = append(repayments, repayment)
 	}
 	return repayments, rows.Err()

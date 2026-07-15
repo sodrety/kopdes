@@ -189,6 +189,13 @@ var migrations = []migration{
 		Version: 14,
 		Name:    "lock_officer_trigger_function_search_path",
 	},
+	{
+		Version: 17,
+		Name:    "add_member_type",
+		Statements: []string{
+			`ALTER TABLE members ADD COLUMN member_type TEXT NOT NULL DEFAULT 'employee' CHECK (member_type IN ('daily_worker', 'employee', 'self_employed'))`,
+		},
+	},
 }
 
 func Migrate(db *sql.DB) error {

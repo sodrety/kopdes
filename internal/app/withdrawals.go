@@ -29,6 +29,8 @@ type AdminWithdrawalRequest struct {
 	WithdrawalRequest
 	MemberNo        string             `json:"member_no"`
 	FullName        string             `json:"full_name"`
+	MemberType      string             `json:"member_type"`
+	MemberTypeLabel string             `json:"member_type_label"`
 	ApprovalHistory []ApprovalDecision `json:"approval_history"`
 	CanDecide       bool               `json:"can_decide"`
 }
@@ -292,7 +294,7 @@ func (s *Server) withdrawalRequestsByMember(memberID string) ([]WithdrawalReques
 
 func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalRequest, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT wr.id, wr.member_id, m.member_no, m.full_name, wr.amount, wr.note, wr.status, COALESCE(wr.current_approval_stage,''), COALESCE(CAST(wr.reviewed_at AS TEXT), ''), wr.rejection_reason, COALESCE(wr.saving_record_id, ''), wr.created_at, wr.updated_at
+	query := `SELECT wr.id, wr.member_id, m.member_no, m.full_name, m.member_type, wr.amount, wr.note, wr.status, COALESCE(wr.current_approval_stage,''), COALESCE(CAST(wr.reviewed_at AS TEXT), ''), wr.rejection_reason, COALESCE(wr.saving_record_id, ''), wr.created_at, wr.updated_at
 		FROM withdrawal_requests wr
 		INNER JOIN members m ON m.id = wr.member_id`
 	args := []any{}
@@ -309,9 +311,10 @@ func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalReq
 	var requests []AdminWithdrawalRequest
 	for rows.Next() {
 		var request AdminWithdrawalRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.MemberType, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt); err != nil {
 			return nil, err
 		}
+		request.MemberTypeLabel = memberTypeLabel(request.MemberType)
 		requests = append(requests, request)
 	}
 	if err := rows.Err(); err != nil {

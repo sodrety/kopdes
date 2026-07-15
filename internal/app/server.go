@@ -79,6 +79,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	admin.POST("/members", server.requirePermission(PermissionMembersManage), server.createMember)
 	admin.GET("/members", server.requirePermission(PermissionMembersView), server.listMembers)
 	admin.GET("/members/:id", server.requirePermission(PermissionMembersView), server.getMember)
+	admin.POST("/members/:id/type", server.requirePermission(PermissionMembersManage), server.updateMemberType)
 	admin.POST("/members/:id/user", server.requirePermission(PermissionMembersManage), server.createMemberUser)
 	admin.POST("/savings", server.requirePermission(PermissionSavingsRecord), server.recordSaving)
 	admin.GET("/savings", server.requirePermission(PermissionSavingsView), server.adminSavings)
