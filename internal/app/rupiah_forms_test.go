@@ -46,7 +46,7 @@ func TestGroupedRupiahBrowserFormsPersistExactAmounts(t *testing.T) {
 	}
 
 	loanRequestResponse := postForm("/api/member/loan-requests", memberToken, url.Values{
-		"loan_type": {"regular"}, "requested_amount": {"Rp 3.000.000.000"},
+		"loan_type": {"regular"}, "requested_amount": {"Rp 200.000.000"},
 		"duration_months": {"5"}, "purpose": {"Grouped browser Loan request"},
 	})
 	if loanRequestResponse.Code != http.StatusSeeOther {
@@ -54,10 +54,10 @@ func TestGroupedRupiahBrowserFormsPersistExactAmounts(t *testing.T) {
 	}
 	var loanRequestID string
 	var requestedAmount int64
-	if err := fixture.db.QueryRow(`SELECT id,requested_amount FROM loan_requests WHERE member_id=$1 AND status='pending'`, member.ID).Scan(&loanRequestID, &requestedAmount); err != nil || requestedAmount != 3_000_000_000 {
-		t.Fatalf("Loan requested amount = %d, %v; want 3000000000", requestedAmount, err)
+	if err := fixture.db.QueryRow(`SELECT id,requested_amount FROM loan_requests WHERE member_id=$1 AND status='pending'`, member.ID).Scan(&loanRequestID, &requestedAmount); err != nil || requestedAmount != 200_000_000 {
+		t.Fatalf("Loan requested amount = %d, %v; want 200000000", requestedAmount, err)
 	}
-	loan := fixture.approveLoanRequest(t, adminToken, loanRequestID, 3_000_000_000, 5)
+	loan := fixture.approveLoanRequest(t, adminToken, loanRequestID, 200_000_000, 5)
 	repaymentResponse := postForm("/api/admin/loans/"+loan.ID+"/repayments", adminToken, url.Values{
 		"amount": {"Rp 200.000"}, "record_date": {"2026-07-15"},
 	})

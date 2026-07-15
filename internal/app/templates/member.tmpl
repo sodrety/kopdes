@@ -256,7 +256,7 @@
     {{if .OutstandingLoans}}
     <section class="panel loan-warning" role="alert">
       <h2>{{t .Lang "outstanding_loans"}} — Rp {{nominal .TotalOutstanding}}</h2>
-      <p>{{t .Lang "loan_request_blocked_outstanding"}}</p>
+      <p>{{t .Lang "loan_request_outstanding_notice"}}</p>
       <div class="loan-card-grid">
       {{range .OutstandingLoans}}
         <article class="loan-summary-card {{if .IsOverdue}}loan-overdue{{end}}">
@@ -281,14 +281,14 @@
         <form method="post" action="/api/member/loan-requests" hx-post="/api/member/loan-requests" hx-target="#loan-request-error" hx-swap="innerHTML" data-loan-fee-preview data-monthly-admin-fee-label="{{t .Lang "monthly_admin_fee"}}" data-total-admin-fee-label="{{t .Lang "total_admin_fee"}}" data-total-obligation-label="{{t .Lang "total_obligation"}}" data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}">
           <label>{{t .Lang "loan_type"}} <select name="loan_type" data-loan-type required><option value="">{{t .Lang "select_loan_type"}}</option><option value="regular">{{t .Lang "loan_type_regular"}}</option><option value="secondary_goods">{{t .Lang "loan_type_secondary_goods"}}</option><option value="goods_purchase_paylater">{{t .Lang "loan_type_goods_purchase_paylater"}}</option></select></label>
 		  <label>{{t .Lang "requested_amount"}}
-            <input name="requested_amount" type="text" inputmode="numeric" placeholder="Rp 0" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" aria-describedby="loan-request-amount-hint" aria-errormessage="loan-request-amount-error" required>
-            <small id="loan-request-amount-hint">{{t .Lang "rupiah_input_hint"}}</small>
+            <input name="requested_amount" type="text" inputmode="numeric" placeholder="Rp 0" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="200000000" data-rupiah-max-invalid="{{t .Lang "error_loan_amount_limit"}}" aria-describedby="loan-request-amount-hint" aria-errormessage="loan-request-amount-error" required>
+            <small id="loan-request-amount-hint">{{t .Lang "loan_amount_limit_hint"}}</small>
             <small id="loan-request-amount-error" class="form-error-message" aria-live="polite" hidden></small>
           </label>
 		  <label>{{t .Lang "duration_months"}} <input name="duration_months" type="number" min="1" max="24" data-loan-duration required></label>
           <p class="loan-fee-preview" data-loan-fee-output aria-live="polite" hidden></p>
 		  <label>{{t .Lang "purpose"}} <input name="purpose" required></label>
-          <button type="submit" {{if .OutstandingLoans}}disabled aria-disabled="true" title="{{t .Lang "loan_request_blocked_outstanding"}}"{{end}}>{{t .Lang "submit_loan_request"}}</button>
+          <button type="submit">{{t .Lang "submit_loan_request"}}</button>
         </form>
 {{template "form-error" (dict "ID" "loan-request-error")}}
       </article>

@@ -92,7 +92,6 @@ var (
 	errInvalidLoanApproval           = errors.New("invalid loan approval")
 	errLoanRequestNotPending         = errors.New("loan request not pending")
 	errLoanRequestNotFound           = errors.New("loan request not found")
-	errMemberAlreadyHasActiveLoan    = errors.New("member already has active loan")
 	errInvalidLoanApprovalCalculated = errors.New("invalid calculated installment")
 	errInvalidLoanStartDate          = errors.New("invalid loan start date")
 	errLoanStartDateLocked           = errors.New("loan start date locked")
@@ -130,6 +129,10 @@ func (s *Server) approveLoanRequest(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_approval_fields"))
 		return
 	}
+	if errors.Is(err, errLoanAmountLimitExceeded) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_amount_limit"))
+		return
+	}
 	if errors.Is(err, errInvalidLoanStartDate) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_start_date_range"))
 		return
@@ -140,10 +143,6 @@ func (s *Server) approveLoanRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errWrongApprovalStage) {
 		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(lang, "error_wrong_approval_stage"))
-		return
-	}
-	if errors.Is(err, errMemberAlreadyHasActiveLoan) {
-		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_member_active_loan"))
 		return
 	}
 	if errors.Is(err, errLoanRequestNotFound) {
@@ -326,6 +325,9 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		if req.ApprovedAmount <= 0 || req.DurationMonths <= 0 || startDate == "" {
 			return LoanApprovalResult{}, errInvalidLoanApproval
 		}
+		if req.ApprovedAmount > maxLoanPrincipalAmount {
+			return LoanApprovalResult{}, errLoanAmountLimitExceeded
+		}
 		start, parseErr := parseLoanDate(startDate)
 		if parseErr != nil || start.After(time.Now().In(jakartaLocation)) {
 			return LoanApprovalResult{}, errInvalidLoanStartDate
@@ -405,14 +407,6 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		return LoanApprovalResult{}, err
 	}
 
-	var activeLoanID string
-	err = tx.QueryRow(`SELECT id FROM loans WHERE member_id = $1 AND status <> 'cancelled' AND remaining_balance > 0 LIMIT 1`, request.MemberID).Scan(&activeLoanID)
-	if err == nil {
-		return LoanApprovalResult{}, errMemberAlreadyHasActiveLoan
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return LoanApprovalResult{}, err
-	}
 	if err := validateLoanFeeSnapshot(request.ProposedAdminFeePolicy, request.ProposedApprovedAmount, request.ProposedDurationMonths, request.ProposedMonthlyAdminFee, request.ProposedTotalAdminFee, request.ProposedTotalObligation); err != nil {
 		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
 	}
@@ -476,9 +470,6 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		loan.ApprovedBy,
 		loan.StartDate, loan.AdminFeePolicy, loan.MonthlyAdminFee, loan.TotalAdminFee, loan.TotalObligation, loan.NextDueDate, loan.FinalDueDate,
 	); err != nil {
-		if isUniqueViolation(err) {
-			return LoanApprovalResult{}, errMemberAlreadyHasActiveLoan
-		}
 		return LoanApprovalResult{}, err
 	}
 	for _, installment := range calc.Installments {

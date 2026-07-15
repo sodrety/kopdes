@@ -51,6 +51,8 @@ type rejectLoanInput struct {
 	RejectionReason string `json:"rejection_reason" form:"rejection_reason"`
 }
 
+const maxLoanPrincipalAmount int64 = 200_000_000
+
 func (s *Server) submitLoanRequest(c *gin.Context) {
 	lang := languageFromRequest(c)
 	member, ok := s.profileMember(c)
@@ -70,6 +72,10 @@ func (s *Server) submitLoanRequest(c *gin.Context) {
 	loanRequest, err := s.insertLoanRequest(member, req)
 	if errors.Is(err, errInvalidLoanRequest) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_request_fields"))
+		return
+	}
+	if errors.Is(err, errLoanAmountLimitExceeded) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_amount_limit"))
 		return
 	}
 	if errors.Is(err, errInactiveLoanMember) {
@@ -163,6 +169,7 @@ var (
 	errPendingLoanRequestExists = errors.New("pending loan request exists")
 	errInvalidLoanRejection     = errors.New("invalid loan rejection")
 	errOutstandingLoanBalance   = errors.New("outstanding loan balance")
+	errLoanAmountLimitExceeded  = errors.New("loan amount limit exceeded")
 )
 
 func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanRequest, error) {
@@ -181,6 +188,9 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 	if req.RequestedAmount <= 0 || req.DurationMonths <= 0 || req.DurationMonths > maxDuration || strings.TrimSpace(req.Purpose) == "" {
 		return LoanRequest{}, errInvalidLoanRequest
 	}
+	if req.RequestedAmount > maxLoanPrincipalAmount {
+		return LoanRequest{}, errLoanAmountLimitExceeded
+	}
 	if member.Status != "active" {
 		return LoanRequest{}, errInactiveLoanMember
 	}
@@ -197,14 +207,6 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 	if err := tx.QueryRow(`SELECT id FROM members WHERE id = $1`+rowLockClause(s.db), member.ID).Scan(&lockedMemberID); err != nil {
 		return LoanRequest{}, err
 	}
-	var outstanding int64
-	if err := tx.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND status <> 'cancelled' AND remaining_balance > 0`, member.ID).Scan(&outstanding); err != nil {
-		return LoanRequest{}, err
-	}
-	if outstanding > 0 {
-		return LoanRequest{}, errOutstandingLoanBalance
-	}
-
 	var pendingID string
 	err = tx.QueryRow(`SELECT id FROM loan_requests WHERE member_id = $1 AND status = 'pending' LIMIT 1`, member.ID).Scan(&pendingID)
 	if err == nil {
