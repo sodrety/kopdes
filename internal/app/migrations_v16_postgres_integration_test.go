@@ -363,6 +363,11 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 		if _, err := CreateMemberUser(db, email, "password", id); err != nil {
 			t.Fatalf("seed %s User: %v", role, err)
 		}
+		// These fixture accounts are established test identities. Production-created
+		// member accounts intentionally require a password change on first login.
+		if _, err := db.Exec(`UPDATE users SET must_change_password=FALSE WHERE member_id=$1`, id); err != nil {
+			t.Fatalf("establish %s User password: %v", role, err)
+		}
 		if role != "" {
 			if _, err := db.Exec(`INSERT INTO officer_appointments (id,member_id,role,active) VALUES ($1,$2,$3,TRUE)`, "appointment-"+id, id, role); err != nil {
 				t.Fatalf("seed %s appointment: %v", role, err)
