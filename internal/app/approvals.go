@@ -213,3 +213,26 @@ func createMemberOutcomeNotification(tx *sql.Tx, requestType, requestID, memberI
 	}
 	return nil
 }
+
+func createMemberLoanTermsChangedNotification(tx *sql.Tx, requestID, memberID string) error {
+	payload, _ := json.Marshal(map[string]string{"change": "manager_terms"})
+	eventID := newID()
+	if _, err := tx.Exec(`INSERT INTO notification_events (id,event_type,request_type,request_id,payload) VALUES ($1,'loan_terms_changed','loan',$2,$3)`, eventID, requestID, string(payload)); err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT id FROM users WHERE member_id=$1 AND historical_identity=FALSE AND active=TRUE`, memberID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO notifications (id,event_id,user_id,title_key,body_key,link,audience) VALUES ($1,$2,$3,'notification_loan_terms_changed_title','notification_loan_terms_changed_body','/member/loan-requests','member')`, newID(), eventID, userID); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}

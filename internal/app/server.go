@@ -446,14 +446,22 @@ func bearerToken(header string) string {
 }
 
 func respondError(c *gin.Context, status int, code, message string) {
+	localizedMessage := localizedErrorMessage(c, message)
 	if isHTMXRequest(c) {
-		body := `<span class="form-error-message">` + template.HTMLEscapeString(localizedErrorMessage(c, message)) + `</span>`
+		body := `<span class="form-error-message">` + template.HTMLEscapeString(localizedMessage) + `</span>`
 		c.Data(status, "text/html; charset=utf-8", []byte(body))
 		return
 	}
 	if wantsBrowserDocument(c) {
-		respondBrowserError(c, status, code, message)
+		respondBrowserError(c, status, code, localizedMessage)
 		return
+	}
+	// Preserve the established JSON contract for canonical/raw messages. New
+	// callers can pass an explicit catalog key and receive one translation.
+	if catalog, ok := translations[languageFromRequest(c)]; ok {
+		if _, explicitKey := catalog[message]; explicitKey {
+			message = localizedMessage
+		}
 	}
 	respondJSONError(c, status, code, message)
 }

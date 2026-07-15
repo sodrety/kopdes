@@ -41,7 +41,7 @@ func TestMemberTypeMigrationBackfillsExistingMembers(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ('legacy-member','LEGACY-1','Legacy Member','2026-01-01','inactive')`); err != nil {
 		t.Fatalf("insert legacy member: %v", err)
 	}
-	for version := 1; version <= 14; version++ {
+	for version := 1; version <= 16; version++ {
 		if _, err := db.Exec(`INSERT INTO schema_migrations (version,name) VALUES ($1,$2)`, version, fmt.Sprintf("legacy_%d", version)); err != nil {
 			t.Fatalf("mark migration %d applied: %v", version, err)
 		}

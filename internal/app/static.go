@@ -618,6 +618,57 @@ button {
   color: var(--primary);
   box-shadow: none;
 }
+.review-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: none;
+  place-items: center;
+  padding: 24px;
+}
+.review-modal:target {
+  display: grid;
+}
+.review-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.55);
+}
+.review-modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(820px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  background: var(--canvas);
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
+}
+.review-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.review-modal-header h2 {
+  margin: 0;
+}
+.review-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9999px;
+  border: 1px solid var(--line);
+  color: var(--body);
+  font-size: 24px;
+  line-height: 1;
+  text-decoration: none;
+}
 button:disabled {
   opacity: 0.48;
   cursor: not-allowed;
@@ -1514,7 +1565,7 @@ td:nth-child(n+2):not(.review-cell) {
 	font-size: 13px;
 }
 .review-cell {
-	min-width: 300px;
+	min-width: 120px;
 }
 .review-action label {
 	gap: 4px;
@@ -1550,6 +1601,27 @@ td:nth-child(n+2):not(.review-cell) {
 .inline-rejection-form button {
 	padding: 7px 10px;
 	font-size: 13px;
+}
+.review-modal-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+.review-modal-actions .inline-approval-form,
+.review-modal-actions .inline-rejection-form {
+  min-width: 0;
+}
+.review-approval-history {
+  margin-top: 18px;
+}
+.review-approval-history h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  line-height: 22px;
+}
+.review-approval-history ol {
+  margin: 0;
+  padding-left: 20px;
 }
 .inline-repayment-form {
 	display: grid;
@@ -1608,6 +1680,10 @@ td:nth-child(n+2):not(.review-cell) {
   color: var(--body);
   font-size: 13px;
   font-weight: 600;
+}
+.review-detail-grid {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line-soft);
 }
 .balance-statement td:last-child {
   text-align: right;

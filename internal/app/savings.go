@@ -15,7 +15,7 @@ type SavingRecord struct {
 	MemberID    string `json:"member_id"`
 	Type        string `json:"type"`
 	Category    string `json:"category"`
-	Amount      int    `json:"amount"`
+	Amount      int64  `json:"amount"`
 	RecordDate  string `json:"record_date"`
 	ReferenceNo string `json:"reference_no"`
 	Note        string `json:"note"`
@@ -27,7 +27,7 @@ type savingRequest struct {
 	MemberID    string `json:"member_id" form:"member_id"`
 	Type        string `json:"type" form:"type"`
 	Category    string `json:"category" form:"category"`
-	Amount      int    `json:"amount" form:"amount"`
+	Amount      int64  `json:"amount" form:"amount"`
 	RecordDate  string `json:"record_date" form:"record_date"`
 	ReferenceNo string `json:"reference_no" form:"reference_no"`
 	Note        string `json:"note" form:"note"`
@@ -51,7 +51,10 @@ type AdminSavingRecord struct {
 
 func (s *Server) recordSaving(c *gin.Context) {
 	var req savingRequest
-	if err := c.ShouldBind(&req); err != nil {
+	if err := bindRequestWithRupiahAmount(c, &req, "amount"); errors.Is(err, errInvalidRupiahAmount) {
+		invalidRupiahAmountResponse(c)
+		return
+	} else if err != nil {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid saving request")
 		return
 	}
@@ -85,6 +88,10 @@ func (s *Server) recordSaving(c *gin.Context) {
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", "Member not found")
+		return
+	}
+	if isMonetaryAggregateCapacityError(err) {
+		respondError(c, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "error_monetary_aggregate_capacity")
 		return
 	}
 	if err != nil {
@@ -345,16 +352,16 @@ func (s *Server) latestSavingsByMember(memberID string, limit int) ([]SavingReco
 }
 
 type SavingSummary struct {
-	TotalDeposit               int `json:"total_deposit"`
-	TotalWithdrawal            int `json:"total_withdrawal"`
-	CurrentBalance             int `json:"current_balance"`
-	PokokBalance               int `json:"pokok_balance"`
-	WajibBalance               int `json:"wajib_balance"`
-	SukarelaBalance            int `json:"sukarela_balance"`
-	AvailableWithdrawalBalance int `json:"available_withdrawal_balance"`
+	TotalDeposit               int64 `json:"total_deposit"`
+	TotalWithdrawal            int64 `json:"total_withdrawal"`
+	CurrentBalance             int64 `json:"current_balance"`
+	PokokBalance               int64 `json:"pokok_balance"`
+	WajibBalance               int64 `json:"wajib_balance"`
+	SukarelaBalance            int64 `json:"sukarela_balance"`
+	AvailableWithdrawalBalance int64 `json:"available_withdrawal_balance"`
 }
 
-func (s SavingSummary) BalanceForCategory(category string) int {
+func (s SavingSummary) BalanceForCategory(category string) int64 {
 	switch category {
 	case "pokok":
 		return s.PokokBalance
@@ -372,7 +379,7 @@ func (s *Server) savingSummary(memberID string) (SavingSummary, error) {
 	if err != nil {
 		return SavingSummary{}, err
 	}
-	var reserved int
+	var reserved int64
 	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM withdrawal_reservations WHERE member_id=$1 AND status='active'`, memberID).Scan(&reserved); err != nil {
 		return SavingSummary{}, err
 	}

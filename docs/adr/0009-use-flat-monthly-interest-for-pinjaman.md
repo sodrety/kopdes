@@ -1,6 +1,6 @@
 # Use flat monthly Bunga for Pinjaman
 
-Accepted. Supersedes ADR 0006 for future Pinjaman work: approved loans should support **Bunga** as flat monthly interest on the approved principal, matching KOPKARLYTA-style Pinjaman and Angsuran expectations. The default Bunga rate is 1.00% per month, and an Admin may override it per approved Loan. Approved Loans should generate an expected monthly **Installment Schedule** from principal, tenor, and flat monthly **Bunga**. Admins still record verified **Repayment Records** separately, and those actual repayments may be partial, exact, or extra relative to the schedule.
+Partially superseded by ADR 0014. The Bunga terminology, flat-rate policy, default rate, and Officer override are no longer accepted. The decision to generate an expected **Installment Schedule** separately from verified **Repayment Records**, which may be partial, exact, or extra, remains accepted.
 
 **Consequences**
 

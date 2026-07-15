@@ -60,12 +60,12 @@ func TestAdminCanLoginAndSeeEmptyDashboardSummary(t *testing.T) {
 	}
 
 	var summary struct {
-		TotalMembers         int `json:"total_members"`
-		ActiveMembers        int `json:"active_members"`
-		TotalSavings         int `json:"total_savings"`
-		ActiveLoans          int `json:"active_loans"`
-		TotalOutstandingLoan int `json:"total_outstanding_loan"`
-		PendingLoanRequests  int `json:"pending_loan_requests"`
+		TotalMembers         int   `json:"total_members"`
+		ActiveMembers        int   `json:"active_members"`
+		TotalSavings         int   `json:"total_savings"`
+		ActiveLoans          int   `json:"active_loans"`
+		TotalOutstandingLoan int64 `json:"total_outstanding_loan"`
+		PendingLoanRequests  int   `json:"pending_loan_requests"`
 	}
 	if err := json.Unmarshal(dashboardRec.Body.Bytes(), &summary); err != nil {
 		t.Fatalf("decode dashboard response: %v", err)
@@ -181,7 +181,7 @@ func TestBahasaRenderingForAuthenticatedAdminAndMemberPages(t *testing.T) {
 	if memberRec.Code != http.StatusOK {
 		t.Fatalf("expected localized member loan request page status 200, got %d: %s", memberRec.Code, memberRec.Body.String())
 	}
-	if body := memberRec.Body.String(); !strings.Contains(body, "Permintaan pinjaman") || !strings.Contains(body, "Ajukan permintaan pinjaman") || !strings.Contains(body, "Riwayat permintaan") || !strings.Contains(body, "Menunggu") {
+	if body := memberRec.Body.String(); !strings.Contains(body, "Permintaan pinjaman") || !strings.Contains(body, "Ajukan permintaan pinjaman") || !strings.Contains(body, "Riwayat permintaan") || !strings.Contains(body, "Pilih jenis pinjaman") || !strings.Contains(body, "Menunggu") {
 		t.Fatalf("expected Bahasa member loan request page, got %s", body)
 	}
 }
@@ -205,8 +205,8 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 15 {
-		t.Fatalf("expected fifteen tracked migrations, got %d", migrationCount)
+	if migrationCount != 17 {
+		t.Fatalf("expected seventeen tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
@@ -589,7 +589,7 @@ func TestConcurrentLoanRequestSubmissionsCreateOnlyOnePendingRequest(t *testing.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":500000,"duration_months":5}`))
+			req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":500000,"duration_months":5,"purpose":"Working capital","loan_type":"regular"}`))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer "+memberToken)
 			rec := httptest.NewRecorder()
@@ -667,7 +667,7 @@ func TestConcurrentRepaymentsCannotOverpayLoan(t *testing.T) {
 		t.Fatalf("query remaining loan balance: %v", err)
 	}
 	if remainingBalance != 25000 {
-		t.Fatalf("expected remaining balance 25000 including Bunga, got %d", remainingBalance)
+		t.Fatalf("expected remaining balance 25000 including admin fee, got %d", remainingBalance)
 	}
 }
 
@@ -982,7 +982,7 @@ func TestStaticCSSIncludesMobileAdminResponsiveRules(t *testing.T) {
 		t.Fatalf("expected css status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	css := rec.Body.String()
-	for _, text := range []string{"--primary: #0056b3", "--warning: #ffc107", "--negative: #dc2626", ".public-header", ".public-hero", ".public-feature-card", ".auth-visual", "linear-gradient(180deg, #4e73df", ".admin-topbar", ".summary-card", ".dashboard-home-grid", ".dashboard-quick-list", ".brand-logo", ".sidebar-group-label", ".status-pending", "@media (max-width: 760px)", ".admin-sidebar", "overflow-x: auto", ".page-shell", ".summary-grid", "grid-template-columns: repeat(2, minmax(0, 1fr))", ".inline-approval-form", ".inline-repayment-form", ".table-scroll td:last-child"} {
+	for _, text := range []string{"--primary: #0056b3", "--warning: #ffc107", "--negative: #dc2626", ".public-header", ".public-hero", ".public-feature-card", ".auth-visual", "linear-gradient(180deg, #4e73df", ".admin-topbar", ".summary-card", ".dashboard-home-grid", ".dashboard-quick-list", ".brand-logo", ".sidebar-group-label", ".status-pending", "@media (max-width: 760px)", ".admin-sidebar", "overflow-x: auto", ".page-shell", ".summary-grid", "grid-template-columns: repeat(2, minmax(0, 1fr))", ".inline-approval-form", ".inline-repayment-form", ".review-modal:target", ".review-modal-card", ".table-scroll td:last-child"} {
 		if !strings.Contains(css, text) {
 			t.Fatalf("expected css to include %q, got %s", text, css)
 		}
@@ -1806,7 +1806,7 @@ func TestHtmxAdminFormFailureReturnsHTMLFormError(t *testing.T) {
 	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
 		t.Fatalf("expected HTML content type, got %q", contentType)
 	}
-	if body := rec.Body.String(); body != `<span class="form-error-message">Member, category, amount, and record date are required</span>` {
+	if body := rec.Body.String(); body != `<span class="form-error-message">Enter a whole Rupiah amount from Rp 1 to Rp 9,223,372,036,854,775,807</span>` {
 		t.Fatalf("expected escaped HTML error fragment, got %s", body)
 	}
 }
@@ -2123,7 +2123,7 @@ func TestAdminCanExportPinjamanAndAngsuranCSV(t *testing.T) {
 		t.Fatalf("expected pinjaman export status 200, got %d: %s", loanRec.Code, loanRec.Body.String())
 	}
 	loanBody := loanRec.Body.String()
-	for _, text := range []string{"member_no,member,Member type,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_at", "M-LOAN-EXP,Loan Export,Karyawan,900000,9,109000,881000,active"} {
+	for _, text := range []string{"member_no,member,Member type,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_at,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date", "M-LOAN-EXP,Loan Export,Karyawan,900000,9,109000,881000,active,", "regular_tiered_monthly_v1,9000,81000,981000"} {
 		if !strings.Contains(loanBody, text) {
 			t.Fatalf("expected pinjaman export to include %q, got %s", text, loanBody)
 		}
@@ -2737,6 +2737,7 @@ func TestMemberCanSubmitAndTrackLoanRequest(t *testing.T) {
 	createReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{
 		"requested_amount":3000000,
 		"duration_months":6,
+		"loan_type":" regular ",
 		"purpose":"Small business capital"
 	}`))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -2752,16 +2753,24 @@ func TestMemberCanSubmitAndTrackLoanRequest(t *testing.T) {
 	var created struct {
 		ID              string `json:"id"`
 		MemberID        string `json:"member_id"`
-		RequestedAmount int    `json:"requested_amount"`
+		RequestedAmount int64  `json:"requested_amount"`
 		DurationMonths  int    `json:"duration_months"`
 		Purpose         string `json:"purpose"`
 		Status          string `json:"status"`
+		LoanType        string `json:"loan_type"`
 	}
 	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode loan request: %v", err)
 	}
-	if created.ID == "" || created.MemberID != member.ID || created.RequestedAmount != 3000000 || created.DurationMonths != 6 || created.Purpose != "Small business capital" || created.Status != "pending" {
+	if created.ID == "" || created.MemberID != member.ID || created.RequestedAmount != 3000000 || created.DurationMonths != 6 || created.Purpose != "Small business capital" || created.Status != "pending" || created.LoanType != "regular" {
 		t.Fatalf("unexpected loan request: %+v", created)
+	}
+	var persistedLoanType string
+	if err := fixture.db.QueryRow(`SELECT loan_type FROM loan_requests WHERE id=$1`, created.ID).Scan(&persistedLoanType); err != nil {
+		t.Fatalf("read persisted loan type: %v", err)
+	}
+	if persistedLoanType != created.LoanType {
+		t.Fatalf("persisted loan type=%q, returned loan type=%q", persistedLoanType, created.LoanType)
 	}
 
 	historyReq := httptest.NewRequest(http.MethodGet, "/api/member/loan-requests", nil)
@@ -2777,15 +2786,16 @@ func TestMemberCanSubmitAndTrackLoanRequest(t *testing.T) {
 	var history struct {
 		LoanRequests []struct {
 			ID              string `json:"id"`
-			RequestedAmount int    `json:"requested_amount"`
+			RequestedAmount int64  `json:"requested_amount"`
 			DurationMonths  int    `json:"duration_months"`
 			Status          string `json:"status"`
+			LoanType        string `json:"loan_type"`
 		} `json:"loan_requests"`
 	}
 	if err := json.Unmarshal(historyRec.Body.Bytes(), &history); err != nil {
 		t.Fatalf("decode loan request history: %v", err)
 	}
-	if len(history.LoanRequests) != 1 || history.LoanRequests[0].ID != created.ID || history.LoanRequests[0].Status != "pending" {
+	if len(history.LoanRequests) != 1 || history.LoanRequests[0].ID != created.ID || history.LoanRequests[0].Status != "pending" || history.LoanRequests[0].LoanType != created.LoanType {
 		t.Fatalf("unexpected loan request history: %+v", history)
 	}
 }
@@ -2801,6 +2811,42 @@ func TestLoanRequestValidationAndEligibility(t *testing.T) {
 		t.Fatalf("deactivate ineligible Member: %v", err)
 	}
 
+	t.Run("loan type is explicit and known", func(t *testing.T) {
+		for name, payload := range map[string]string{
+			"missing":     `{"requested_amount":1000000,"duration_months":4}`,
+			"unsupported": `{"requested_amount":1000000,"duration_months":4,"loan_type":"unknown_type"}`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(payload))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+activeToken)
+				rec := httptest.NewRecorder()
+
+				fixture.server.ServeHTTP(rec, req)
+
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+				}
+				assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Loan Type is required and requested amount and duration months must be greater than zero")
+			})
+		}
+	})
+
+	t.Run("loan type validation is localized", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":1000000,"duration_months":4}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+activeToken)
+		req.Header.Set("Accept-Language", "id")
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+		}
+		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Jenis Pinjaman wajib dipilih serta jumlah permintaan dan durasi bulan harus lebih besar dari nol")
+	})
+
 	t.Run("amount and duration must be positive", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":0,"duration_months":0}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -2812,7 +2858,7 @@ func TestLoanRequestValidationAndEligibility(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Requested amount and duration months must be greater than zero")
+		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Loan Type is required and requested amount and duration months must be greater than zero")
 	})
 
 	t.Run("member must be active", func(t *testing.T) {
@@ -2831,7 +2877,7 @@ func TestLoanRequestValidationAndEligibility(t *testing.T) {
 
 	t.Run("member can have only one pending request", func(t *testing.T) {
 		fixture.createLoanRequest(t, activeToken, 1000000, 4)
-		req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":2000000,"duration_months":8}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":2000000,"duration_months":8,"purpose":"Working capital","loan_type":"regular"}`))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+activeToken)
 		rec := httptest.NewRecorder()
@@ -2863,7 +2909,7 @@ func TestMemberLoanRequestPageRendersFormAndHistory(t *testing.T) {
 		t.Fatalf("expected loan request page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"member-loan-requests-shell", "Loan requests", "Submit loan request", `name="requested_amount"`, `name="duration_months"`, "table-scroll", "1.500.000", "Menunggu"} {
+	for _, text := range []string{"member-loan-requests-shell", "Loan requests", "Submit loan request", `name="loan_type"`, `value="regular"`, `name="requested_amount"`, `name="duration_months"`, "table-scroll", "1.500.000", "Menunggu"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected loan request page to include %q, got %s", text, body)
 		}
@@ -2892,7 +2938,7 @@ func TestAdminCanListPendingLoanRequestsForReview(t *testing.T) {
 			MemberID        string `json:"member_id"`
 			MemberNo        string `json:"member_no"`
 			FullName        string `json:"full_name"`
-			RequestedAmount int    `json:"requested_amount"`
+			RequestedAmount int64  `json:"requested_amount"`
 			DurationMonths  int    `json:"duration_months"`
 			Purpose         string `json:"purpose"`
 			Status          string `json:"status"`
@@ -2965,7 +3011,7 @@ func TestAdminLoanRequestReviewPageRendersPendingQueue(t *testing.T) {
 		t.Fatalf("expected admin loan request page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"Loan request review", "table-scroll", "Queue Member", "M-0021", "3.200.000", "12", "Test loan", "Menunggu", "Approve", "Reject"} {
+	for _, text := range []string{"Loan request review", "table-scroll", "Queue Member", "M-0021", "3.200.000", "12", "Test loan", "Menunggu", `href="#loan-request-review-`, `class="review-modal"`, "Approve", "Reject"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected admin loan request page to include %q, got %s", text, body)
 		}
@@ -3035,10 +3081,10 @@ func TestAdminCanApproveLoanRequestAndExposeActiveLoan(t *testing.T) {
 	}
 	var activeLoan struct {
 		ID                 string `json:"id"`
-		ApprovedAmount     int    `json:"approved_amount"`
+		ApprovedAmount     int64  `json:"approved_amount"`
 		DurationMonths     int    `json:"duration_months"`
-		MonthlyInstallment int    `json:"monthly_installment"`
-		RemainingBalance   int    `json:"remaining_balance"`
+		MonthlyInstallment int64  `json:"monthly_installment"`
+		RemainingBalance   int64  `json:"remaining_balance"`
 		Status             string `json:"status"`
 	}
 	if err := json.Unmarshal(activeRec.Body.Bytes(), &activeLoan); err != nil {
@@ -3062,7 +3108,7 @@ func TestAdminCanApproveLoanRequestAndExposeActiveLoan(t *testing.T) {
 			ID             string `json:"id"`
 			MemberNo       string `json:"member_no"`
 			FullName       string `json:"full_name"`
-			ApprovedAmount int    `json:"approved_amount"`
+			ApprovedAmount int64  `json:"approved_amount"`
 			Status         string `json:"status"`
 		} `json:"loans"`
 	}
@@ -3091,30 +3137,40 @@ func TestLoanApprovalValidationAndConflicts(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Approved amount, duration months, start date, and a valid interest rate are required")
+		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Approved amount, duration of 1 to 24 months, and start date are required")
 		if loans := fixture.activeLoans(t, adminToken); len(loans) != 0 {
 			t.Fatalf("expected validation failure to create no loans, got %+v", loans)
 		}
 	})
 
-	t.Run("approved amount cannot exceed requested amount", func(t *testing.T) {
+	t.Run("manager may increase requested amount", func(t *testing.T) {
 		fixture := newTestFixture(t)
 		adminToken := fixture.login(t, "admin@coop.test", "password")
 		fixture.createMember(t, adminToken, `{"member_no":"M-0023","full_name":"Approval Rules","join_date":"2026-06-16","status":"active","email":"approval-rules@coop.test","password":"member-password"}`)
 		memberToken := fixture.login(t, "approval-rules@coop.test", "member-password")
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+fixture.pendingLoanRequestID(t, memberToken)+"/approve", bytes.NewBufferString(`{"approved_amount":1500000,"duration_months":5,"start_date":"2026-07-11"}`))
+		requestID := fixture.pendingLoanRequestID(t, memberToken)
+		body := fmt.Sprintf(`{"approved_amount":1500000,"duration_months":5,"start_date":%q}`, time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02"))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+adminToken)
 		rec := httptest.NewRecorder()
 
 		fixture.server.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Approved amount cannot exceed requested amount")
+		var result struct {
+			Request struct {
+				ProposedApprovedAmount int64  `json:"proposed_approved_amount"`
+				ProposedAdminFeePolicy string `json:"proposed_admin_fee_policy"`
+			} `json:"loan_request"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil || result.Request.ProposedApprovedAmount != 1_500_000 || result.Request.ProposedAdminFeePolicy != "regular_tiered_monthly_v1" {
+			t.Fatalf("unexpected increased proposal: %s", rec.Body.String())
+		}
 		if loans := fixture.activeLoans(t, adminToken); len(loans) != 0 {
-			t.Fatalf("expected exceeded amount failure to create no loans, got %+v", loans)
+			t.Fatalf("expected only Manager proposal to create no loans, got %+v", loans)
 		}
 	})
 
@@ -3141,7 +3197,7 @@ func TestLoanApprovalValidationAndConflicts(t *testing.T) {
 			t.Fatalf("expected reapproval failure to keep one active loan, got %+v", loans)
 		}
 
-		conflictReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":600000,"duration_months":3,"purpose":"blocked"}`))
+		conflictReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":600000,"duration_months":3,"loan_type":"regular","purpose":"blocked"}`))
 		conflictReq.Header.Set("Content-Type", "application/json")
 		conflictReq.Header.Set("Authorization", "Bearer "+memberToken)
 		conflictRec := httptest.NewRecorder()
@@ -3176,7 +3232,7 @@ func TestLoanApprovalPagesRenderReviewAndActiveLoanViews(t *testing.T) {
 		t.Fatalf("expected review page status 200, got %d: %s", reviewRec.Code, reviewRec.Body.String())
 	}
 	reviewBody := reviewRec.Body.String()
-	for _, text := range []string{"/api/admin/loan-requests/" + requestID + "/approve", `name="approved_amount"`, `name="duration_months"`, "Approved amount", "Duration", "Approve"} {
+	for _, text := range []string{`href="#loan-request-review-` + requestID + `"`, `id="loan-request-review-` + requestID + `"`, "/api/admin/loan-requests/" + requestID + "/approve", `name="approved_amount"`, `name="duration_months"`, "Approved amount", "Duration", "Approve"} {
 		if !strings.Contains(reviewBody, text) {
 			t.Fatalf("expected review page to include %q, got %s", text, reviewBody)
 		}
@@ -3387,7 +3443,7 @@ func TestAdminCanRecordRepaymentAndMemberCanViewHistory(t *testing.T) {
 	}
 	var activeLoan struct {
 		ID               string `json:"id"`
-		RemainingBalance int    `json:"remaining_balance"`
+		RemainingBalance int64  `json:"remaining_balance"`
 		Status           string `json:"status"`
 	}
 	if err := json.Unmarshal(activeRec.Body.Bytes(), &activeLoan); err != nil {
@@ -3653,12 +3709,12 @@ func TestAdminDashboardAggregatesOperationalTotals(t *testing.T) {
 		t.Fatalf("expected dashboard status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var summary struct {
-		TotalMembers         int `json:"total_members"`
-		ActiveMembers        int `json:"active_members"`
-		TotalSavings         int `json:"total_savings"`
-		ActiveLoans          int `json:"active_loans"`
-		TotalOutstandingLoan int `json:"total_outstanding_loan"`
-		PendingLoanRequests  int `json:"pending_loan_requests"`
+		TotalMembers         int   `json:"total_members"`
+		ActiveMembers        int   `json:"active_members"`
+		TotalSavings         int   `json:"total_savings"`
+		ActiveLoans          int   `json:"active_loans"`
+		TotalOutstandingLoan int64 `json:"total_outstanding_loan"`
+		PendingLoanRequests  int   `json:"pending_loan_requests"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
 		t.Fatalf("decode dashboard summary: %v", err)
@@ -3691,7 +3747,7 @@ func TestMemberDashboardIsIsolatedAndIncludesLatestActivity(t *testing.T) {
 	}
 	var dashboard struct {
 		SavingBalance        int       `json:"saving_balance"`
-		RemainingLoanBalance int       `json:"remaining_loan_balance"`
+		RemainingLoanBalance int64     `json:"remaining_loan_balance"`
 		ActiveLoan           *testLoan `json:"active_loan"`
 		LatestSavings        []struct {
 			MemberID    string `json:"member_id"`
@@ -3753,7 +3809,7 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	memberToken := fixture.login(t, "schedule@coop.test", "member-password")
 	requestID := fixture.createLoanRequest(t, memberToken, 1000000, 3)
 	startDate := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
-	body := fmt.Sprintf(`{"approved_amount":900000,"duration_months":3,"start_date":%q,"interest_rate_bps":125}`, startDate)
+	body := fmt.Sprintf(`{"approved_amount":900000,"duration_months":3,"start_date":%q}`, startDate)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+adminToken)
@@ -3790,8 +3846,8 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	if loan.ID == "" {
 		t.Fatal("expected Ketua Utama approval to create the scheduled loan")
 	}
-	if loan.RemainingBalance != 933750 {
-		t.Fatalf("expected obligation 933750, got %+v", loan)
+	if loan.RemainingBalance != 927000 {
+		t.Fatalf("expected obligation 927000, got %+v", loan)
 	}
 
 	detailReq := httptest.NewRequest(http.MethodGet, "/api/admin/loans/"+loan.ID, nil)
@@ -3803,7 +3859,7 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	}
 	var detail struct {
 		Installments []struct {
-			ScheduledAmount int    `json:"scheduled_amount"`
+			ScheduledAmount int64  `json:"scheduled_amount"`
 			DueDate         string `json:"due_date"`
 		} `json:"installments"`
 	}
@@ -3812,9 +3868,9 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	}
 	sum := 0
 	for _, i := range detail.Installments {
-		sum += i.ScheduledAmount
+		sum += int(i.ScheduledAmount)
 	}
-	if sum != 933750 {
+	if sum != 927000 {
 		t.Fatalf("schedule sum %d", sum)
 	}
 
@@ -3834,10 +3890,13 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	adminDetailPageReq.AddCookie(fixture.browserLogin(t, "admin@coop.test", "password"))
 	adminDetailPageRec := httptest.NewRecorder()
 	fixture.server.ServeHTTP(adminDetailPageRec, adminDetailPageReq)
-	for _, text := range []string{"Detail pinjaman", "Jadwal angsuran", startDate, "1.25%"} {
+	for _, text := range []string{"Detail pinjaman", "Jadwal angsuran", "Biaya admin bulanan", "Total biaya admin", startDate, "9.000"} {
 		if adminDetailPageRec.Code != http.StatusOK || !strings.Contains(adminDetailPageRec.Body.String(), text) {
 			t.Fatalf("expected Indonesian detail UI %q, got %d %s", text, adminDetailPageRec.Code, adminDetailPageRec.Body.String())
 		}
+	}
+	if strings.Contains(adminDetailPageRec.Body.String(), "Bunga") || strings.Contains(adminDetailPageRec.Body.String(), "bunga") {
+		t.Fatalf("expected preserved charge labels to use Biaya Admin terminology, got %s", adminDetailPageRec.Body.String())
 	}
 
 	correctReq := httptest.NewRequest(http.MethodPost, "/api/admin/loans/"+loan.ID+"/start-date", bytes.NewBufferString(fmt.Sprintf(`{"start_date":%q}`, startDate)))
@@ -3854,7 +3913,7 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 		t.Fatalf("audit count=%d err=%v", audits, err)
 	}
 
-	blockedReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":100000,"duration_months":1}`))
+	blockedReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":100000,"duration_months":1,"purpose":"Another need","loan_type":"regular"}`))
 	blockedReq.Header.Set("Content-Type", "application/json")
 	blockedReq.Header.Set("Authorization", "Bearer "+memberToken)
 	blockedRec := httptest.NewRecorder()
@@ -3862,7 +3921,7 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	if blockedRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected outstanding block, got %d %s", blockedRec.Code, blockedRec.Body.String())
 	}
-	blockedIDReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":100000,"duration_months":1}`))
+	blockedIDReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":100000,"duration_months":1,"purpose":"Kebutuhan lain","loan_type":"regular"}`))
 	blockedIDReq.Header.Set("Content-Type", "application/json")
 	blockedIDReq.Header.Set("Authorization", "Bearer "+memberToken)
 	blockedIDReq.Header.Set("Accept-Language", "id")
@@ -3888,7 +3947,7 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 		t.Fatalf("expected correction route to remain unavailable, got %d %s", lockedRec.Code, lockedRec.Body.String())
 	}
 	var total int
-	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND remaining_balance>0`, member.ID).Scan(&total); err != nil || total != 932750 {
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND remaining_balance>0`, member.ID).Scan(&total); err != nil || total != 926000 {
 		t.Fatalf("adjusted total=%d err=%v", total, err)
 	}
 }
@@ -4129,10 +4188,16 @@ func (f testFixture) recordSavingInCategory(t *testing.T, adminToken, memberID, 
 
 func (f testFixture) createLoanRequest(t *testing.T, memberToken string, amount, durationMonths int) string {
 	t.Helper()
+	return f.createLoanRequestWithType(t, memberToken, "regular", amount, durationMonths)
+}
+
+func (f testFixture) createLoanRequestWithType(t *testing.T, memberToken, loanType string, amount, durationMonths int) string {
+	t.Helper()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{
 		"requested_amount":`+strconv.Itoa(amount)+`,
 		"duration_months":`+strconv.Itoa(durationMonths)+`,
+		"loan_type":"`+loanType+`",
 		"purpose":"Test loan"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -4201,10 +4266,14 @@ type testLoan struct {
 	MemberID           string `json:"member_id"`
 	MemberNo           string `json:"member_no"`
 	FullName           string `json:"full_name"`
-	ApprovedAmount     int    `json:"approved_amount"`
+	ApprovedAmount     int64  `json:"approved_amount"`
 	DurationMonths     int    `json:"duration_months"`
-	MonthlyInstallment int    `json:"monthly_installment"`
-	RemainingBalance   int    `json:"remaining_balance"`
+	MonthlyInstallment int64  `json:"monthly_installment"`
+	RemainingBalance   int64  `json:"remaining_balance"`
+	AdminFeePolicy     string `json:"admin_fee_policy"`
+	MonthlyAdminFee    int64  `json:"monthly_admin_fee"`
+	TotalAdminFee      int64  `json:"total_admin_fee"`
+	TotalObligation    int64  `json:"total_obligation"`
 	Status             string `json:"status"`
 }
 
@@ -4212,7 +4281,7 @@ type testRepayment struct {
 	ID          string `json:"id"`
 	LoanID      string `json:"loan_id"`
 	MemberID    string `json:"member_id"`
-	Amount      int    `json:"amount"`
+	Amount      int64  `json:"amount"`
 	RecordDate  string `json:"record_date"`
 	ReferenceNo string `json:"reference_no"`
 	Note        string `json:"note"`
@@ -4314,11 +4383,11 @@ func (f testFixture) loansByStatus(t *testing.T, adminToken, status string) []te
 	return response.Loans
 }
 
-func (f testFixture) recordRepayment(t *testing.T, adminToken, loanID string, amount int) testRepayment {
+func (f testFixture) recordRepayment(t *testing.T, adminToken, loanID string, amount int64) testRepayment {
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/loans/"+loanID+"/repayments", bytes.NewBufferString(`{
-		"amount":`+strconv.Itoa(amount)+`,
+		"amount":`+strconv.FormatInt(amount, 10)+`,
 		"record_date":"2026-06-16",
 		"reference_no":"RPY-TEST",
 		"note":"Test repayment"

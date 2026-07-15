@@ -1,6 +1,6 @@
 # Use exact Loan schedules and retroactive Bunga
 
-Accepted. Extends ADR 0009 and supersedes the remaining principal-only behavior described by ADR 0006.
+Partially superseded by ADR 0014. The configurable flat Bunga policy and terminology are no longer accepted; exact calendar scheduling, whole-Rupiah installment division, oldest-first repayment allocation, historical-obligation preservation, and related date rules remain accepted.
 
 An Admin records the exact Loan start/disbursement date during approval. The first Installment Schedule deadline is one calendar month later. Every later deadline is calculated from the original start day, clamped to the target month's final valid day (for example, 31 January produces 29 February in a leap year, 31 March, and 30 April). The final deadline is the last installment deadline.
 

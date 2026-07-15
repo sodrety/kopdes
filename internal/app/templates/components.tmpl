@@ -18,6 +18,10 @@
 <strong>{{.FullName}}</strong><br><span class="table-muted">{{.MemberNo}}</span>
 {{end}}
 
+{{define "loan-type-label"}}
+{{if .LegacyTerms}}{{t .Lang "loan_type_regular_legacy"}}{{else}}{{t .Lang (printf "loan_type_%s" .LoanType)}}{{end}}
+{{end}}
+
 {{define "table-open"}}
         <div class="table-scroll">
         <table data-enhanced-table data-page-label="{{t .Lang "table_page_status"}}" data-previous-label="{{t .Lang "previous_page"}}" data-next-label="{{t .Lang "next_page"}}">

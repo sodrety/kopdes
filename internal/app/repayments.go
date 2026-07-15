@@ -14,7 +14,7 @@ type LoanRepayment struct {
 	ID          string `json:"id"`
 	LoanID      string `json:"loan_id"`
 	MemberID    string `json:"member_id"`
-	Amount      int    `json:"amount"`
+	Amount      int64  `json:"amount"`
 	RecordDate  string `json:"record_date"`
 	ReferenceNo string `json:"reference_no"`
 	Note        string `json:"note"`
@@ -30,7 +30,7 @@ type AdminLoanRepayment struct {
 	FullName        string `json:"full_name"`
 	MemberType      string `json:"member_type"`
 	MemberTypeLabel string `json:"member_type_label"`
-	Amount          int    `json:"amount"`
+	Amount          int64  `json:"amount"`
 	RecordDate      string `json:"record_date"`
 	ReferenceNo     string `json:"reference_no"`
 	Note            string `json:"note"`
@@ -38,7 +38,7 @@ type AdminLoanRepayment struct {
 }
 
 type repaymentInput struct {
-	Amount      int    `json:"amount" form:"amount"`
+	Amount      int64  `json:"amount" form:"amount"`
 	RecordDate  string `json:"record_date" form:"record_date"`
 	ReferenceNo string `json:"reference_no" form:"reference_no"`
 	Note        string `json:"note" form:"note"`
@@ -64,7 +64,10 @@ func (s *Server) recordLoanRepayment(c *gin.Context) {
 	}
 
 	var req repaymentInput
-	if err := c.ShouldBind(&req); err != nil {
+	if err := bindRequestWithRupiahAmount(c, &req, "amount"); errors.Is(err, errInvalidRupiahAmount) {
+		invalidRupiahAmountResponse(c)
+		return
+	} else if err != nil {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_loan_repayment"))
 		return
 	}
@@ -137,7 +140,7 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 
 	var loan struct {
 		MemberID         string
-		RemainingBalance int
+		RemainingBalance int64
 		Status           string
 	}
 	err = tx.QueryRow(
@@ -175,7 +178,7 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 	}
 	type unpaidInstallment struct {
 		id              string
-		scheduled, paid int
+		scheduled, paid int64
 	}
 	var installments []unpaidInstallment
 	for rows.Next() {

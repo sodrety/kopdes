@@ -10,15 +10,39 @@ on:
 jobs:
   go-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.5-alpine3.21
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kopdes_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d kopdes_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.14.0
+
       - name: Run tests
         run: go test ./...
+
+      - name: Run PostgreSQL integration tests
+        env:
+          KOPDES_POSTGRES_TEST_URL: postgres://postgres:postgres@127.0.0.1:5432/kopdes_test?sslmode=disable
+        run: go test -tags=postgres_integration ./internal/app

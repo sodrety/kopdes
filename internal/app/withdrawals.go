@@ -13,7 +13,7 @@ import (
 type WithdrawalRequest struct {
 	ID                   string            `json:"id"`
 	MemberID             string            `json:"member_id"`
-	Amount               int               `json:"amount"`
+	Amount               int64             `json:"amount"`
 	Note                 string            `json:"note"`
 	Status               string            `json:"status"`
 	CurrentApprovalStage string            `json:"current_approval_stage,omitempty"`
@@ -36,7 +36,7 @@ type AdminWithdrawalRequest struct {
 }
 
 type withdrawalRequestInput struct {
-	Amount int    `json:"amount" form:"amount"`
+	Amount int64  `json:"amount" form:"amount"`
 	Note   string `json:"note" form:"note"`
 }
 
@@ -65,7 +65,10 @@ func (s *Server) submitWithdrawalRequest(c *gin.Context) {
 	}
 
 	var req withdrawalRequestInput
-	if err := c.ShouldBind(&req); err != nil {
+	if err := bindRequestWithRupiahAmount(c, &req, "amount"); errors.Is(err, errInvalidRupiahAmount) {
+		invalidRupiahAmountResponse(c)
+		return
+	} else if err != nil {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid withdrawal request")
 		return
 	}
@@ -81,6 +84,10 @@ func (s *Server) submitWithdrawalRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errInsufficientSukarelaBalance) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Withdrawal cannot exceed Simpanan Sukarela balance")
+		return
+	}
+	if isMonetaryAggregateCapacityError(err) {
+		respondError(c, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "error_monetary_aggregate_capacity")
 		return
 	}
 	if err != nil {
@@ -151,6 +158,10 @@ func (s *Server) approveWithdrawalRequest(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", "Withdrawal request not found")
 		return
 	}
+	if isMonetaryAggregateCapacityError(err) {
+		respondError(c, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "error_monetary_aggregate_capacity")
+		return
+	}
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
@@ -219,7 +230,7 @@ func (s *Server) insertWithdrawalRequest(member Member, req withdrawalRequestInp
 	if err != nil {
 		return WithdrawalRequest{}, err
 	}
-	var reserved int
+	var reserved int64
 	if err := tx.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM withdrawal_reservations WHERE member_id=$1 AND status='active'`, member.ID).Scan(&reserved); err != nil {
 		return WithdrawalRequest{}, err
 	}
@@ -400,7 +411,7 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	if request.Amount > summary.SukarelaBalance {
 		return WithdrawalRequest{}, errInsufficientSukarelaBalance
 	}
-	var reservationAmount int
+	var reservationAmount int64
 	var reservationStatus string
 	if err := tx.QueryRow(`SELECT amount,status FROM withdrawal_reservations WHERE request_id=$1`+rowLockClause(s.db), requestID).Scan(&reservationAmount, &reservationStatus); err != nil {
 		return WithdrawalRequest{}, err

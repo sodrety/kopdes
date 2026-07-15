@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/csv"
 	"fmt"
+	"math"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -15,7 +17,7 @@ import (
 
 type ChartSegment struct {
 	Label   string
-	Value   int
+	Value   int64
 	Percent int
 	Class   string
 }
@@ -62,17 +64,17 @@ type AdminOperationalReports struct {
 }
 
 type BalanceReport struct {
-	TotalSavings         int
-	TotalOutstandingLoan int
-	PendingWithdrawals   int
-	OperationalBalance   int
-	TotalAssets          int
-	TotalLiabilities     int
-	TotalEquity          int
+	TotalSavings         int64
+	TotalOutstandingLoan int64
+	PendingWithdrawals   int64
+	OperationalBalance   int64
+	TotalAssets          int64
+	TotalLiabilities     int64
+	TotalEquity          int64
 	LiabilityRatio       int
 	HealthStatus         string
-	CashAsset            int
-	LoanReceivable       int
+	CashAsset            int64
+	LoanReceivable       int64
 	PrintedAt            string
 	Rows                 []BalanceReportRow
 }
@@ -80,20 +82,20 @@ type BalanceReport struct {
 type BalanceReportRow struct {
 	GroupKey string
 	LabelKey string
-	Amount   int
+	Amount   int64
 	Class    string
 }
 
 type ProfitLossReport struct {
-	TotalIncome        int
-	TotalCost          int
-	NetProfit          int
+	TotalIncome        int64
+	TotalCost          int64
+	NetProfit          int64
 	IncomePercent      int
 	CostPercent        int
 	MarginPercent      int
-	IncomeTransactions int
-	CostTransactions   int
-	MonthlyAverage     int
+	IncomeTransactions int64
+	CostTransactions   int64
+	MonthlyAverage     int64
 	PeriodStart        string
 	PeriodEnd          string
 }
@@ -108,10 +110,10 @@ type SavingsReportRow struct {
 	FullName        string `json:"full_name"`
 	MemberType      string `json:"member_type"`
 	MemberTypeLabel string `json:"member_type_label"`
-	Pokok           int    `json:"pokok"`
-	Wajib           int    `json:"wajib"`
-	Sukarela        int    `json:"sukarela"`
-	Total           int    `json:"total"`
+	Pokok           int64  `json:"pokok"`
+	Wajib           int64  `json:"wajib"`
+	Sukarela        int64  `json:"sukarela"`
+	Total           int64  `json:"total"`
 }
 
 type WithdrawalReportRow struct {
@@ -217,12 +219,12 @@ func writeBalanceReportCSV(c *gin.Context, report BalanceReport) {
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	writer := csv.NewWriter(c.Writer)
 	_ = writer.Write([]string{"metric", "amount"})
-	_ = writer.Write([]string{"total_assets", strconv.Itoa(report.TotalAssets)})
-	_ = writer.Write([]string{"total_liabilities", strconv.Itoa(report.TotalLiabilities)})
-	_ = writer.Write([]string{"total_equity", strconv.Itoa(report.TotalEquity)})
-	_ = writer.Write([]string{"cash_asset", strconv.Itoa(report.CashAsset)})
-	_ = writer.Write([]string{"loan_receivable", strconv.Itoa(report.LoanReceivable)})
-	_ = writer.Write([]string{"pending_withdrawals", strconv.Itoa(report.PendingWithdrawals)})
+	_ = writer.Write([]string{"total_assets", strconv.FormatInt(report.TotalAssets, 10)})
+	_ = writer.Write([]string{"total_liabilities", strconv.FormatInt(report.TotalLiabilities, 10)})
+	_ = writer.Write([]string{"total_equity", strconv.FormatInt(report.TotalEquity, 10)})
+	_ = writer.Write([]string{"cash_asset", strconv.FormatInt(report.CashAsset, 10)})
+	_ = writer.Write([]string{"loan_receivable", strconv.FormatInt(report.LoanReceivable, 10)})
+	_ = writer.Write([]string{"pending_withdrawals", strconv.FormatInt(report.PendingWithdrawals, 10)})
 	writer.Flush()
 }
 
@@ -231,7 +233,7 @@ func writeProfitLossReportCSV(c *gin.Context, report ProfitLossReport) {
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	writer := csv.NewWriter(c.Writer)
 	_ = writer.Write([]string{"period_start", "period_end", "total_income", "total_cost", "net_profit", "income_transactions", "cost_transactions", "margin_percent"})
-	_ = writer.Write([]string{report.PeriodStart, report.PeriodEnd, strconv.Itoa(report.TotalIncome), strconv.Itoa(report.TotalCost), strconv.Itoa(report.NetProfit), strconv.Itoa(report.IncomeTransactions), strconv.Itoa(report.CostTransactions), strconv.Itoa(report.MarginPercent)})
+	_ = writer.Write([]string{report.PeriodStart, report.PeriodEnd, strconv.FormatInt(report.TotalIncome, 10), strconv.FormatInt(report.TotalCost, 10), strconv.FormatInt(report.NetProfit, 10), strconv.FormatInt(report.IncomeTransactions, 10), strconv.FormatInt(report.CostTransactions, 10), strconv.Itoa(report.MarginPercent)})
 	writer.Flush()
 }
 
@@ -329,13 +331,17 @@ func (s *Server) adminOperationalReports() (AdminOperationalReports, error) {
 	}
 	savingsTotal := sumChartValues(savings)
 	remainingLoan := chartValueByLabel(loanExposure, "remaining_balance")
+	balance, err := checkedReportSub(savingsTotal, remainingLoan)
+	if err != nil {
+		return AdminOperationalReports{}, err
+	}
 	return AdminOperationalReports{
 		SavingsByCategory:     savings,
 		WithdrawalsByStatus:   withdrawals,
 		LoanExposure:          loanExposure,
 		RepaymentProgress:     repaymentProgress,
 		SavingsLoanComparison: dashboardSavingsLoanComparisonChart(savingsTotal, remainingLoan),
-		BalanceTrend:          dashboardBalanceTrendChart(savingsTotal - remainingLoan),
+		BalanceTrend:          dashboardBalanceTrendChart(balance),
 		SavingsByMember:       savingsByMember,
 		WithdrawalsByMember:   withdrawalsByMember,
 		Loans:                 loans,
@@ -358,13 +364,26 @@ func (s *Server) balanceReport() (BalanceReport, error) {
 	}
 	totalSavings := sumChartValues(savings)
 	totalOutstandingLoan := chartValueByLabel(loanExposure, "remaining_balance")
-	cashAsset := totalSavings - pendingWithdrawals
-	totalAssets := cashAsset + totalOutstandingLoan
+	cashAsset, err := checkedReportSub(totalSavings, pendingWithdrawals)
+	if err != nil {
+		return BalanceReport{}, err
+	}
+	totalAssets, err := checkedReportAdd(cashAsset, totalOutstandingLoan)
+	if err != nil {
+		return BalanceReport{}, err
+	}
 	totalLiabilities := totalSavings
-	totalEquity := totalAssets - totalLiabilities
+	totalEquity, err := checkedReportSub(totalAssets, totalLiabilities)
+	if err != nil {
+		return BalanceReport{}, err
+	}
+	operationalBalance, err := checkedReportSub(cashAsset, totalOutstandingLoan)
+	if err != nil {
+		return BalanceReport{}, err
+	}
 	liabilityRatio := 0
 	if totalAssets > 0 {
-		liabilityRatio = totalLiabilities * 100 / totalAssets
+		liabilityRatio = ratioPercent(totalLiabilities, totalAssets)
 	}
 	healthStatus := "Baik"
 	if liabilityRatio >= 80 {
@@ -376,7 +395,7 @@ func (s *Server) balanceReport() (BalanceReport, error) {
 		TotalSavings:         totalSavings,
 		TotalOutstandingLoan: totalOutstandingLoan,
 		PendingWithdrawals:   pendingWithdrawals,
-		OperationalBalance:   totalSavings - totalOutstandingLoan - pendingWithdrawals,
+		OperationalBalance:   operationalBalance,
 		TotalAssets:          totalAssets,
 		TotalLiabilities:     totalLiabilities,
 		TotalEquity:          totalEquity,
@@ -396,8 +415,8 @@ func (s *Server) balanceReport() (BalanceReport, error) {
 	return report, nil
 }
 
-func (s *Server) pendingWithdrawalAmount() (int, error) {
-	var amount int
+func (s *Server) pendingWithdrawalAmount() (int64, error) {
+	var amount int64
 	err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0) FROM withdrawal_requests WHERE status = 'pending'`).Scan(&amount)
 	return amount, err
 }
@@ -461,8 +480,8 @@ func (s *Server) profitLossReport(period ProfitLossPeriod) (ProfitLossReport, er
 		}
 	}
 
-	var savingDeposits, loanRepayments, savingWithdrawals int
-	var depositCount, repaymentCount, withdrawalCount int
+	var savingDeposits, loanRepayments, savingWithdrawals int64
+	var depositCount, repaymentCount, withdrawalCount int64
 	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM saving_records WHERE type = 'deposit' AND record_date >= $1 AND record_date <= $2`, dateFrom, dateTo).Scan(&savingDeposits, &depositCount); err != nil {
 		return ProfitLossReport{}, err
 	}
@@ -472,19 +491,28 @@ func (s *Server) profitLossReport(period ProfitLossPeriod) (ProfitLossReport, er
 	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM saving_records WHERE type = 'withdrawal' AND record_date >= $1 AND record_date <= $2`, dateFrom, dateTo).Scan(&savingWithdrawals, &withdrawalCount); err != nil {
 		return ProfitLossReport{}, err
 	}
-	totalIncome := savingDeposits + loanRepayments
+	totalIncome, err := checkedReportAdd(savingDeposits, loanRepayments)
+	if err != nil {
+		return ProfitLossReport{}, err
+	}
 	totalCost := savingWithdrawals
-	totalActivity := totalIncome + totalCost
+	totalActivity, err := checkedReportAdd(totalIncome, totalCost)
+	if err != nil {
+		return ProfitLossReport{}, err
+	}
 	incomePercent := 0
 	costPercent := 0
 	if totalActivity > 0 {
-		incomePercent = totalIncome * 100 / totalActivity
-		costPercent = totalCost * 100 / totalActivity
+		incomePercent = chartPercent(totalIncome, totalActivity)
+		costPercent = chartPercent(totalCost, totalActivity)
 	}
-	netProfit := totalIncome - totalCost
+	netProfit, err := checkedReportSub(totalIncome, totalCost)
+	if err != nil {
+		return ProfitLossReport{}, err
+	}
 	marginPercent := 0
 	if totalIncome > 0 {
-		marginPercent = netProfit * 100 / totalIncome
+		marginPercent = ratioPercent(netProfit, totalIncome)
 	}
 	periodStart, err := time.Parse("2006-01-02", dateFrom)
 	if err != nil {
@@ -504,7 +532,7 @@ func (s *Server) profitLossReport(period ProfitLossPeriod) (ProfitLossReport, er
 		MarginPercent:      marginPercent,
 		IncomeTransactions: depositCount + repaymentCount,
 		CostTransactions:   withdrawalCount,
-		MonthlyAverage:     netProfit / monthCount,
+		MonthlyAverage:     netProfit / int64(monthCount),
 		PeriodStart:        periodStart.Format("02/01/2006"),
 		PeriodEnd:          periodEnd.Format("02/01/2006"),
 	}, nil
@@ -519,7 +547,7 @@ func monthsInclusive(start, end time.Time) int {
 }
 
 func (s *Server) savingsCategoryChart() (ChartSegments, error) {
-	values := map[string]int{"pokok": 0, "wajib": 0, "sukarela": 0}
+	values := map[string]int64{"pokok": 0, "wajib": 0, "sukarela": 0}
 	rows, err := s.db.Query(`SELECT category, COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount ELSE -amount END), 0) FROM saving_records GROUP BY category`)
 	if err != nil {
 		return nil, err
@@ -527,7 +555,7 @@ func (s *Server) savingsCategoryChart() (ChartSegments, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var category string
-		var value int
+		var value int64
 		if err := rows.Scan(&category, &value); err != nil {
 			return nil, err
 		}
@@ -544,7 +572,7 @@ func (s *Server) savingsCategoryChart() (ChartSegments, error) {
 }
 
 func (s *Server) withdrawalStatusChart() (ChartSegments, error) {
-	values := map[string]int{"pending": 0, "approved": 0, "rejected": 0}
+	values := map[string]int64{"pending": 0, "approved": 0, "rejected": 0}
 	rows, err := s.db.Query(`SELECT status, COUNT(*) FROM withdrawal_requests GROUP BY status`)
 	if err != nil {
 		return nil, err
@@ -552,7 +580,7 @@ func (s *Server) withdrawalStatusChart() (ChartSegments, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var status string
-		var value int
+		var value int64
 		if err := rows.Scan(&status, &value); err != nil {
 			return nil, err
 		}
@@ -569,7 +597,7 @@ func (s *Server) withdrawalStatusChart() (ChartSegments, error) {
 }
 
 func (s *Server) loanExposureChart() (ChartSegments, error) {
-	var approved, obligation, remaining, repaid int
+	var approved, obligation, remaining, repaid int64
 	if err := s.db.QueryRow(`SELECT COALESCE(SUM(approved_amount), 0), COALESCE(SUM(total_obligation), 0), COALESCE(SUM(remaining_balance), 0) FROM loans WHERE status <> 'cancelled'`).Scan(&approved, &obligation, &remaining); err != nil {
 		return nil, err
 	}
@@ -585,7 +613,7 @@ func (s *Server) loanExposureChart() (ChartSegments, error) {
 }
 
 func (s *Server) repaymentProgressChart() (ChartSegments, error) {
-	var scheduled, actual int
+	var scheduled, actual int64
 	if err := s.db.QueryRow(`SELECT COALESCE(SUM(total_obligation), 0) FROM loans WHERE status <> 'cancelled'`).Scan(&scheduled); err != nil {
 		return nil, err
 	}
@@ -657,7 +685,7 @@ func (s *Server) withdrawalReportByMember() ([]WithdrawalReportRow, error) {
 }
 
 func chartSegments(segments []ChartSegment) ChartSegments {
-	max := 0
+	var max int64
 	for _, segment := range segments {
 		if segment.Value > max {
 			max = segment.Value
@@ -668,7 +696,7 @@ func chartSegments(segments []ChartSegment) ChartSegments {
 			segments[i].Percent = 0
 			continue
 		}
-		segments[i].Percent = segments[i].Value * 100 / max
+		segments[i].Percent = chartPercent(segments[i].Value, max)
 		if segments[i].Value > 0 && segments[i].Percent < 4 {
 			segments[i].Percent = 4
 		}
@@ -685,15 +713,15 @@ func (segments ChartSegments) HasData() bool {
 	return false
 }
 
-func sumChartValues(segments ChartSegments) int {
-	total := 0
+func sumChartValues(segments ChartSegments) int64 {
+	var total int64
 	for _, segment := range segments {
 		total += segment.Value
 	}
 	return total
 }
 
-func chartValueByLabel(segments ChartSegments, label string) int {
+func chartValueByLabel(segments ChartSegments, label string) int64 {
 	for _, segment := range segments {
 		if segment.Label == label {
 			return segment.Value
@@ -702,13 +730,13 @@ func chartValueByLabel(segments ChartSegments, label string) int {
 	return 0
 }
 
-func dashboardSavingsLoanComparisonChart(savingsTotal, loanTotal int) LineChart {
+func dashboardSavingsLoanComparisonChart(savingsTotal, loanTotal int64) LineChart {
 	months := []string{"Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"}
-	values := []int{savingsTotal, loanTotal}
-	maxValue := nicePositiveAxisMax(maxInt(values...))
+	maxValue := nicePositiveAxisMax(maxInt64(savingsTotal, loanTotal))
+	scaled, scaledMaximum := scaleChartMoney([]int64{savingsTotal, loanTotal}, maxValue)
 	seriesValues := [][]int{
-		repeatedValues(savingsTotal, len(months)),
-		repeatedValues(loanTotal, len(months)),
+		repeatedValues(scaled[0], len(months)),
+		repeatedValues(scaled[1], len(months)),
 	}
 	return LineChart{
 		TitleKey:    "savings_loans_comparison",
@@ -720,13 +748,13 @@ func dashboardSavingsLoanComparisonChart(savingsTotal, loanTotal int) LineChart 
 			{Label: compactRupiahAxisLabel(0), X: 58, Y: 234},
 		},
 		Series: []LineChartSeries{
-			lineChartSeries("savings", "chart-line-simpanan", seriesValues[0], 0, maxValue),
-			lineChartSeries("pinjaman", "chart-line-pinjaman", seriesValues[1], 0, maxValue),
+			lineChartSeries("savings", "chart-line-simpanan", seriesValues[0], 0, scaledMaximum),
+			lineChartSeries("pinjaman", "chart-line-pinjaman", seriesValues[1], 0, scaledMaximum),
 		},
 	}
 }
 
-func dashboardBalanceTrendChart(balance int) LineChart {
+func dashboardBalanceTrendChart(balance int64) LineChart {
 	year := time.Now().Year()
 	months := []string{
 		fmt.Sprintf("Jan %d", year),
@@ -736,7 +764,8 @@ func dashboardBalanceTrendChart(balance int) LineChart {
 		fmt.Sprintf("Mei %d", year),
 		fmt.Sprintf("Jun %d", year),
 	}
-	maxValue := nicePositiveAxisMax(absInt(balance))
+	maxValue := nicePositiveAxisMax(absInt64(balance))
+	scaled, scaledMaximum := scaleChartMoney([]int64{balance}, maxValue)
 	return LineChart{
 		TitleKey: "balance_trend_6_months",
 		XTicks:   xAxisLabels(months, 76, 720, 252),
@@ -748,7 +777,7 @@ func dashboardBalanceTrendChart(balance int) LineChart {
 			{Label: compactRupiahAxisLabel(-maxValue), X: 58, Y: 234},
 		},
 		Series: []LineChartSeries{
-			lineChartSeries("neraca", "chart-line-neraca", repeatedValues(balance, len(months)), -maxValue, maxValue),
+			lineChartSeries("neraca", "chart-line-neraca", repeatedValues(scaled[0], len(months)), -scaledMaximum, scaledMaximum),
 		},
 	}
 }
@@ -810,18 +839,21 @@ func repeatedValues(value, count int) []int {
 	return values
 }
 
-func nicePositiveAxisMax(value int) int {
+func nicePositiveAxisMax(value int64) int64 {
 	if value <= 0 {
 		return 1
 	}
-	step := 500000
+	step := int64(500000)
 	if value <= step {
 		return step
+	}
+	if value > math.MaxInt64-(step-1) {
+		return math.MaxInt64
 	}
 	return ((value + step - 1) / step) * step
 }
 
-func compactRupiahAxisLabel(value int) string {
+func compactRupiahAxisLabel(value int64) string {
 	sign := ""
 	if value < 0 {
 		sign = "-"
@@ -841,8 +873,8 @@ func compactRupiahAxisLabel(value int) string {
 	}
 }
 
-func maxInt(values ...int) int {
-	max := 0
+func maxInt64(values ...int64) int64 {
+	var max int64
 	for _, value := range values {
 		if value > max {
 			max = value
@@ -851,11 +883,78 @@ func maxInt(values ...int) int {
 	return max
 }
 
-func absInt(value int) int {
+func absInt64(value int64) int64 {
 	if value < 0 {
+		if value == math.MinInt64 {
+			return math.MaxInt64
+		}
 		return -value
 	}
 	return value
+}
+
+func checkedReportAdd(left, right int64) (int64, error) {
+	if (right > 0 && left > math.MaxInt64-right) || (right < 0 && left < math.MinInt64-right) {
+		return 0, fmt.Errorf("report monetary total exceeds BIGINT capacity")
+	}
+	return left + right, nil
+}
+
+func checkedReportSub(left, right int64) (int64, error) {
+	if right == math.MinInt64 {
+		if left >= 0 {
+			return 0, fmt.Errorf("report monetary total exceeds BIGINT capacity")
+		}
+		return left - right, nil
+	}
+	return checkedReportAdd(left, -right)
+}
+
+func ratioPercent(value, total int64) int {
+	if total <= 0 {
+		return 0
+	}
+	numerator := new(big.Int).Mul(big.NewInt(value), big.NewInt(100))
+	percent64 := new(big.Int).Quo(numerator, big.NewInt(total))
+	maxInt := new(big.Int).SetUint64(uint64(^uint(0) >> 1))
+	minInt := new(big.Int).Neg(new(big.Int).Add(maxInt, big.NewInt(1)))
+	if percent64.Cmp(maxInt) > 0 {
+		return int(^uint(0) >> 1)
+	}
+	if percent64.Cmp(minInt) < 0 {
+		return -int(^uint(0)>>1) - 1
+	}
+	return int(percent64.Int64())
+}
+
+func chartPercent(value, total int64) int {
+	percent := ratioPercent(value, total)
+	if percent > 100 {
+		return 100
+	}
+	if percent < -100 {
+		return -100
+	}
+	return percent
+}
+
+// scaleChartMoney converts monetary int64 values only after choosing a common
+// divisor. Financial totals remain exact; only bounded SVG coordinates lose
+// sub-pixel monetary precision.
+func scaleChartMoney(values []int64, axisMaximum int64) ([]int, int) {
+	divisor := int64(1)
+	for axisMaximum/divisor > math.MaxInt32 {
+		divisor *= 1_000
+	}
+	scaled := make([]int, len(values))
+	for index, value := range values {
+		scaled[index] = int(value / divisor)
+	}
+	maximum := int(axisMaximum / divisor)
+	if maximum < 1 {
+		maximum = 1
+	}
+	return scaled, maximum
 }
 
 func (s *Server) exportSavingsCSV(c *gin.Context) {
@@ -866,7 +965,7 @@ func (s *Server) exportSavingsCSV(c *gin.Context) {
 	}
 	writeCSV(c, "simpanan-export.csv", []string{"member_no", "member", translate(languageFromRequest(c), "member_type"), "category", "type", "amount", "date", "reference_no", "note", "recorded_by"}, func(w *csv.Writer) error {
 		for _, record := range records {
-			if err := w.Write([]string{record.MemberNo, record.FullName, record.MemberTypeLabel, record.Category, record.Type, strconv.Itoa(record.Amount), record.RecordDate, record.ReferenceNo, record.Note, record.RecordedBy}); err != nil {
+			if err := w.Write([]string{record.MemberNo, record.FullName, record.MemberTypeLabel, record.Category, record.Type, strconv.FormatInt(record.Amount, 10), record.RecordDate, record.ReferenceNo, record.Note, record.RecordedBy}); err != nil {
 				return err
 			}
 		}
@@ -882,7 +981,7 @@ func (s *Server) exportWithdrawalRequestsCSV(c *gin.Context) {
 	}
 	writeCSV(c, "penarikan-export.csv", []string{"member_no", "member", translate(languageFromRequest(c), "member_type"), "amount", "status", "requested_at", "reviewed_at", "note", "review_note", "saving_record_id"}, func(w *csv.Writer) error {
 		for _, request := range requests {
-			if err := w.Write([]string{request.MemberNo, request.FullName, request.MemberTypeLabel, strconv.Itoa(request.Amount), request.Status, request.CreatedAt, request.ReviewedAt, request.Note, request.RejectionReason, request.SavingRecordID}); err != nil {
+			if err := w.Write([]string{request.MemberNo, request.FullName, request.MemberTypeLabel, strconv.FormatInt(request.Amount, 10), request.Status, request.CreatedAt, request.ReviewedAt, request.Note, request.RejectionReason, request.SavingRecordID}); err != nil {
 				return err
 			}
 		}
@@ -896,9 +995,13 @@ func (s *Server) exportLoansCSV(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	writeCSV(c, "pinjaman-export.csv", []string{"member_no", "member", translate(languageFromRequest(c), "member_type"), "approved_amount", "duration_months", "monthly_installment", "remaining_balance", "status", "approved_at", "start_date", "interest_rate_bps", "total_interest", "total_obligation", "next_due_date", "final_due_date"}, func(w *csv.Writer) error {
+	writeCSV(c, "pinjaman-export.csv", []string{"member_no", "member", translate(languageFromRequest(c), "member_type"), "approved_amount", "duration_months", "monthly_installment", "remaining_balance", "status", "approved_at", "start_date", "admin_fee_policy", "monthly_admin_fee", "total_admin_fee", "total_obligation", "next_due_date", "final_due_date"}, func(w *csv.Writer) error {
 		for _, loan := range loans {
-			if err := w.Write([]string{loan.MemberNo, loan.FullName, loan.MemberTypeLabel, strconv.Itoa(loan.ApprovedAmount), strconv.Itoa(loan.DurationMonths), strconv.Itoa(loan.MonthlyInstallment), strconv.Itoa(loan.RemainingBalance), loan.Status, loan.ApprovedAt, loan.StartDate, strconv.Itoa(loan.InterestRateBPS), strconv.Itoa(loan.TotalInterest), strconv.Itoa(loan.TotalObligation), loan.NextDueDate, loan.FinalDueDate}); err != nil {
+			monthlyAdminFee := ""
+			if loan.MonthlyAdminFee != nil {
+				monthlyAdminFee = strconv.FormatInt(*loan.MonthlyAdminFee, 10)
+			}
+			if err := w.Write([]string{loan.MemberNo, loan.FullName, loan.MemberTypeLabel, strconv.FormatInt(loan.ApprovedAmount, 10), strconv.Itoa(loan.DurationMonths), strconv.FormatInt(loan.MonthlyInstallment, 10), strconv.FormatInt(loan.RemainingBalance, 10), loan.Status, loan.ApprovedAt, loan.StartDate, loan.AdminFeePolicy, monthlyAdminFee, strconv.FormatInt(loan.TotalAdminFee, 10), strconv.FormatInt(loan.TotalObligation, 10), loan.NextDueDate, loan.FinalDueDate}); err != nil {
 				return err
 			}
 		}
@@ -914,7 +1017,7 @@ func (s *Server) exportRepaymentsCSV(c *gin.Context) {
 	}
 	writeCSV(c, "angsuran-export.csv", []string{"member_no", "member", translate(languageFromRequest(c), "member_type"), "loan_id", "amount", "date", "reference_no", "note"}, func(w *csv.Writer) error {
 		for _, repayment := range repayments {
-			if err := w.Write([]string{repayment.MemberNo, repayment.FullName, repayment.MemberTypeLabel, repayment.LoanID, strconv.Itoa(repayment.Amount), repayment.RecordDate, repayment.ReferenceNo, repayment.Note}); err != nil {
+			if err := w.Write([]string{repayment.MemberNo, repayment.FullName, repayment.MemberTypeLabel, repayment.LoanID, strconv.FormatInt(repayment.Amount, 10), repayment.RecordDate, repayment.ReferenceNo, repayment.Note}); err != nil {
 				return err
 			}
 		}

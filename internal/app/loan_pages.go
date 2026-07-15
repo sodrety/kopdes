@@ -99,14 +99,16 @@ func (s *Server) exportLoanPDF(c *gin.Context) {
 	lines := []string{
 		fmt.Sprintf("%s: %s", translate(lang, "loan_id"), loan.ID),
 		fmt.Sprintf("%s: Rp %d", translate(lang, "approved_principal"), loan.ApprovedAmount),
-		fmt.Sprintf("%s: %.2f%%", translate(lang, "monthly_interest_rate"), float64(loan.InterestRateBPS)/100),
-		fmt.Sprintf("%s: Rp %d", translate(lang, "total_interest"), loan.TotalInterest),
+		fmt.Sprintf("%s: Rp %d", translate(lang, "total_admin_fee"), loan.TotalAdminFee),
 		fmt.Sprintf("%s: Rp %d", translate(lang, "total_obligation"), loan.TotalObligation),
 		fmt.Sprintf("%s: Rp %d", translate(lang, "remaining_balance"), loan.RemainingBalance),
 		fmt.Sprintf("%s: %s", translate(lang, "start_date"), loan.StartDate),
 		fmt.Sprintf("%s: %s", translate(lang, "next_due_date"), loan.NextDueDate),
 		fmt.Sprintf("%s: %s", translate(lang, "final_due_date"), loan.FinalDueDate),
 		fmt.Sprintf("%s: %s", translate(lang, "status"), translate(lang, "status_"+loan.Status)),
+	}
+	if loan.MonthlyAdminFee != nil {
+		lines = append(lines, fmt.Sprintf("%s: Rp %d", translate(lang, "monthly_admin_fee"), *loan.MonthlyAdminFee))
 	}
 	for _, item := range installments {
 		lines = append(lines, fmt.Sprintf("#%d | %s | Rp %d | %s Rp %d", item.InstallmentNo, item.DueDate, item.ScheduledAmount, translate(lang, "paid_amount"), item.PaidAmount))
