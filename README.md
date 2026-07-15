@@ -80,8 +80,23 @@ The app runs migrations on startup and records applied versions in `schema_migra
 
 ## Test
 
+The test suite requires Go from `go.mod` and Node.js 22.14.0. Node runs the browser-side Rupiah input tests invoked by the Go suite.
+
 ```sh
 go test ./...
+```
+
+Run the JavaScript test directly with:
+
+```sh
+node --test internal/app/static/vendor/rupiah-inputs.test.mjs
+```
+
+The migration 15 PostgreSQL integration harness is opt-in so the ordinary test suite does not depend on an available database. Point it at a disposable PostgreSQL database; each test creates and drops its own isolated schema:
+
+```sh
+KOPDES_POSTGRES_TEST_URL='postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable' \
+  go test -tags=postgres_integration ./internal/app -run TestLegacyLoanPostgresMigration -count=1
 ```
 
 ## Frontend Assets

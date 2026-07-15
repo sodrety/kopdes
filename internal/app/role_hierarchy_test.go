@@ -6,9 +6,109 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestConcurrentLoanApprovalsCreateOneDecisionPerStageAndOneLoan(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, managerToken, `{"member_no":"HIER-CONCURRENT","full_name":"Concurrent Loan Member","join_date":"2026-07-01","status":"active"}`)
+	if _, err := fixture.db.Exec(`UPDATE users SET member_id=$1 WHERE id='member-user-id'`, member.ID); err != nil {
+		t.Fatalf("link member user: %v", err)
+	}
+	requestID := fixture.createLoanRequest(t, fixture.login(t, "member@coop.test", "password"), 1_000_000, 10)
+	managerBody := `{"approved_amount":900000,"duration_months":9,"start_date":"` + time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02") + `"}`
+
+	runConcurrent := func(token, body string) []int {
+		t.Helper()
+		codes := make([]int, 2)
+		var wait sync.WaitGroup
+		wait.Add(2)
+		for index := range codes {
+			go func(index int) {
+				defer wait.Done()
+				codes[index] = hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", token, body).Code
+			}(index)
+		}
+		wait.Wait()
+		return codes
+	}
+
+	managerCodes := runConcurrent(managerToken, managerBody)
+	assertExactlyOneOK := func(stage string, codes []int) {
+		t.Helper()
+		ok := 0
+		for _, code := range codes {
+			if code == http.StatusOK {
+				ok++
+			}
+		}
+		if ok != 1 {
+			t.Fatalf("%s concurrent statuses=%v, want exactly one success", stage, codes)
+		}
+	}
+	assertExactlyOneOK("manager", managerCodes)
+	assertCount := func(query string, expected int) {
+		t.Helper()
+		var count int
+		if err := fixture.db.QueryRow(query).Scan(&count); err != nil || count != expected {
+			t.Fatalf("count query=%q got=%d err=%v want=%d", query, count, err, expected)
+		}
+	}
+	assertCount(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id='`+requestID+`' AND stage='manager'`, 1)
+	assertCount(`SELECT COUNT(*) FROM loans WHERE loan_request_id='`+requestID+`'`, 0)
+
+	for _, credentials := range []struct{ email, password string }{{"ketua-i@coop.test", "password"}, {"ketua-ii@coop.test", "password"}} {
+		token := fixture.login(t, credentials.email, credentials.password)
+		if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", token, `{}`); response.Code != http.StatusOK {
+			t.Fatalf("advance to final stage: %d %s", response.Code, response.Body.String())
+		}
+	}
+	finalCodes := runConcurrent(fixture.login(t, "ketua-utama@coop.test", "password"), `{}`)
+	assertExactlyOneOK("ketua_utama", finalCodes)
+	assertCount(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id='`+requestID+`' AND stage='ketua_utama'`, 1)
+	assertCount(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id='`+requestID+`'`, 4)
+	assertCount(`SELECT COUNT(*) FROM loans WHERE loan_request_id='`+requestID+`'`, 1)
+	assertCount(`SELECT COUNT(*) FROM loan_requests WHERE id='`+requestID+`' AND status='approved' AND current_approval_stage IS NULL`, 1)
+}
+
+func TestManagerMayDecreaseLoanTermsAndLaterStagesCannotReplaceSnapshot(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, managerToken, `{"member_no":"HIER-LOCK","full_name":"Locked Terms Member","join_date":"2026-07-01","status":"active"}`)
+	if _, err := fixture.db.Exec(`UPDATE users SET member_id=$1 WHERE id='member-user-id'`, member.ID); err != nil {
+		t.Fatalf("link member user: %v", err)
+	}
+	requestID := fixture.createLoanRequest(t, fixture.login(t, "member@coop.test", "password"), 1_000_000, 10)
+	startDate := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
+	managerBody := `{"approved_amount":800000,"duration_months":8,"start_date":"` + startDate + `"}`
+	if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, managerBody); response.Code != http.StatusOK {
+		t.Fatalf("manager decrease: %d %s", response.Code, response.Body.String())
+	}
+
+	ketuaIToken := fixture.login(t, "ketua-i@coop.test", "password")
+	tamperingPayload := `{"approved_amount":950000,"duration_months":20,"start_date":"2099-01-01","note":"review only"}`
+	if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", ketuaIToken, tamperingPayload); response.Code != http.StatusOK {
+		t.Fatalf("later-stage review payload: %d %s", response.Code, response.Body.String())
+	}
+	for _, credentials := range []struct{ email, password string }{{"ketua-ii@coop.test", "password"}, {"ketua-utama@coop.test", "password"}} {
+		if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", fixture.login(t, credentials.email, credentials.password), `{}`); response.Code != http.StatusOK {
+			t.Fatalf("complete approval: %d %s", response.Code, response.Body.String())
+		}
+	}
+
+	var amount, monthlyFee, totalFee, obligation int64
+	var duration int
+	var storedStart string
+	if err := fixture.db.QueryRow(`SELECT approved_amount,duration_months,start_date,monthly_admin_fee,total_admin_fee,total_obligation FROM loans WHERE loan_request_id=$1`, requestID).Scan(&amount, &duration, &storedStart, &monthlyFee, &totalFee, &obligation); err != nil {
+		t.Fatalf("read locked final terms: %v", err)
+	}
+	if amount != 800_000 || duration != 8 || storedStart != startDate || monthlyFee != 8_000 || totalFee != 64_000 || obligation != 864_000 {
+		t.Fatalf("later stage replaced manager snapshot: amount=%d duration=%d start=%s monthly=%d total=%d obligation=%d", amount, duration, storedStart, monthlyFee, totalFee, obligation)
+	}
+}
 
 func TestLoanApprovalRequiresEveryOfficerStageAndCreatesLoanOnlyAtFinalStage(t *testing.T) {
 	fixture := newTestFixture(t)
@@ -28,7 +128,7 @@ func TestLoanApprovalRequiresEveryOfficerStageAndCreatesLoanOnlyAtFinalStage(t *
 		t.Fatalf("expected wrong-stage approval status 403, got %d: %s", response.Code, response.Body.String())
 	}
 
-	managerBody := `{"approved_amount":900000,"duration_months":9,"start_date":"` + time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02") + `","interest_rate_bps":125,"note":"Terms verified"}`
+	managerBody := `{"approved_amount":900000,"duration_months":9,"start_date":"` + time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02") + `","note":"Terms verified"}`
 	stages := []struct {
 		token     string
 		body      string
@@ -64,15 +164,34 @@ func TestLoanApprovalRequiresEveryOfficerStageAndCreatesLoanOnlyAtFinalStage(t *
 		}
 	}
 
-	var decisions, approvedAmount, interestRateBPS int
+	var decisions int
+	var approvedAmount, monthlyAdminFee, totalAdminFee int64
 	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id=$1`, requestID).Scan(&decisions); err != nil {
 		t.Fatalf("count decisions: %v", err)
 	}
-	if err := fixture.db.QueryRow(`SELECT approved_amount,interest_rate_bps FROM loans WHERE loan_request_id=$1`, requestID).Scan(&approvedAmount, &interestRateBPS); err != nil {
+	if err := fixture.db.QueryRow(`SELECT approved_amount,monthly_admin_fee,total_admin_fee FROM loans WHERE loan_request_id=$1`, requestID).Scan(&approvedAmount, &monthlyAdminFee, &totalAdminFee); err != nil {
 		t.Fatalf("read final loan: %v", err)
 	}
-	if decisions != 4 || approvedAmount != 900_000 || interestRateBPS != 125 {
-		t.Fatalf("unexpected final loan decisions=%d amount=%d rate=%d", decisions, approvedAmount, interestRateBPS)
+	if decisions != 4 || approvedAmount != 900_000 || monthlyAdminFee != 9_000 || totalAdminFee != 81_000 {
+		t.Fatalf("unexpected final loan decisions=%d amount=%d monthly fee=%d total fee=%d", decisions, approvedAmount, monthlyAdminFee, totalAdminFee)
+	}
+}
+
+func TestFinalLoanApprovalCopiesTheRequestedLoanType(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, managerToken, `{"member_no":"HIER-TYPE","full_name":"Typed Loan Member","join_date":"2026-07-01","status":"active"}`)
+	if _, err := fixture.db.Exec(`UPDATE users SET member_id=$1 WHERE id='member-user-id'`, member.ID); err != nil {
+		t.Fatalf("link member user: %v", err)
+	}
+	requestID := fixture.createLoanRequest(t, fixture.login(t, "member@coop.test", "password"), 1_000_000, 10)
+	fixture.approveLoanRequest(t, managerToken, requestID, 900_000, 9)
+	var requestType, loanType string
+	if err := fixture.db.QueryRow(`SELECT lr.loan_type,l.loan_type FROM loan_requests lr JOIN loans l ON l.loan_request_id=lr.id WHERE lr.id=$1`, requestID).Scan(&requestType, &loanType); err != nil {
+		t.Fatalf("read finalized typed Loan: %v", err)
+	}
+	if requestType != "regular" || loanType != requestType {
+		t.Fatalf("final Loan Type=%q, want request snapshot %q", loanType, requestType)
 	}
 }
 
@@ -235,6 +354,49 @@ func TestApprovalNotificationsMoveToNextRoleAndFinishWithMember(t *testing.T) {
 	}
 	if events != 5 {
 		t.Fatalf("expected four stage events and one outcome event, got %d", events)
+	}
+}
+
+func TestManagerChangedLoanTermsNotifyMember(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, managerToken, `{"member_no":"HIER-TERMS","full_name":"Terms Changed Member","join_date":"2026-07-01","status":"active"}`)
+	if _, err := fixture.db.Exec(`UPDATE users SET member_id=$1 WHERE id='member-user-id'`, member.ID); err != nil {
+		t.Fatalf("link member user: %v", err)
+	}
+	memberToken := fixture.login(t, "member@coop.test", "password")
+	requestID := fixture.createLoanRequest(t, memberToken, 500_000, 5)
+
+	managerBody := `{"approved_amount":600000,"duration_months":5,"start_date":"` + time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02") + `"}`
+	if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, managerBody); response.Code != http.StatusOK {
+		t.Fatalf("manager approval: %d: %s", response.Code, response.Body.String())
+	}
+	var count int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM notifications n JOIN notification_events e ON e.id=n.event_id WHERE n.user_id='member-user-id' AND n.audience='member' AND n.resolved_at IS NULL AND e.event_type='loan_terms_changed'`).Scan(&count); err != nil {
+		t.Fatalf("count terms changed notifications: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one active terms-changed member notification, got %d", count)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/notifications?audience=member", nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("notifications status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Notifications []struct {
+			Title string `json:"title"`
+			Link  string `json:"link"`
+		} `json:"notifications"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode notifications: %v", err)
+	}
+	if len(payload.Notifications) != 1 || payload.Notifications[0].Title != "Loan terms changed" || payload.Notifications[0].Link != "/member/loan-requests" {
+		t.Fatalf("unexpected member notification: %+v", payload.Notifications)
 	}
 }
 

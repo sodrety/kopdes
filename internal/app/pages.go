@@ -19,7 +19,7 @@ var pageTemplates = template.Must(template.New("").Funcs(template.FuncMap{
 	"dict":    templateDict,
 	"nominal": formatNominal,
 	"rate":    func(bps int) string { return fmt.Sprintf("%.2f%%", float64(bps)/100) },
-	"sub":     func(a, b int) int { return a - b },
+	"sub":     func(a, b int64) int64 { return a - b },
 	"t":       translateTemplate,
 }).ParseFS(pageTemplateFS, "templates/*.tmpl"))
 
@@ -41,6 +41,11 @@ func templateDict(values ...any) (map[string]any, error) {
 func formatNominal(value any) string {
 	var raw string
 	switch v := value.(type) {
+	case *int64:
+		if v == nil {
+			return "—"
+		}
+		raw = fmt.Sprintf("%d", *v)
 	case int:
 		raw = fmt.Sprintf("%d", v)
 	case int8:
@@ -389,7 +394,7 @@ func (s *Server) memberLoanRequestsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	total := 0
+	var total int64
 	for _, loan := range outstanding {
 		total += loan.RemainingBalance
 	}

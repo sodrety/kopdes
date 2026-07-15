@@ -1,0 +1,5 @@
+# Use fixed type-based Admin Fees for Loans
+
+Accepted. Supersedes the Bunga terminology, configurable rate, and flat-rate policy portions of ADRs 0009 and 0011. Every new Loan Request requires a Member-selected Loan Type. **Regular** applies a monthly Admin Fee of 1% to the first Rp25,000,000 of approved principal and 1.5% to the excess, multiplied by a tenor of at most 24 months. **Barang Sekunder** applies a one-time 20% Admin Fee with a tenor of at most 12 months. **Pembelian Barang/Paylater** applies a one-time 5% Admin Fee with a fixed one-month tenor. These rules are fixed and cannot be overridden by an Officer.
+
+The Manager may set the proposed amount and tenor above or below the Member's request, subject to the selected Loan Type's tenor limit. Manager approval snapshots the fee policy and calculated obligation for later approval stages. Admin Fees are rounded to whole Rupiah using half-up rounding only when a fractional Rupiah occurs, and Total Obligation is divided evenly across the tenor with any remainder assigned to the final installment. Historical-obligation migration is governed by ADR 0013.

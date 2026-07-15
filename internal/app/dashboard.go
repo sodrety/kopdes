@@ -9,18 +9,18 @@ import (
 )
 
 type AdminDashboardSummary struct {
-	TotalMembers         int `json:"total_members"`
-	ActiveMembers        int `json:"active_members"`
-	TotalSavings         int `json:"total_savings"`
-	ActiveLoans          int `json:"active_loans"`
-	TotalOutstandingLoan int `json:"total_outstanding_loan"`
-	PendingLoanRequests  int `json:"pending_loan_requests"`
+	TotalMembers         int   `json:"total_members"`
+	ActiveMembers        int   `json:"active_members"`
+	TotalSavings         int64 `json:"total_savings"`
+	ActiveLoans          int   `json:"active_loans"`
+	TotalOutstandingLoan int64 `json:"total_outstanding_loan"`
+	PendingLoanRequests  int   `json:"pending_loan_requests"`
 }
 
 type MemberDashboardSummary struct {
-	SavingBalance        int             `json:"saving_balance"`
+	SavingBalance        int64           `json:"saving_balance"`
 	ActiveLoan           *Loan           `json:"active_loan"`
-	RemainingLoanBalance int             `json:"remaining_loan_balance"`
+	RemainingLoanBalance int64           `json:"remaining_loan_balance"`
 	LatestSavings        []SavingRecord  `json:"latest_savings"`
 	LatestRepayments     []LoanRepayment `json:"latest_repayments"`
 	LoanRequests         []LoanRequest   `json:"loan_requests"`

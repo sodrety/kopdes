@@ -27,7 +27,7 @@ func TestMemberBackedOfficerMigrationKeepsCanonicalMemberIdentity(t *testing.T) 
 	if err := PrepareLegacyOfficerMappings(db, map[string]string{"legacy-manager@coop.test": "member-manager"}); err != nil {
 		t.Fatalf("prepare mapping: %v", err)
 	}
-	if err := Migrate(db); err != nil {
+	if err := applyMigration(db, migrations[12]); err != nil {
 		t.Fatalf("migrate to v13: %v", err)
 	}
 

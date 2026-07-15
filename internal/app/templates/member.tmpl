@@ -19,6 +19,7 @@
         <thead>
           <tr>
             <th>{{t $.Lang "amount"}}</th>
+            <th>{{t $.Lang "loan_type"}}</th>
             <th>{{t $.Lang "duration"}}</th>
             <th>{{t $.Lang "status"}}</th>
             <th>{{t $.Lang "purpose"}}</th>
@@ -29,6 +30,7 @@
           {{range .Dashboard.LoanRequests}}
           <tr>
             <td>{{nominal .RequestedAmount}}</td>
+            <td>{{template "loan-type-label" (dict "Lang" $.Lang "LoanType" .LoanType "LegacyTerms" .LegacyTerms)}}</td>
             <td>{{.DurationMonths}} {{t $.Lang "months"}}</td>
             <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
             <td>{{.Purpose}}</td>
@@ -114,6 +116,7 @@
       {{range .OutstandingLoans}}
       {{if eq .Status "active"}}<p>{{t $.Lang "active_loan"}}</p>{{end}}
       <div class="detail-grid">
+        <div><span>{{t $.Lang "loan_type"}}</span><strong>{{template "loan-type-label" (dict "Lang" $.Lang "LoanType" .LoanType "LegacyTerms" .LegacyTerms)}}</strong></div>
         <div><span>{{t $.Lang "approved_amount"}}</span><strong>{{nominal .ApprovedAmount}}</strong></div>
         <div><span>{{t $.Lang "monthly_installment"}}</span><strong>{{nominal .MonthlyInstallment}}</strong></div>
         <div><span>{{t $.Lang "remaining_balance"}}</span><strong>{{nominal .RemainingBalance}}</strong></div>
@@ -205,7 +208,11 @@
       <article class="panel">
         <h2>{{t .Lang "submit_withdrawal_request"}}</h2>
         <form method="post" action="/api/member/withdrawal-requests" hx-post="/api/member/withdrawal-requests" hx-target="#withdrawal-request-error" hx-swap="innerHTML">
-          <label>{{t .Lang "amount"}} <input name="amount" type="number" min="1" max="{{.Summary.AvailableWithdrawalBalance}}" required></label>
+          <label>{{t .Lang "amount"}}
+            <input name="amount" type="text" inputmode="numeric" placeholder="Rp 0" data-rupiah-input data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="{{.Summary.AvailableWithdrawalBalance}}" data-rupiah-max-invalid="{{t .Lang "error_withdrawal_amount_over_available"}}" aria-describedby="withdrawal-amount-hint" aria-errormessage="withdrawal-amount-error" required>
+            <small id="withdrawal-amount-hint">{{t .Lang "rupiah_input_hint"}}</small>
+            <small id="withdrawal-amount-error" class="form-error-message" aria-live="polite" hidden></small>
+          </label>
           <label>{{t .Lang "note"}} <input name="note"></label>
           <button type="submit">{{t .Lang "submit_withdrawal_request"}}</button>
         </form>
@@ -255,10 +262,11 @@
         <article class="loan-summary-card {{if .IsOverdue}}loan-overdue{{end}}">
           <header><strong>{{t $.Lang (printf "status_%s" .Status)}}</strong>{{if .IsOverdue}}<span>{{t $.Lang "overdue"}}</span>{{end}}</header>
           <dl>
+            <div><dt>{{t $.Lang "loan_type"}}</dt><dd>{{template "loan-type-label" (dict "Lang" $.Lang "LoanType" .LoanType "LegacyTerms" .LegacyTerms)}}</dd></div>
             <div><dt>{{t $.Lang "remaining_balance"}}</dt><dd>Rp {{nominal .RemainingBalance}}</dd></div>
             <div><dt>{{t $.Lang "approved_principal"}}</dt><dd>Rp {{nominal .ApprovedAmount}}</dd></div>
             <div><dt>{{t $.Lang "start_date"}}</dt><dd>{{.StartDate}}</dd></div>
-            <div><dt>{{t $.Lang "monthly_interest_rate"}}</dt><dd>{{rate .InterestRateBPS}}</dd></div>
+			<div><dt>{{t $.Lang "monthly_admin_fee"}}</dt><dd>Rp {{nominal .MonthlyAdminFee}}</dd></div>
             <div><dt>{{t $.Lang "next_due_date"}}</dt><dd>{{.NextDueDate}}</dd></div>
             <div><dt>{{t $.Lang "final_due_date"}}</dt><dd>{{.FinalDueDate}}</dd></div>
           </dl>
@@ -270,10 +278,16 @@
     <section class="two-column">
       <article class="panel">
         <h2>{{t .Lang "submit_loan_request"}}</h2>
-        <form method="post" action="/api/member/loan-requests" hx-post="/api/member/loan-requests" hx-target="#loan-request-error" hx-swap="innerHTML">
-          <label>{{t .Lang "requested_amount"}} <input name="requested_amount" type="number" min="1" required></label>
-          <label>{{t .Lang "duration_months"}} <input name="duration_months" type="number" min="1" max="120" required></label>
-          <label>{{t .Lang "purpose"}} <input name="purpose"></label>
+        <form method="post" action="/api/member/loan-requests" hx-post="/api/member/loan-requests" hx-target="#loan-request-error" hx-swap="innerHTML" data-loan-fee-preview data-monthly-admin-fee-label="{{t .Lang "monthly_admin_fee"}}" data-total-admin-fee-label="{{t .Lang "total_admin_fee"}}" data-total-obligation-label="{{t .Lang "total_obligation"}}" data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}">
+          <label>{{t .Lang "loan_type"}} <select name="loan_type" data-loan-type required><option value="">{{t .Lang "select_loan_type"}}</option><option value="regular">{{t .Lang "loan_type_regular"}}</option><option value="secondary_goods">{{t .Lang "loan_type_secondary_goods"}}</option><option value="goods_purchase_paylater">{{t .Lang "loan_type_goods_purchase_paylater"}}</option></select></label>
+		  <label>{{t .Lang "requested_amount"}}
+            <input name="requested_amount" type="text" inputmode="numeric" placeholder="Rp 0" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" aria-describedby="loan-request-amount-hint" aria-errormessage="loan-request-amount-error" required>
+            <small id="loan-request-amount-hint">{{t .Lang "rupiah_input_hint"}}</small>
+            <small id="loan-request-amount-error" class="form-error-message" aria-live="polite" hidden></small>
+          </label>
+		  <label>{{t .Lang "duration_months"}} <input name="duration_months" type="number" min="1" max="24" data-loan-duration required></label>
+          <p class="loan-fee-preview" data-loan-fee-output aria-live="polite" hidden></p>
+		  <label>{{t .Lang "purpose"}} <input name="purpose" required></label>
           <button type="submit" {{if .OutstandingLoans}}disabled aria-disabled="true" title="{{t .Lang "loan_request_blocked_outstanding"}}"{{end}}>{{t .Lang "submit_loan_request"}}</button>
         </form>
 {{template "form-error" (dict "ID" "loan-request-error")}}
@@ -285,6 +299,7 @@
           <thead>
             <tr>
               <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "loan_type"}}</th>
               <th>{{t $.Lang "duration"}}</th>
               <th>{{t $.Lang "status"}}</th>
               <th>{{t $.Lang "purpose"}}</th>
@@ -295,6 +310,7 @@
             {{range .LoanRequests}}
             <tr>
               <td>{{nominal .RequestedAmount}}</td>
+              <td>{{template "loan-type-label" (dict "Lang" $.Lang "LoanType" .LoanType "LegacyTerms" .LegacyTerms)}}</td>
               <td>{{.DurationMonths}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>{{.Purpose}}</td>

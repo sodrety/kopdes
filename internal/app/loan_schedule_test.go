@@ -81,17 +81,113 @@ func TestCalculateLoanScheduleValidatesInputs(t *testing.T) {
 	}
 }
 
-func TestParseInterestRatePercentExactHundredths(t *testing.T) {
-	for input, want := range map[string]int{"0": 0, "1": 100, "1.25": 125, "10.00": 1000, "0.01": 1} {
-		got, err := parseInterestRatePercent(input)
-		if err != nil || got != want {
-			t.Fatalf("parse %q = %d, %v; want %d", input, got, err, want)
+func TestCalculateRegularLoanScheduleUsesTieredMonthlyAdminFee(t *testing.T) {
+	calculation, err := calculateRegularLoanSchedule(30_000_000, 24, "2026-01-31")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calculation.MonthlyAdminFee != 325_000 || calculation.TotalAdminFee != 7_800_000 || calculation.TotalObligation != 37_800_000 {
+		t.Fatalf("unexpected Regular Loan calculation: %+v", calculation)
+	}
+	var scheduled int64
+	for _, installment := range calculation.Installments {
+		scheduled += installment.ScheduledAmount
+	}
+	if len(calculation.Installments) != 24 || scheduled != calculation.TotalObligation {
+		t.Fatalf("unexpected installment schedule: count=%d sum=%d", len(calculation.Installments), scheduled)
+	}
+}
+
+func TestCalculateRegularLoanScheduleBoundariesRoundingAndRemainder(t *testing.T) {
+	for _, tc := range []struct {
+		name, date                 string
+		principal                  int64
+		duration                   int
+		monthly, total, obligation int64
+	}{
+		{"first tier boundary", "2026-01-01", 25_000_000, 1, 250_000, 250_000, 25_250_000},
+		{"one month", "2026-01-01", 50, 1, 1, 1, 51},
+		{"twenty four months", "2026-01-01", 25_000_001, 24, 250_000, 6_000_000, 31_000_001},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := calculateRegularLoanSchedule(tc.principal, tc.duration, tc.date)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.MonthlyAdminFee != tc.monthly || got.TotalAdminFee != tc.total || got.TotalObligation != tc.obligation {
+				t.Fatalf("got monthly=%d total=%d obligation=%d", got.MonthlyAdminFee, got.TotalAdminFee, got.TotalObligation)
+			}
+		})
+	}
+	remainder, err := calculateRegularLoanSchedule(101, 2, "2026-01-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remainder.Installments[0].ScheduledAmount != 51 || remainder.Installments[1].ScheduledAmount != 52 {
+		t.Fatalf("remainder schedule = %+v", remainder.Installments)
+	}
+}
+
+func TestCalculateRegularLoanScheduleRejectsInvalidAndOverflowingInputs(t *testing.T) {
+	for _, tc := range []struct {
+		principal int64
+		duration  int
+	}{
+		{0, 1}, {1, 0}, {1, 25}, {math.MaxInt64, 24},
+	} {
+		if _, err := calculateRegularLoanSchedule(tc.principal, tc.duration, "2026-01-01"); err == nil {
+			t.Fatalf("expected error for principal=%d duration=%d", tc.principal, tc.duration)
 		}
 	}
-	for _, input := range []string{"", "-1", "10.01", "11", "1.001", "one", ".5", "999999999999999999999999999999999999", "18446744073709551615.99"} {
-		if _, err := parseInterestRatePercent(input); err == nil {
-			t.Fatalf("expected %q to fail", input)
+}
+
+func TestRegularLoanAdminFeeNumeratorOverflowBoundary(t *testing.T) {
+	firstTierNumerator := regularLoanFirstTierLimit * 100
+	maximumExcess := (math.MaxInt64 - firstTierNumerator) / 150
+	maximumPrincipal := regularLoanFirstTierLimit + maximumExcess
+
+	fee, err := calculateRegularLoanMonthlyAdminFeeV1(maximumPrincipal)
+	if err != nil {
+		t.Fatalf("exact safe numerator boundary rejected: %v", err)
+	}
+	expectedNumerator := firstTierNumerator + maximumExcess*150
+	expectedFee := expectedNumerator / 10_000
+	if expectedNumerator%10_000 >= 5_000 {
+		expectedFee++
+	}
+	if fee != expectedFee {
+		t.Fatalf("boundary fee=%d want=%d", fee, expectedFee)
+	}
+	if _, err := calculateRegularLoanMonthlyAdminFeeV1(maximumPrincipal + 1); err == nil {
+		t.Fatal("principal one Rupiah past safe combined numerator boundary must fail")
+	}
+}
+
+func TestLoanFeeSnapshotValidationAndScheduleUseStoredObligation(t *testing.T) {
+	monthly := int64(325_000)
+	if err := validateLoanFeeSnapshot(regularLoanAdminFeePolicy, 30_000_000, 24, &monthly, 7_800_000, 37_800_000); err != nil {
+		t.Fatal(err)
+	}
+	for _, tampered := range []struct {
+		monthly *int64
+		total   int64
+		owed    int64
+	}{
+		{nil, 7_800_000, 37_800_000},
+		{&monthly, 7_800_001, 37_800_001},
+		{&monthly, 7_800_000, 37_800_001},
+	} {
+		if err := validateLoanFeeSnapshot(regularLoanAdminFeePolicy, 30_000_000, 24, tampered.monthly, tampered.total, tampered.owed); err == nil {
+			t.Fatal("expected tampered snapshot rejection")
 		}
+	}
+	wrongMonthly := int64(1)
+	if err := validateLoanFeeSnapshot(regularLoanAdminFeePolicy, 30_000_000, 24, &wrongMonthly, 24, 30_000_024); err == nil {
+		t.Fatal("expected policy-version validation to reject internally consistent but incorrect fee terms")
+	}
+	legacy, err := buildLoanScheduleFromObligation(1_000_121, 121, "2026-01-31", int(^uint(0)>>1))
+	if err != nil || len(legacy.Installments) != 121 || legacy.TotalObligation != 1_000_121 {
+		t.Fatalf("legacy stored-obligation schedule = %+v, err=%v", legacy, err)
 	}
 }
 
