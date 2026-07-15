@@ -131,10 +131,10 @@ func CreateMemberUser(db *sql.DB, email, password, memberID string) (User, error
 		Role:               "member",
 		MemberID:           sql.NullString{String: memberID, Valid: true},
 		Active:             true,
-		MustChangePassword: false,
+		MustChangePassword: true,
 	}
 	_, err = db.Exec(
-		`INSERT INTO users (id, email, password_hash, role, member_id, historical_identity) VALUES ($1, $2, $3, 'member', $4, FALSE)`,
+		`INSERT INTO users (id, email, password_hash, role, member_id, must_change_password, historical_identity) VALUES ($1, $2, $3, 'member', $4, TRUE, FALSE)`,
 		user.ID,
 		user.Email,
 		string(hash),

@@ -217,7 +217,6 @@
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_master_data"}}</span>
           <a class="sidebar-link {{if eq .Active "members"}}active{{end}}" href="/admin/members" title="{{t .Lang "members"}}"><i class="sidebar-icon" data-lucide="users"></i><span class="sidebar-label">{{t .Lang "members"}}</span></a>
-          {{if index .Permissions "officers.manage"}}<a class="sidebar-link {{if eq .Active "officers"}}active{{end}}" href="/admin/officers" title="{{t .Lang "officers"}}"><i class="sidebar-icon" data-lucide="shield-check"></i><span class="sidebar-label">{{t .Lang "officers"}}</span></a>{{end}}
         </div>
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_operations"}}</span>

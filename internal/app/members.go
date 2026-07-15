@@ -7,20 +7,28 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Member struct {
-	ID              string `json:"id"`
-	MemberNo        string `json:"member_no"`
-	FullName        string `json:"full_name"`
-	Phone           string `json:"phone"`
-	Address         string `json:"address"`
-	JoinDate        string `json:"join_date"`
-	Status          string `json:"status"`
-	MemberType      string `json:"member_type"`
-	MemberTypeLabel string `json:"member_type_label"`
-	CreatedAt       string `json:"created_at,omitempty"`
-	UpdatedAt       string `json:"updated_at,omitempty"`
+	ID                 string `json:"id"`
+	MemberNo           string `json:"member_no"`
+	FullName           string `json:"full_name"`
+	Phone              string `json:"phone"`
+	Address            string `json:"address"`
+	JoinDate           string `json:"join_date"`
+	Status             string `json:"status"`
+	MemberType         string `json:"member_type"`
+	MemberTypeLabel    string `json:"member_type_label"`
+	CreatedAt          string `json:"created_at,omitempty"`
+	UpdatedAt          string `json:"updated_at,omitempty"`
+	HasLogin           bool   `json:"has_login"`
+	LoginEmail         string `json:"login_email,omitempty"`
+	LoginActive        bool   `json:"login_active"`
+	MustChangePassword bool   `json:"must_change_password"`
+	OfficerID          string `json:"officer_id,omitempty"`
+	OfficerRole        string `json:"officer_role,omitempty"`
+	OfficerActive      bool   `json:"officer_active"`
 }
 
 type memberRequest struct {
@@ -45,6 +53,12 @@ func (s *Server) createMember(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_member_type"))
 		return
 	}
+	email := strings.TrimSpace(req.Email)
+	password := strings.TrimSpace(req.Password)
+	if email == "" || len(password) < 8 {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_member_login_required"))
+		return
+	}
 
 	member, err := s.insertMember(req)
 	if errors.Is(err, errInvalidMember) {
@@ -61,22 +75,14 @@ func (s *Server) createMember(c *gin.Context) {
 	}
 
 	loginCreated := false
-	email := strings.TrimSpace(req.Email)
-	password := strings.TrimSpace(req.Password)
-	if email != "" || password != "" {
-		if email == "" || password == "" {
-			respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Email and password must both be provided to create a member login")
-			return
-		}
-		if _, err := CreateMemberUser(s.db, email, password, member.ID); isUniqueViolation(err) {
-			respondError(c, http.StatusConflict, "DUPLICATE_DATA", "Email already exists")
-			return
-		} else if err != nil {
-			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
-			return
-		}
-		loginCreated = true
+	if _, err := CreateMemberUser(s.db, email, password, member.ID); isUniqueViolation(err) {
+		respondError(c, http.StatusConflict, "DUPLICATE_DATA", "Email already exists")
+		return
+	} else if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
 	}
+	loginCreated = true
 
 	respondCreatedOrHXRedirect(c, "/admin/members/"+member.ID, gin.H{
 		"id":                member.ID,
@@ -158,6 +164,23 @@ func (s *Server) createMemberUser(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Email and password are required")
 		return
 	}
+	var existingID string
+	if err := s.db.QueryRow(`SELECT id FROM users WHERE member_id=$1 AND historical_identity=FALSE`, member.ID).Scan(&existingID); err == nil {
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+			return
+		}
+		if _, err := s.db.Exec(`UPDATE users SET email=$1,password_hash=$2,must_change_password=TRUE,active=TRUE,updated_at=CURRENT_TIMESTAMP WHERE id=$3`, strings.ToLower(strings.TrimSpace(req.Email)), string(hash), existingID); isUniqueViolation(err) {
+			respondError(c, http.StatusConflict, "DUPLICATE_DATA", "Email already exists")
+			return
+		} else if err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{"id": existingID, "email": strings.ToLower(strings.TrimSpace(req.Email)), "role": "member", "member_id": member.ID})
+		return
+	}
 
 	user, err := CreateMemberUser(s.db, strings.TrimSpace(req.Email), req.Password, member.ID)
 	if isUniqueViolation(err) {
@@ -175,6 +198,62 @@ func (s *Server) createMemberUser(c *gin.Context) {
 		"role":      user.Role,
 		"member_id": user.MemberID.String,
 	})
+}
+
+func (s *Server) updateMemberUser(c *gin.Context) {
+	var req struct {
+		Email  string `json:"email" form:"email"`
+		Active *bool  `json:"active" form:"active"`
+	}
+	if err := c.ShouldBind(&req); err != nil || strings.TrimSpace(req.Email) == "" || req.Active == nil {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_member_login"))
+		return
+	}
+	result, err := s.db.Exec(`UPDATE users SET email=$1,active=$2,updated_at=CURRENT_TIMESTAMP WHERE member_id=$3 AND historical_identity=FALSE`, strings.ToLower(strings.TrimSpace(req.Email)), *req.Active, c.Param("id"))
+	if isUniqueViolation(err) {
+		respondError(c, http.StatusConflict, "DUPLICATE_DATA", translate(languageFromRequest(c), "error_email_exists"))
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	} else if affected == 0 {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_member_login_not_found"))
+		return
+	}
+	respondOKOrHXRedirect(c, "/admin/members/"+c.Param("id"), gin.H{"status": "ok"})
+}
+
+func (s *Server) resetMemberPassword(c *gin.Context) {
+	var req struct {
+		Password string `json:"password" form:"password"`
+	}
+	if err := c.ShouldBind(&req); err != nil || len(req.Password) < 8 {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_password_minimum"))
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	result, err := s.db.Exec(`UPDATE users SET password_hash=$1,must_change_password=TRUE,updated_at=CURRENT_TIMESTAMP WHERE member_id=$2 AND historical_identity=FALSE`, string(hash), c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	} else if affected == 0 {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_member_login_not_found"))
+		return
+	}
+	respondOKOrHXRedirect(c, "/admin/members/"+c.Param("id"), gin.H{"status": "ok"})
 }
 
 func (s *Server) memberProfile(c *gin.Context) {
@@ -268,7 +347,13 @@ func (s *Server) insertMember(req memberRequest) (Member, error) {
 }
 
 func (s *Server) allMembers() ([]Member, error) {
-	rows, err := s.db.Query(`SELECT id, member_no, full_name, phone, address, join_date, status, member_type FROM members ORDER BY member_no`)
+	rows, err := s.db.Query(`SELECT m.id, m.member_no, m.full_name, m.phone, m.address, m.join_date, m.status, m.member_type,
+		COALESCE(u.email,''), COALESCE(u.active,FALSE), COALESCE(u.must_change_password,FALSE),
+		COALESCE(oa.id,''), COALESCE(oa.role,''), COALESCE(oa.active,FALSE)
+		FROM members m
+		LEFT JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE
+		LEFT JOIN officer_appointments oa ON oa.member_id=m.id
+		ORDER BY m.member_no`)
 	if err != nil {
 		return nil, err
 	}
@@ -277,9 +362,11 @@ func (s *Server) allMembers() ([]Member, error) {
 	var members []Member
 	for rows.Next() {
 		var member Member
-		if err := rows.Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Phone, &member.Address, &member.JoinDate, &member.Status, &member.MemberType); err != nil {
+		if err := rows.Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Phone, &member.Address, &member.JoinDate, &member.Status, &member.MemberType,
+			&member.LoginEmail, &member.LoginActive, &member.MustChangePassword, &member.OfficerID, &member.OfficerRole, &member.OfficerActive); err != nil {
 			return nil, err
 		}
+		member.HasLogin = member.LoginEmail != ""
 		member.MemberTypeLabel = memberTypeLabel(member.MemberType)
 		members = append(members, member)
 	}
@@ -289,10 +376,18 @@ func (s *Server) allMembers() ([]Member, error) {
 func (s *Server) memberByID(id string) (Member, error) {
 	var member Member
 	err := s.db.QueryRow(
-		`SELECT id, member_no, full_name, phone, address, join_date, status, member_type FROM members WHERE id = $1`,
+		`SELECT m.id, m.member_no, m.full_name, m.phone, m.address, m.join_date, m.status, m.member_type,
+			COALESCE(u.email,''), COALESCE(u.active,FALSE), COALESCE(u.must_change_password,FALSE),
+			COALESCE(oa.id,''), COALESCE(oa.role,''), COALESCE(oa.active,FALSE)
+			FROM members m
+			LEFT JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE
+			LEFT JOIN officer_appointments oa ON oa.member_id=m.id
+			WHERE m.id = $1`,
 		id,
-	).Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Phone, &member.Address, &member.JoinDate, &member.Status, &member.MemberType)
+	).Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Phone, &member.Address, &member.JoinDate, &member.Status, &member.MemberType,
+		&member.LoginEmail, &member.LoginActive, &member.MustChangePassword, &member.OfficerID, &member.OfficerRole, &member.OfficerActive)
 	member.MemberTypeLabel = memberTypeLabel(member.MemberType)
+	member.HasLogin = member.LoginEmail != ""
 	return member, err
 }
 
