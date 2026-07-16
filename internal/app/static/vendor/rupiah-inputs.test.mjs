@@ -5,13 +5,13 @@ import vm from "node:vm";
 
 const script = readFileSync(new URL("./rupiah-inputs.js", import.meta.url), "utf8");
 
-function browserHarness({ group = ",", maximum = "", maximumMessage = "Too much" } = {}) {
+function browserHarness({ group = ",", maximum = "", maximumMessage = "Too much", fieldName = "amount" } = {}) {
   const documentListeners = new Map();
   const fieldListeners = new Map();
   const attributes = new Map([["aria-errormessage", "amount-error"]]);
   const error = { textContent: "", hidden: true };
   const field = {
-    name: "amount",
+    name: fieldName,
     value: "",
     validationMessage: "",
     dataset: {
@@ -127,6 +127,18 @@ test("Simpanan invalid input exposes a live accessible error", () => {
   assert.equal(browser.attributes.get("aria-invalid"), "true");
   assert.equal(browser.error.textContent, "Invalid Rupiah");
   assert.equal(browser.error.hidden, false);
+});
+
+test("Pinjaman requested_amount formats while typing and submits normalized digits", () => {
+  const browser = browserHarness({ fieldName: "requested_amount", group: "." });
+  browser.field.value = "1250000";
+  browser.field.dispatch("input");
+  assert.equal(browser.field.value, "Rp 1.250.000");
+  assert.equal(browser.field.validationMessage, "");
+
+  const parameters = {};
+  browser.document.fire("htmx:configRequest", { detail: { elt: browser.field, parameters } });
+  assert.equal(parameters.requested_amount, "1250000");
 });
 
 function loanPreviewHarness({ type = "regular", group = ",", amount = "", duration = "" } = {}) {
