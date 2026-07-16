@@ -327,6 +327,20 @@ func (s *Server) adminRepaymentsPage(c *gin.Context) {
 	}))
 }
 
+func (s *Server) adminTransactionsPage(c *gin.Context) {
+	filters := cashTransactionFiltersFromQuery(c)
+	transactions, err := s.cashTransactionsForAdmin(filters)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	renderPage(c, "admin-transactions", pageData(c, "Transaksi Kas - KKSUK PD Dharma Jaya", "transactions", "cash_transactions", "review_cash_transactions", gin.H{
+		"Transactions": transactions.Rows,
+		"Summary":      transactions.Summary,
+		"Filters":      filters,
+	}))
+}
+
 func (s *Server) memberProfilePage(c *gin.Context) {
 	member, ok := s.profileMember(c)
 	if !ok {

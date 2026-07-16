@@ -3803,6 +3803,61 @@ func TestAdminRepaymentsMenuLinksToActiveRepaymentsPage(t *testing.T) {
 	}
 }
 
+func TestAdminTransactionsPageShowsReadOnlyAggregateCashLedger(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-CASH-1","full_name":"Cash Ledger Member","join_date":"2026-06-16","status":"active","email":"cash-ledger@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "cash-ledger@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 750000, "CASH-SAVE", "Cash saving")
+	withdrawalID := fixture.createWithdrawalRequest(t, memberToken, 200000, "Cash withdrawal")
+	fixture.approveWithdrawalRequest(t, adminToken, withdrawalID)
+	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 500000, 5), 500000, 5)
+	fixture.recordRepayment(t, adminToken, loan.ID, 100000)
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/transactions", nil)
+	req.AddCookie(adminCookie)
+	req.AddCookie(fixture.setLanguage(t, "id", "/admin/transactions"))
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected admin transactions page status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, text := range []string{`class="sidebar-link active" href="/admin/transactions"`, "Transaksi Kas", "Daftar transaksi", "Total Pemasukan", "850.000", "Total Pengeluaran", "700.000", "Saldo Akhir", "150.000", "Simpanan sukarela dari Cash Ledger Member", "Penarikan sukarela oleh Cash Ledger Member", "Pencairan pinjaman untuk Cash Ledger Member", "Angsuran pinjaman dari Cash Ledger Member", "CASH-SAVE", "RPY-TEST"} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected transactions page to include %q, got %s", text, body)
+		}
+	}
+	for _, text := range []string{"Tambah", "Edit", "Hapus", `href="/admin/transactions/new"`} {
+		if strings.Contains(body, text) {
+			t.Fatalf("expected transactions page to be read-only and omit %q, got %s", text, body)
+		}
+	}
+
+	filterReq := httptest.NewRequest(http.MethodGet, "/admin/transactions?category=cash_in&type=repayment", nil)
+	filterReq.AddCookie(adminCookie)
+	filterReq.AddCookie(fixture.setLanguage(t, "id", "/admin/transactions?category=cash_in&type=repayment"))
+	filterRec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(filterRec, filterReq)
+
+	if filterRec.Code != http.StatusOK {
+		t.Fatalf("expected filtered admin transactions page status 200, got %d: %s", filterRec.Code, filterRec.Body.String())
+	}
+	filterBody := filterRec.Body.String()
+	for _, text := range []string{`value="cash_in" selected`, `value="repayment" selected`, "Total Pemasukan", "100.000", "Total Pengeluaran", "0", "Saldo Akhir", "100.000", "Angsuran pinjaman dari Cash Ledger Member"} {
+		if !strings.Contains(filterBody, text) {
+			t.Fatalf("expected filtered transactions page to include %q, got %s", text, filterBody)
+		}
+	}
+	if strings.Contains(filterBody, "Pencairan pinjaman untuk Cash Ledger Member") || strings.Contains(filterBody, "CASH-SAVE") {
+		t.Fatalf("expected filtered transactions page to exclude non-repayment rows, got %s", filterBody)
+	}
+}
+
 func TestAdminDashboardAggregatesOperationalTotals(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")

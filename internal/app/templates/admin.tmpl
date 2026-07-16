@@ -676,6 +676,73 @@
 {{template "admin-shell-end" .}}
 {{end}}
 
+{{define "admin-transactions"}}
+{{template "admin-shell-start" .}}
+      <section class="summary-grid">
+{{template "summary-card" (dict "Label" (t .Lang "total_cash_in") "Value" (nominal .Summary.TotalIncome))}}
+{{template "summary-card" (dict "Label" (t .Lang "total_cash_out") "Value" (nominal .Summary.TotalExpense))}}
+{{template "summary-card" (dict "Label" (t .Lang "ending_balance") "Value" (nominal .Summary.EndingBalance))}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "transaction_list"}}</h2>
+        <form class="filter-form" method="get" action="/admin/transactions">
+          <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.Filters.DateFrom}}"></label>
+          <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.Filters.DateTo}}"></label>
+          <label>{{t .Lang "category"}}
+            <select name="category">
+              <option value="">{{t .Lang "all_categories"}}</option>
+              <option value="cash_in" {{if eq .Filters.Category "cash_in"}}selected{{end}}>{{t .Lang "cash_in"}}</option>
+              <option value="cash_out" {{if eq .Filters.Category "cash_out"}}selected{{end}}>{{t .Lang "cash_out"}}</option>
+            </select>
+          </label>
+          <label>{{t .Lang "transaction_type"}}
+            <select name="type">
+              <option value="">{{t .Lang "all_types"}}</option>
+              <option value="savings" {{if eq .Filters.Type "savings"}}selected{{end}}>{{t .Lang "transaction_type_savings"}}</option>
+              <option value="withdrawal" {{if eq .Filters.Type "withdrawal"}}selected{{end}}>{{t .Lang "transaction_type_withdrawal"}}</option>
+              <option value="loan" {{if eq .Filters.Type "loan"}}selected{{end}}>{{t .Lang "transaction_type_loan"}}</option>
+              <option value="repayment" {{if eq .Filters.Type "repayment"}}selected{{end}}>{{t .Lang "transaction_type_repayment"}}</option>
+            </select>
+          </label>
+          <button type="submit">{{t .Lang "apply_filters"}}</button>
+          <a class="button-link button-link-secondary" href="/admin/transactions">{{t .Lang "reset"}}</a>
+        </form>
+        {{if .Transactions}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "date"}}</th>
+              <th>{{t $.Lang "description"}}</th>
+              <th>{{t $.Lang "transaction_type"}}</th>
+              <th>{{t $.Lang "cash_in"}}</th>
+              <th>{{t $.Lang "cash_out"}}</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "reference"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Transactions}}
+            <tr>
+              <td>{{.TransactionDate}}</td>
+              <td>{{.Description}}</td>
+              <td>{{t $.Lang (printf "transaction_type_%s" .Type)}}</td>
+              <td>{{if gt .Income 0}}Rp {{nominal .Income}}{{else}}-{{end}}</td>
+              <td>{{if gt .Expense 0}}Rp {{nominal .Expense}}{{else}}-{{end}}</td>
+              <td>Rp {{nominal .Amount}}</td>
+              <td>{{template "member-table-cell" .}}</td>
+              <td>{{.ReferenceNo}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_cash_transactions")}}
+        {{end}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
 {{define "admin-member-detail"}}
 {{template "admin-shell-start" .}}
       <section class="summary-grid">
