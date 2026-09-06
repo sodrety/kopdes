@@ -111,3 +111,8 @@ Update these files intentionally when upgrading frontend runtime behavior.
 ## Staging
 
 Use `render.yaml` to create the staging web service and PostgreSQL database on Render. See `docs/deployment/staging.md` for setup and smoke-test steps.
+
+## Production
+
+Use `compose.production.yml`, `Caddyfile`, and `.env.production.example` to prepare the single-VPS production deployment for `koperasidj.id`. See `docs/deployment/production.md` for Docker, Tailscale, bootstrap, smoke-test, backup, and update steps.
+After bootstrap, `main` builds an immutable GHCR image and deploys through the Hermes self-hosted runner over Tailscale; `./scripts/deploy-production.sh` remains available for guarded manual updates.
