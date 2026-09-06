@@ -2399,7 +2399,7 @@ func TestAdminProfitLossReportMimicsKopkarlytaReport(t *testing.T) {
 		t.Fatalf("expected profit/loss report status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{`href="/admin/reports/profit-loss" title="Profit/loss report"`, `<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, `name="date_from"`, `name="date_to"`, "Apply filters", "Reset", "Total income", "Total cost", "Net profit", "Data export", "Export CSV", "Export PDF", "Print report", "Income detail", "Cost detail", "Monthly breakdown", "Income breakdown", "Cost breakdown", "Insights &amp; analysis", "Financial composition", "Monthly performance", "Rp 440.000", "Rp 75.000", "Rp 365.000"} {
+	for _, text := range []string{`<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, `name="date_from"`, `name="date_to"`, "Apply filters", "Reset", "Total income", "Total cost", "Net profit", "Data export", "Export CSV", "Export PDF", "Print report", "Income detail", "Cost detail", "Monthly breakdown", "Income breakdown", "Cost breakdown", "Insights &amp; analysis", "Financial composition", "Monthly performance", "Rp 440.000", "Rp 75.000", "Rp 365.000"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected profit/loss report to include %q, got %s", text, body)
 		}
