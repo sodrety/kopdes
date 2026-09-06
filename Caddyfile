@@ -1,0 +1,10 @@
+www.koperasidj.id {
+	redir https://koperasidj.id{uri}
+}
+
+koperasidj.id {
+	@metrics path /metrics
+	respond @metrics 404
+
+	reverse_proxy app:8080
+}

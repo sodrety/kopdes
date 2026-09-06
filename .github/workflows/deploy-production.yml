@@ -1,0 +1,77 @@
+name: deploy-production
+
+on:
+  workflow_run:
+    workflows: ["test"]
+    types: [completed]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tested commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Log in to GitHub Container Registry
+        env:
+          REGISTRY: ghcr.io
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          printf '%s\n' "$GHCR_TOKEN" | docker login "$REGISTRY" \
+            --username "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Build and push immutable application image
+        env:
+          IMAGE_NAME: ghcr.io/sodrety/kopdes
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu
+          docker buildx build \
+            --pull \
+            --platform linux/amd64 \
+            --tag "$IMAGE_NAME:$IMAGE_TAG" \
+            --tag "$IMAGE_NAME:main" \
+            --label "org.opencontainers.image.revision=$IMAGE_TAG" \
+            --push .
+
+  deploy:
+    needs: build
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: [self-hosted, linux, x64, hermes]
+    environment: production
+    steps:
+      - name: Deploy tested commit
+        env:
+          VPS_HOST: kopdes-prod
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+          IMAGE_NAME: ghcr.io/sodrety/kopdes
+          DEPLOY_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$VPS_APP_DIR"
+          printf -v remote_command 'cd -- %q && APP_IMAGE=%q DEPLOY_COMMIT=%q ./scripts/deploy-production.sh' "$VPS_APP_DIR" "$IMAGE_NAME:$DEPLOY_COMMIT" "$DEPLOY_COMMIT"
+          ssh \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" \
+            "$remote_command"

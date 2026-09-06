@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: ${APP_IMAGE:-ghcr.io/sodrety/kopdes:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV}
+      APP_ADDRESS: ${APP_ADDRESS}
+      DATABASE_DRIVER: ${DATABASE_DRIVER}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECURE: ${COOKIE_SECURE}
+      KETUA_UTAMA_MEMBER_ID: ${KETUA_UTAMA_MEMBER_ID:-}
+      KETUA_UTAMA_EMAIL: ${KETUA_UTAMA_EMAIL:-}
+      KETUA_UTAMA_PASSWORD: ${KETUA_UTAMA_PASSWORD:-}
+      SERVICE_NAME: ${SERVICE_NAME}
+      SERVICE_VERSION: ${SERVICE_VERSION}
+      METRICS_ENABLED: ${METRICS_ENABLED}
+      TRACING_ENABLED: ${TRACING_ENABLED}
+      TRACING_EXPORTER: ${TRACING_EXPORTER}
+      TRACING_ENDPOINT: ${TRACING_ENDPOINT:-}
+      TRACING_INSECURE: ${TRACING_INSECURE}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
