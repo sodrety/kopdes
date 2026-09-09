@@ -219,7 +219,7 @@ func TestSeedImportStoresExtendedCategoriesSkipsUnmatchedAndCreatesCredentials(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(credentialRows) != 2 || credentialRows[1][0] != "kksuk-000001" {
+	if len(credentialRows) != 2 || credentialRows[1][0] != "kksuk-000001" || credentialRows[1][2] != "active-template-member@koperasidj.id" {
 		t.Fatalf("unexpected credential rows: %v", credentialRows)
 	}
 }
@@ -303,7 +303,7 @@ func TestSeedImportAppendPreservesExistingBootstrapMember(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(credentialRows) != 2 || credentialRows[1][0] != "kksuk-000001" {
+	if len(credentialRows) != 2 || credentialRows[1][0] != "kksuk-000001" || credentialRows[1][2] != "appended-member@koperasidj.id" {
 		t.Fatalf("unexpected append credential rows: %v", credentialRows)
 	}
 
@@ -313,6 +313,76 @@ func TestSeedImportAppendPreservesExistingBootstrapMember(t *testing.T) {
 	}
 	if repeated.Status != "already_succeeded" {
 		t.Fatalf("repeat append status = %q, want already_succeeded", repeated.Status)
+	}
+}
+
+func TestSeedEmailAllocatorUsesNameAndMemberNoForDuplicates(t *testing.T) {
+	db := v14TestDatabase(t)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	allocator, err := newSeedEmailAllocator(tx, []preparedMember{{Source: seeddata.Member{FullName: "Same Name"}, MemberNo: "A-001"}, {Source: seeddata.Member{FullName: "Same Name"}, MemberNo: "B-002"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if got := allocator.next("Same Name", "A-001"); got != "same-name-a-001@koperasidj.id" {
+		t.Fatalf("first duplicate email = %q", got)
+	}
+	if got := allocator.next("Same Name", "B-002"); got != "same-name-b-002@koperasidj.id" {
+		t.Fatalf("second duplicate email = %q", got)
+	}
+	if got := allocator.next("Dewi Kartini", "C-003"); got != "dewi-kartini@koperasidj.id" {
+		t.Fatalf("unique name email = %q", got)
+	}
+}
+
+func TestRunSeedEmailRenameUpdatesDatabaseAndPreservesPasswords(t *testing.T) {
+	db := v14TestDatabase(t)
+	if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ('rename-member-a','A-001','Same Name','2026-01-01','active'),('rename-member-b','B-002','Same Name','2026-01-01','active')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO users (id,email,password_hash,role,member_id,full_name,active,must_change_password,historical_identity) VALUES ('rename-user-a','a@koperasidj.id','hash-a','member','rename-member-a','Same Name',TRUE,TRUE,FALSE),('rename-user-b','b@koperasidj.id','hash-b','member','rename-member-b','Same Name',TRUE,TRUE,FALSE)`); err != nil {
+		t.Fatal(err)
+	}
+	inputPath := filepath.Join(t.TempDir(), "credentials.csv")
+	outputPath := filepath.Join(t.TempDir(), "renamed-credentials.csv")
+	input := "member_no,full_name,email,temporary_password\nA-001,Same Name,a@koperasidj.id,password-a\nB-002,Same Name,b@koperasidj.id,password-b\n"
+	if err := os.WriteFile(inputPath, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := RunSeedEmailRename(db, SeedEmailRenameOptions{CredentialsPath: inputPath, OutputPath: outputPath})
+	if err != nil {
+		t.Fatalf("RunSeedEmailRename: %v", err)
+	}
+	if report.Status != "succeeded" || report.Updated != 2 {
+		t.Fatalf("unexpected rename report: %+v", report)
+	}
+	var emailA, emailB, hashA, hashB string
+	if err := db.QueryRow(`SELECT email,password_hash FROM users WHERE id='rename-user-a'`).Scan(&emailA, &hashA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT email,password_hash FROM users WHERE id='rename-user-b'`).Scan(&emailB, &hashB); err != nil {
+		t.Fatal(err)
+	}
+	if emailA != "same-name-a-001@koperasidj.id" || emailB != "same-name-b-002@koperasidj.id" || hashA != "hash-a" || hashB != "hash-b" {
+		t.Fatalf("unexpected renamed users: %q/%q %q/%q", emailA, emailB, hashA, hashB)
+	}
+	outputFile, err := os.Open(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := csv.NewReader(outputFile).ReadAll()
+	_ = outputFile.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 || rows[1][2] != "same-name-a-001@koperasidj.id" || rows[1][3] != "password-a" || rows[2][2] != "same-name-b-002@koperasidj.id" || rows[2][3] != "password-b" {
+		t.Fatalf("unexpected renamed credentials: %v", rows)
 	}
 }
 
@@ -444,7 +514,7 @@ func TestSeedImportStagesHistoricalDataAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 3 || rows[1][2] != "00123@koperasidj.id" || strings.TrimSpace(rows[1][3]) == "" || rows[2][2] != "00124@koperasidj.id" || strings.TrimSpace(rows[2][3]) == "" {
+	if len(rows) != 3 || rows[1][2] != "fixture-member@koperasidj.id" || strings.TrimSpace(rows[1][3]) == "" || rows[2][2] != "secondary-fixture-member@koperasidj.id" || strings.TrimSpace(rows[2][3]) == "" {
 		t.Fatalf("unexpected credentials output: %v", rows)
 	}
 

@@ -119,6 +119,11 @@ type preparedSeed struct {
 	LoanByID     map[string]preparedLoan
 }
 
+type seedEmailAllocator struct {
+	duplicateNames map[string]int
+	used           map[string]struct{}
+}
+
 func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOptions) (SeedImportReport, error) {
 	manifestHash, err := manifest.Hash()
 	if err != nil {
@@ -677,6 +682,10 @@ func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials
 	if err != nil {
 		return err
 	}
+	emailAllocator, err := newSeedEmailAllocator(tx, prepared.Members)
+	if err != nil {
+		return err
+	}
 	for _, member := range prepared.Members {
 		if !appendMode {
 			if _, err := tx.Exec(`INSERT INTO members (id,member_no,full_name,phone,address,join_date,status) VALUES ($1,$2,$3,'','',$4,$5)`, member.ID, member.MemberNo, member.Source.FullName, member.Source.JoinDate, member.Status); err != nil {
@@ -710,7 +719,7 @@ func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials
 		if err != nil {
 			return err
 		}
-		email := slugSeed(member.MemberNo) + "@" + seedEmailDomain
+		email := emailAllocator.next(member.Source.FullName, member.MemberNo)
 		userID := deterministicID("user", member.ID)
 		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
@@ -775,6 +784,57 @@ func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials
 	}
 	return tx.Commit()
 }
+
+func newSeedEmailAllocator(tx *sql.Tx, members []preparedMember) (*seedEmailAllocator, error) {
+	allocator := &seedEmailAllocator{duplicateNames: map[string]int{}, used: map[string]struct{}{}}
+	for _, member := range members {
+		allocator.duplicateNames[normalizedName(member.Source.FullName)]++
+	}
+	rows, err := tx.Query(`SELECT email FROM users`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		allocator.used[emailKey(email)] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return allocator, nil
+}
+
+func (allocator *seedEmailAllocator) next(fullName, memberNo string) string {
+	base := slugSeed(fullName)
+	if base == "" {
+		base = "member"
+	}
+	duplicate := allocator.duplicateNames[normalizedName(fullName)] > 1
+	candidate := base + "@" + seedEmailDomain
+	if duplicate || hasEmail(allocator.used, candidate) {
+		suffix := slugSeed(memberNo)
+		if suffix == "" {
+			suffix = "member"
+		}
+		candidate = base + "-" + suffix + "@" + seedEmailDomain
+		for index := 2; hasEmail(allocator.used, candidate); index++ {
+			candidate = fmt.Sprintf("%s-%s-%d@%s", base, suffix, index, seedEmailDomain)
+		}
+	}
+	allocator.used[emailKey(candidate)] = struct{}{}
+	return candidate
+}
+
+func hasEmail(used map[string]struct{}, email string) bool {
+	_, exists := used[emailKey(email)]
+	return exists
+}
+
+func emailKey(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
 
 func assignImportedLoanTypes(db *sql.DB, loans []preparedLoan) error {
 	tx, err := db.Begin()

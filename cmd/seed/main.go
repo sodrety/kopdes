@@ -29,6 +29,10 @@ func main() {
 		if err := importManifest(os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
+	case "rename-emails":
+		if err := renameEmails(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -113,6 +117,45 @@ func importManifest(args []string) error {
 	return encodeErr
 }
 
+func renameEmails(args []string) error {
+	flags := flag.NewFlagSet("rename-emails", flag.ContinueOnError)
+	credentials := flags.String("credentials", "", "existing credentials CSV containing current emails and passwords")
+	output := flags.String("output", "", "restricted output path for renamed credentials")
+	dryRun := flags.Bool("dry-run", false, "preview email changes without updating the database")
+	report := flags.String("report", "", "output path for the email rename report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	databaseDriver := os.Getenv("DATABASE_DRIVER")
+	if databaseDriver == "" {
+		databaseDriver = "pgx"
+	}
+	db, err := app.OpenDatabase(app.Config{DatabaseDriver: databaseDriver, DatabaseURL: databaseURL})
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := db.Ping(); err != nil {
+		return err
+	}
+	result, err := app.RunSeedEmailRename(db, app.SeedEmailRenameOptions{DryRun: *dryRun, CredentialsPath: *credentials, OutputPath: *output})
+	if reportErr := app.WriteSeedEmailRenameReport(*report, result); reportErr != nil {
+		return reportErr
+	}
+	encoded, encodeErr := json.MarshalIndent(result, "", "  ")
+	if encodeErr == nil {
+		fmt.Println(string(encoded))
+	}
+	if err != nil {
+		return err
+	}
+	return encodeErr
+}
+
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: go run ./cmd/seed normalize|import [options]")
+	fmt.Fprintln(os.Stderr, "usage: go run ./cmd/seed normalize|import|rename-emails [options]")
 }
