@@ -69,6 +69,7 @@ func importManifest(args []string) error {
 	flags := flag.NewFlagSet("import", flag.ContinueOnError)
 	manifestPath := flags.String("manifest", "docs/seed-data/generated/seed-manifest.json", "normalized manifest")
 	dryRun := flags.Bool("dry-run", false, "validate and report without inserting operational data")
+	appendMode := flags.Bool("append", false, "append members and savings to an existing operational database")
 	credentials := flags.String("credentials", "", "restricted output path for new member credentials")
 	report := flags.String("report", "", "output path for the reconciliation report")
 	if err := flags.Parse(args); err != nil {
@@ -101,7 +102,7 @@ func importManifest(args []string) error {
 	if err := db.Ping(); err != nil {
 		return err
 	}
-	result, err := app.RunSeedImport(db, manifest, app.SeedImportOptions{DryRun: *dryRun, CredentialsPath: *credentials, ReportPath: *report})
+	result, err := app.RunSeedImport(db, manifest, app.SeedImportOptions{DryRun: *dryRun, Append: *appendMode, CredentialsPath: *credentials, ReportPath: *report})
 	encoded, encodeErr := json.MarshalIndent(result, "", "  ")
 	if encodeErr == nil {
 		fmt.Println(string(encoded))

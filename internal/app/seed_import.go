@@ -30,6 +30,7 @@ const (
 
 type SeedImportOptions struct {
 	DryRun          bool
+	Append          bool
 	CredentialsPath string
 	ReportPath      string
 }
@@ -138,10 +139,15 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 		}
 		return SeedImportReport{SnapshotID: manifest.SnapshotID, ManifestHash: manifestHash, Status: "already_succeeded", Counts: map[string]int{}}, nil
 	}
-	if maxVersion, err := currentSchemaVersion(db); err != nil {
+	maxVersion, err := currentSchemaVersion(db)
+	if err != nil {
 		return SeedImportReport{}, err
-	} else if maxVersion > 14 {
+	}
+	if !options.Append && maxVersion > 14 {
 		return SeedImportReport{}, fmt.Errorf("database is already migrated through version %d; initial seed import must run before migrations 15-18", maxVersion)
+	}
+	if options.Append && maxVersion < 18 {
+		return SeedImportReport{}, fmt.Errorf("append seed import requires schema version 18 or later; current version is %d", maxVersion)
 	}
 
 	// Each attempt gets its own audit run so a failed validation can be
@@ -177,7 +183,18 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 		return report, nil
 	}
 	needsExtendedSavingCategories := hasExtendedSavingCategories(prepared)
-	if needsExtendedSavingCategories {
+	if options.Append {
+		if len(prepared.Loans) != 0 {
+			return report, errors.New("append seed import currently supports members and savings only")
+		}
+		if err := MigrateTo(db, 19); err != nil {
+			return report, fmt.Errorf("prepare append schema: %w", err)
+		}
+		prepared, err = reconcileAppendMemberIDs(db, prepared)
+		if err != nil {
+			return report, fmt.Errorf("reconcile existing members for append: %w", err)
+		}
+	} else if needsExtendedSavingCategories {
 		// The template currently imports members and savings only. Apply the
 		// completed schema before staging these extra categories, because the
 		// legacy loan migrations intentionally run after historical seed rows.
@@ -189,31 +206,35 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 		}
 	}
 
-	if err := validateEmptyOperationalDatabase(db); err != nil {
-		report.Status = "validation_failed"
-		report.Issues = append(report.Issues, SeedImportIssue{Severity: "error", Blocker: true, Entity: "database", Reason: err.Error()})
-		_ = persistSeedIssues(db, runID, report.Issues)
-		_ = updateSeedRun(db, runID, report.Status)
-		_ = writeSeedReport(options.ReportPath, report)
-		return report, err
+	if !options.Append {
+		if err := validateEmptyOperationalDatabase(db); err != nil {
+			report.Status = "validation_failed"
+			report.Issues = append(report.Issues, SeedImportIssue{Severity: "error", Blocker: true, Entity: "database", Reason: err.Error()})
+			_ = persistSeedIssues(db, runID, report.Issues)
+			_ = updateSeedRun(db, runID, report.Status)
+			_ = writeSeedReport(options.ReportPath, report)
+			return report, err
+		}
 	}
 
 	credentials := make([]SeedImportCredential, 0)
-	if err := seedBaseSchema(db, runID, prepared, &credentials); err != nil {
+	if err := seedBaseSchema(db, runID, prepared, &credentials, options.Append); err != nil {
 		report.Status = "failed"
 		_ = updateSeedRun(db, runID, report.Status)
 		_ = writeSeedReport(options.ReportPath, report)
 		return report, fmt.Errorf("seed base data: %w", err)
 	}
-	if !needsExtendedSavingCategories {
+	if !options.Append && !needsExtendedSavingCategories {
 		if err := MigrateTo(db, 15); err != nil {
 			return report, fmt.Errorf("apply migration 15 after seed staging: %w", err)
 		}
 	}
-	if err := assignImportedLoanTypes(db, prepared.Loans); err != nil {
-		return report, fmt.Errorf("assign imported loan types: %w", err)
+	if !options.Append {
+		if err := assignImportedLoanTypes(db, prepared.Loans); err != nil {
+			return report, fmt.Errorf("assign imported loan types: %w", err)
+		}
 	}
-	if !needsExtendedSavingCategories {
+	if !options.Append && !needsExtendedSavingCategories {
 		if err := MigrateTo(db, 19); err != nil {
 			return report, fmt.Errorf("finish schema migrations after seed staging: %w", err)
 		}
@@ -239,6 +260,43 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 		return report, err
 	}
 	return report, nil
+}
+
+func reconcileAppendMemberIDs(db *sql.DB, prepared preparedSeed) (preparedSeed, error) {
+	memberIDs := make(map[string]string, len(prepared.Members))
+	for index := range prepared.Members {
+		member := &prepared.Members[index]
+		var existingID, existingName string
+		err := db.QueryRow(`SELECT id,full_name FROM members WHERE LOWER(member_no)=LOWER($1)`, member.MemberNo).Scan(&existingID, &existingName)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return preparedSeed{}, err
+		}
+		if normalizedName(existingName) != normalizedName(member.Source.FullName) {
+			return preparedSeed{}, fmt.Errorf("member number %s already belongs to %q, but the template contains %q", member.MemberNo, existingName, member.Source.FullName)
+		}
+		memberIDs[member.ID] = existingID
+		member.ID = existingID
+	}
+	for key, member := range prepared.MemberByName {
+		if replacement, ok := memberIDs[member.ID]; ok {
+			member.ID = replacement
+			prepared.MemberByName[key] = member
+		}
+	}
+	for index := range prepared.Savings {
+		if replacement, ok := memberIDs[prepared.Savings[index].MemberID]; ok {
+			prepared.Savings[index].MemberID = replacement
+		}
+	}
+	for index := range prepared.Loans {
+		if replacement, ok := memberIDs[prepared.Loans[index].MemberID]; ok {
+			prepared.Loans[index].MemberID = replacement
+		}
+	}
+	return prepared, nil
 }
 
 func hasExtendedSavingCategories(prepared preparedSeed) bool {
@@ -609,7 +667,7 @@ func validateSeedManifest(manifest seeddata.Manifest) (preparedSeed, []SeedImpor
 	return result, issues
 }
 
-func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials *[]SeedImportCredential) error {
+func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials *[]SeedImportCredential, appendMode bool) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -620,11 +678,33 @@ func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials
 		return err
 	}
 	for _, member := range prepared.Members {
-		if _, err := tx.Exec(`INSERT INTO members (id,member_no,full_name,phone,address,join_date,status) VALUES ($1,$2,$3,'','',$4,$5)`, member.ID, member.MemberNo, member.Source.FullName, member.Source.JoinDate, member.Status); err != nil {
-			return fmt.Errorf("insert member %s: %w", member.Source.FullName, err)
+		if !appendMode {
+			if _, err := tx.Exec(`INSERT INTO members (id,member_no,full_name,phone,address,join_date,status) VALUES ($1,$2,$3,'','',$4,$5)`, member.ID, member.MemberNo, member.Source.FullName, member.Source.JoinDate, member.Status); err != nil {
+				return fmt.Errorf("insert member %s: %w", member.Source.FullName, err)
+			}
+		} else {
+			var existingID string
+			err := tx.QueryRow(`SELECT id FROM members WHERE id=$1`, member.ID).Scan(&existingID)
+			if errors.Is(err, sql.ErrNoRows) {
+				if _, err := tx.Exec(`INSERT INTO members (id,member_no,full_name,phone,address,join_date,status) VALUES ($1,$2,$3,'','',$4,$5)`, member.ID, member.MemberNo, member.Source.FullName, member.Source.JoinDate, member.Status); err != nil {
+					return fmt.Errorf("insert member %s: %w", member.Source.FullName, err)
+				}
+			} else if err != nil {
+				return err
+			}
 		}
 		if member.Status != "active" {
 			continue
+		}
+		if appendMode {
+			var existingUserID string
+			err := tx.QueryRow(`SELECT id FROM users WHERE member_id=$1 AND historical_identity=FALSE LIMIT 1`, member.ID).Scan(&existingUserID)
+			if err == nil {
+				continue
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
 		}
 		password, err := randomTemporaryPassword()
 		if err != nil {

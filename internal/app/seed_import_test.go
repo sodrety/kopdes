@@ -224,6 +224,98 @@ func TestSeedImportStoresExtendedCategoriesSkipsUnmatchedAndCreatesCredentials(t
 	}
 }
 
+func TestSeedImportAppendPreservesExistingBootstrapMember(t *testing.T) {
+	db := v14TestDatabase(t)
+	if err := MigrateTo(db, 18); err != nil {
+		t.Fatalf("prepare existing production schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ('bootstrap-member','KETUA-UMUM','Ketua Utama','2025-01-01','active')`); err != nil {
+		t.Fatalf("insert bootstrap member: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO users (id,email,password_hash,role,member_id,full_name,active,must_change_password,historical_identity) VALUES ('bootstrap-user','ketua-umum@koperasidj.id','existing-hash','member','bootstrap-member','Ketua Utama',TRUE,FALSE,FALSE)`); err != nil {
+		t.Fatalf("insert bootstrap user: %v", err)
+	}
+
+	manifest := seeddata.Manifest{
+		Version: seeddata.ManifestVersion,
+		Sources: []seeddata.Source{{Name: "template.xlsx", SHA256: "append-template-hash"}},
+		Members: []seeddata.Member{{
+			Source:       seeddata.SourceRef{Source: "template.xlsx", Sheet: "01_Anggota", Row: 5},
+			CurrentNPP:   "KETUA-UMUM",
+			FullName:     "Ketua Utama",
+			SourceStatus: "Aktif",
+			JoinDate:     "2025-01-01",
+		}, {
+			Source:       seeddata.SourceRef{Source: "template.xlsx", Sheet: "01_Anggota", Row: 6},
+			CurrentNPP:   "KKSUK-000001",
+			FullName:     "Appended Member",
+			SourceStatus: "Aktif",
+			JoinDate:     "2026-09-07",
+		}},
+		Savings: []seeddata.SavingRow{{
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "03_Simpanan", Row: 5},
+			MemberName: "Ketua Utama",
+			RecordDate: "2025-12-31",
+			Wajib:      "60",
+		}, {
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "03_Simpanan", Row: 6},
+			MemberName: "Appended Member",
+			RecordDate: "2025-12-31",
+			Pokok:      "10",
+			Wajib:      "20",
+			Sukarela:   "30",
+			SHU:        "40",
+			Khusus:     "50",
+		}},
+	}
+	manifest.SnapshotID = seeddata.SnapshotID(manifest.Sources)
+	credentialsPath := filepath.Join(t.TempDir(), "credentials.csv")
+
+	report, err := RunSeedImport(db, manifest, SeedImportOptions{Append: true, CredentialsPath: credentialsPath})
+	if err != nil {
+		t.Fatalf("RunSeedImport append: %v\nreport=%+v", err, report)
+	}
+	if report.Status != "succeeded" || report.Counts["members"] != 2 || report.Counts["savings"] != 6 || report.Counts["accounts"] != 1 {
+		t.Fatalf("unexpected append report: %+v", report)
+	}
+	assertRowCount(t, db, `SELECT COUNT(*) FROM members`, 2)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM saving_records`, 6)
+	var bootstrapName, bootstrapEmail string
+	if err := db.QueryRow(`SELECT members.full_name,users.email FROM members INNER JOIN users ON users.member_id=members.id WHERE members.id='bootstrap-member'`).Scan(&bootstrapName, &bootstrapEmail); err != nil {
+		t.Fatalf("read bootstrap identity: %v", err)
+	}
+	if bootstrapName != "Ketua Utama" || bootstrapEmail != "ketua-umum@koperasidj.id" {
+		t.Fatalf("bootstrap identity changed: name=%q email=%q", bootstrapName, bootstrapEmail)
+	}
+	var maxVersion int
+	if err := db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&maxVersion); err != nil {
+		t.Fatalf("read schema version: %v", err)
+	}
+	if maxVersion != 19 {
+		t.Fatalf("schema max version = %d, want 19", maxVersion)
+	}
+	credentialFile, err := os.Open(credentialsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialRows, err := csv.NewReader(credentialFile).ReadAll()
+	_ = credentialFile.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentialRows) != 2 || credentialRows[1][0] != "kksuk-000001" {
+		t.Fatalf("unexpected append credential rows: %v", credentialRows)
+	}
+
+	repeated, err := RunSeedImport(db, manifest, SeedImportOptions{Append: true, CredentialsPath: credentialsPath})
+	if err != nil {
+		t.Fatalf("repeat RunSeedImport append: %v", err)
+	}
+	if repeated.Status != "already_succeeded" {
+		t.Fatalf("repeat append status = %q, want already_succeeded", repeated.Status)
+	}
+}
+
 func TestSeedImportStagesHistoricalDataAndIsIdempotent(t *testing.T) {
 	db := v14TestDatabase(t)
 	manifest := seeddata.Manifest{
