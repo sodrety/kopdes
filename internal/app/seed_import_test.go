@@ -1,0 +1,370 @@
+package app
+
+import (
+	"encoding/csv"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/sodrety/kopdes/internal/seeddata"
+	_ "modernc.org/sqlite"
+)
+
+func TestParseSeedMoneyPreservesWholeAndFractionalValues(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		want       int64
+		fractional bool
+	}{
+		{name: "indonesian grouped", raw: "Rp15,000,000", want: 15000000},
+		{name: "parenthesized", raw: "(440,000)", want: -440000},
+		{name: "decimal comma", raw: "12,5", fractional: true},
+		{name: "decimal point", raw: "12.5", fractional: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, fractional, err := parseSeedMoney(test.raw)
+			if err != nil {
+				t.Fatalf("parseSeedMoney(%q): %v", test.raw, err)
+			}
+			if got != test.want || fractional != test.fractional {
+				t.Fatalf("parseSeedMoney(%q) = (%d, %v), want (%d, %v)", test.raw, got, fractional, test.want, test.fractional)
+			}
+		})
+	}
+}
+
+func TestParseSeedMoneyRoundedUsesWholeRupiahRounding(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want int64
+	}{
+		{raw: "10,278,196.8397077", want: 10278197},
+		{raw: "-16,267,444.3805523", want: -16267444},
+		{raw: "2,149,999.99999995", want: 2150000},
+		{raw: "12.5", want: 13},
+	}
+	for _, test := range tests {
+		got, fractional, err := parseSeedMoneyRounded(test.raw)
+		if err != nil {
+			t.Fatalf("parseSeedMoneyRounded(%q): %v", test.raw, err)
+		}
+		if got != test.want || !fractional {
+			t.Fatalf("parseSeedMoneyRounded(%q) = (%d, %v), want (%d, true)", test.raw, got, fractional, test.want)
+		}
+	}
+}
+
+func TestMapMemberSourceRules(t *testing.T) {
+	tests := []struct {
+		sourceStatus string
+		status       string
+		memberType   string
+	}{
+		{sourceStatus: "Aktif", status: "active", memberType: "employee"},
+		{sourceStatus: "Baru", status: "active", memberType: "employee"},
+		{sourceStatus: "Purna Bakti 2025", status: "inactive", memberType: "employee"},
+		{sourceStatus: "PHL Distribusi", status: "active", memberType: "daily_worker"},
+		{sourceStatus: "Nasabah", status: "active", memberType: "self_employed"},
+	}
+	for _, test := range tests {
+		status, memberType := mapMemberSource(test.sourceStatus)
+		if status != test.status || memberType != test.memberType {
+			t.Fatalf("mapMemberSource(%q) = (%q, %q), want (%q, %q)", test.sourceStatus, status, memberType, test.status, test.memberType)
+		}
+	}
+}
+
+func TestValidateSeedManifestUsesTemplateMemberTypeAndAllowsMissingBalanceCheckpoints(t *testing.T) {
+	manifest := seeddata.Manifest{
+		Version: seeddata.ManifestVersion,
+		Members: []seeddata.Member{{
+			Source:       seeddata.SourceRef{Source: "template.xlsx", Sheet: "01_Anggota", Row: 5},
+			CurrentNPP:   "KKSUK-000001",
+			FullName:     "Template Member",
+			SourceStatus: "Aktif",
+			MemberType:   "daily_worker",
+			JoinDate:     "2026-09-07",
+		}},
+	}
+	prepared, issues := validateSeedManifest(manifest)
+	if len(issues) != 0 {
+		t.Fatalf("template member with blank balance checkpoints produced issues: %+v", issues)
+	}
+	if len(prepared.Members) != 1 || prepared.Members[0].MemberType != "daily_worker" {
+		t.Fatalf("template member type was not preserved: %+v", prepared.Members)
+	}
+}
+
+func TestValidateSeedManifestStoresAllTemplateSavingCategoriesAndSkipsUnmatchedRows(t *testing.T) {
+	manifest := seeddata.Manifest{
+		Version: seeddata.ManifestVersion,
+		Members: []seeddata.Member{{
+			Source:       seeddata.SourceRef{Source: "template.xlsx", Sheet: "01_Anggota", Row: 5},
+			CurrentNPP:   "KKSUK-000001",
+			FullName:     "Template Member",
+			SourceStatus: "Aktif",
+			JoinDate:     "2026-09-07",
+		}},
+		Savings: []seeddata.SavingRow{{
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "03_Simpanan", Row: 5},
+			MemberName: "Template Member",
+			RecordDate: "2025-12-31",
+			Pokok:      "1.5",
+			Wajib:      "10,278,196.8397077",
+			Sukarela:   "2,149,999.99999995",
+			SHU:        "12.5",
+			Khusus:     "-40",
+		}, {
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "03_Simpanan", Row: 6},
+			MemberName: "Unknown Member",
+			RecordDate: "2025-12-31",
+			Wajib:      "100,000",
+		}},
+	}
+	prepared, issues := validateSeedManifest(manifest)
+	if len(prepared.Savings) != 5 {
+		t.Fatalf("prepared savings = %d, want 5 categories from the matched row", len(prepared.Savings))
+	}
+	if len(issues) != 5 {
+		t.Fatalf("issues = %d, want four rounding warnings and one unmatched warning: %+v", len(issues), issues)
+	}
+	for _, issue := range issues {
+		if issue.Blocker {
+			t.Fatalf("unexpected blocker: %+v", issue)
+		}
+	}
+	categoryAmounts := map[string]int64{}
+	for _, saving := range prepared.Savings {
+		categoryAmounts[saving.Category] = saving.Amount
+	}
+	if categoryAmounts["pokok"] != 2 || categoryAmounts["wajib"] != 10278197 || categoryAmounts["sukarela"] != 2150000 || categoryAmounts["shu"] != 13 || categoryAmounts["khusus"] != 40 {
+		t.Fatalf("unexpected rounded category amounts: %+v", categoryAmounts)
+	}
+}
+
+func TestSeedImportStoresExtendedCategoriesSkipsUnmatchedAndCreatesCredentials(t *testing.T) {
+	db := v14TestDatabase(t)
+	manifest := seeddata.Manifest{
+		Version: seeddata.ManifestVersion,
+		Sources: []seeddata.Source{{Name: "template.xlsx", SHA256: "template-hash"}},
+		Members: []seeddata.Member{{
+			Source:       seeddata.SourceRef{Source: "template.xlsx", Sheet: "01_Anggota", Row: 5},
+			CurrentNPP:   "KKSUK-000001",
+			FullName:     "Active Template Member",
+			SourceStatus: "Aktif",
+			JoinDate:     "2026-09-07",
+		}, {
+			Source:       seeddata.SourceRef{Source: "template.xlsx", Sheet: "01_Anggota", Row: 6},
+			CurrentNPP:   "KKSUK-000002",
+			FullName:     "Inactive Template Member",
+			SourceStatus: "Purna Bakti 2026",
+			JoinDate:     "2026-09-07",
+		}},
+		Savings: []seeddata.SavingRow{{
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "03_Simpanan", Row: 5},
+			MemberName: "Active Template Member",
+			RecordDate: "2025-12-31",
+			Pokok:      "40.5",
+			Wajib:      "10.5",
+			Sukarela:   "20",
+			SHU:        "30.5",
+			Khusus:     "-40.5",
+		}, {
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "03_Simpanan", Row: 6},
+			MemberName: "Unknown Template Member",
+			RecordDate: "2025-12-31",
+			Wajib:      "100,000",
+		}},
+	}
+	manifest.SnapshotID = seeddata.SnapshotID(manifest.Sources)
+	credentialsPath := filepath.Join(t.TempDir(), "credentials.csv")
+	reportPath := filepath.Join(t.TempDir(), "report.json")
+
+	report, err := RunSeedImport(db, manifest, SeedImportOptions{CredentialsPath: credentialsPath, ReportPath: reportPath})
+	if err != nil {
+		t.Fatalf("RunSeedImport: %v\nreport=%+v", err, report)
+	}
+	if report.Status != "succeeded" || report.Counts["members"] != 2 || report.Counts["savings"] != 5 || report.Counts["accounts"] != 1 || report.Counts["blockers"] != 0 || report.Counts["warnings"] != 5 {
+		t.Fatalf("unexpected extended seed report: %+v", report)
+	}
+	rows, err := db.Query(`SELECT category,COUNT(*) FROM saving_records GROUP BY category`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	categoryCounts := map[string]int{}
+	for rows.Next() {
+		var category string
+		var count int
+		if err := rows.Scan(&category, &count); err != nil {
+			t.Fatal(err)
+		}
+		categoryCounts[category] = count
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(categoryCounts) != 5 || categoryCounts["pokok"] != 1 || categoryCounts["wajib"] != 1 || categoryCounts["sukarela"] != 1 || categoryCounts["shu"] != 1 || categoryCounts["khusus"] != 1 {
+		t.Fatalf("unexpected imported saving categories: %+v", categoryCounts)
+	}
+	credentialFile, err := os.Open(credentialsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialRows, err := csv.NewReader(credentialFile).ReadAll()
+	_ = credentialFile.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentialRows) != 2 || credentialRows[1][0] != "kksuk-000001" {
+		t.Fatalf("unexpected credential rows: %v", credentialRows)
+	}
+}
+
+func TestSeedImportStagesHistoricalDataAndIsIdempotent(t *testing.T) {
+	db := v14TestDatabase(t)
+	manifest := seeddata.Manifest{
+		Version: seeddata.ManifestVersion,
+		Sources: []seeddata.Source{{Name: "fixture.xlsx", SHA256: "fixture-hash"}},
+		Members: []seeddata.Member{{
+			Source:       seeddata.SourceRef{Source: "fixture.xlsx", Sheet: "Master Anggota", Row: 3},
+			OldNPP:       "00123",
+			CurrentNPP:   "00123",
+			FullName:     "Fixture Member",
+			SourceStatus: "Aktif",
+			JoinDate:     "2025-01-15",
+			Balances:     seeddata.MemberAmounts{Pokok: "20,000", Wajib: "100,000", Sukarela: "150,000"},
+		}, {
+			Source:       seeddata.SourceRef{Source: "fixture.xlsx", Sheet: "Master Anggota", Row: 4},
+			OldNPP:       "00124",
+			CurrentNPP:   "00124",
+			FullName:     "Secondary Fixture Member",
+			SourceStatus: "Baru",
+			JoinDate:     "2025-02-01",
+		}},
+		Savings: []seeddata.SavingRow{{
+			Source:     seeddata.SourceRef{Source: "fixture.xlsx", Sheet: "Detail Simpanan", Row: 4},
+			MemberName: "Fixture Member",
+			RecordDate: "2026-01-23",
+			Wajib:      "100,000",
+			Sukarela:   "150,000",
+		}},
+		Loans: []seeddata.Loan{{
+			Source:             seeddata.SourceRef{Source: "fixture.xlsx", Sheet: "Data Base Pinjaman", Row: 5},
+			LoanType:           "regular",
+			MemberName:         "Fixture Member",
+			Principal:          "1,000,000",
+			AdminFee:           "100,000",
+			MonthlyInstallment: "100,000",
+			DurationMonths:     11,
+			StartDate:          "2026-01-01",
+		}, {
+			Source:             seeddata.SourceRef{Source: "fixture.xlsx", Sheet: "Pinjaman Barang Sekunder", Row: 5},
+			LoanType:           "secondary_goods",
+			MemberName:         "Secondary Fixture Member",
+			SourceHint:         "1",
+			Principal:          "500,000",
+			AdminFee:           "50,000",
+			TotalObligation:    "550,000",
+			MonthlyInstallment: "183,333",
+			DurationMonths:     3,
+			StartDate:          "2025-01-01",
+			SourceStatus:       "Lunas",
+		}},
+		LoanEvidence: []seeddata.LoanEvidence{{
+			Source:     seeddata.SourceRef{Source: "fixture.xlsx", Sheet: "Pinjaman Barang Sekunder", Row: 5},
+			MemberName: "Secondary Fixture Member",
+			LoanHint:   "1",
+			Method:     "3. Cicilan",
+			Amount:     "183,333",
+			RecordDate: "2025-02-01",
+		}, {
+			Source:     seeddata.SourceRef{Source: "fixture.xlsx", Sheet: "Pinjaman Barang Sekunder", Row: 5},
+			MemberName: "Secondary Fixture Member",
+			LoanHint:   "1",
+			Method:     "3. Cicilan",
+			Amount:     "183,333",
+			RecordDate: "2025-03-01",
+		}, {
+			Source:     seeddata.SourceRef{Source: "fixture.xlsx", Sheet: "Pinjaman Barang Sekunder", Row: 5},
+			MemberName: "Secondary Fixture Member",
+			LoanHint:   "1",
+			Method:     "3. Cicilan",
+			Amount:     "183,334",
+			RecordDate: "2025-04-01",
+		}},
+	}
+	manifest.SnapshotID = seeddata.SnapshotID(manifest.Sources)
+	credentialsPath := filepath.Join(t.TempDir(), "credentials.csv")
+	reportPath := filepath.Join(t.TempDir(), "report.json")
+
+	report, err := RunSeedImport(db, manifest, SeedImportOptions{CredentialsPath: credentialsPath, ReportPath: reportPath})
+	if err != nil {
+		t.Fatalf("RunSeedImport: %v\nreport=%+v", err, report)
+	}
+	if report.Status != "succeeded" || report.Counts["members"] != 2 || report.Counts["savings"] != 3 || report.Counts["loans"] != 2 || report.Counts["installments"] != 14 || report.Counts["accounts"] != 2 {
+		t.Fatalf("unexpected seed report: %+v", report)
+	}
+	var maxVersion int
+	if err := db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&maxVersion); err != nil {
+		t.Fatal(err)
+	}
+	if maxVersion != 19 {
+		t.Fatalf("schema max version = %d, want 19", maxVersion)
+	}
+	var legacyCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM loans WHERE legacy_terms=TRUE AND admin_fee_policy='legacy_flat_monthly'`).Scan(&legacyCount); err != nil {
+		t.Fatal(err)
+	}
+	if legacyCount != 2 {
+		t.Fatalf("legacy imported loan count = %d, want 2", legacyCount)
+	}
+	var secondaryCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM loans WHERE loan_type='secondary_goods' AND legacy_terms=TRUE`).Scan(&secondaryCount); err != nil {
+		t.Fatal(err)
+	}
+	if secondaryCount != 1 {
+		t.Fatalf("secondary imported loan count = %d, want 1", secondaryCount)
+	}
+	var sourceRecords int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM seed_import_records`).Scan(&sourceRecords); err != nil {
+		t.Fatal(err)
+	}
+	if sourceRecords < 3 {
+		t.Fatalf("seed audit records = %d, want source and operational records", sourceRecords)
+	}
+	info, err := os.Stat(credentialsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("credentials mode = %o, want 600", info.Mode().Perm())
+	}
+	file, err := os.Open(credentialsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := csv.NewReader(file).ReadAll()
+	_ = file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 || rows[1][2] != "00123@koperasidj.id" || strings.TrimSpace(rows[1][3]) == "" || rows[2][2] != "00124@koperasidj.id" || strings.TrimSpace(rows[2][3]) == "" {
+		t.Fatalf("unexpected credentials output: %v", rows)
+	}
+
+	retry, err := RunSeedImport(db, manifest, SeedImportOptions{CredentialsPath: filepath.Join(t.TempDir(), "retry.csv")})
+	if err != nil || retry.Status != "already_succeeded" {
+		t.Fatalf("idempotent rerun = %+v, err=%v", retry, err)
+	}
+	var userCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE member_id IS NOT NULL`).Scan(&userCount); err != nil {
+		t.Fatal(err)
+	}
+	if userCount != 2 {
+		t.Fatalf("member account count after rerun = %d, want 2", userCount)
+	}
+}

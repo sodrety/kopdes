@@ -244,9 +244,24 @@ var migrations = []migration{
 		Version: 18,
 		Name:    "limit_loan_amount_to_200m",
 	},
+	{
+		Version: 19,
+		Name:    "add_extended_saving_categories",
+	},
 }
 
 func Migrate(db *sql.DB) error {
+	return MigrateTo(db, 0)
+}
+
+// MigrateTo applies pending migrations up to maxVersion. A maxVersion of zero
+// applies every available migration. The seed importer uses the bounded form
+// to stage historical legacy rows before the provenance protections are
+// installed by migrations 15 and 16.
+func MigrateTo(db *sql.DB, maxVersion int) error {
+	if maxVersion < 0 {
+		return fmt.Errorf("migration max version must be non-negative")
+	}
 	isSQLite := strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
 	if isSQLite {
 		sqliteMigrationMu.Lock()
@@ -261,6 +276,9 @@ func Migrate(db *sql.DB) error {
 	}
 
 	for _, migration := range migrations {
+		if maxVersion != 0 && migration.Version > maxVersion {
+			break
+		}
 		applied, err := migrationApplied(db, migration.Version)
 		if err != nil {
 			return fmt.Errorf("check migration %03d %s: %w", migration.Version, migration.Name, err)
@@ -289,7 +307,7 @@ func migrationApplied(db *sql.DB, version int) (bool, error) {
 
 func applyMigration(db *sql.DB, migration migration) error {
 	isSQLite := strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
-	if isSQLite && (migration.Version == 9 || migration.Version == 12) {
+	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19) {
 		conn, err := db.Conn(context.Background())
 		if err != nil {
 			return err
@@ -400,6 +418,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 			return err
 		}
 	}
+	if migration.Version == 19 {
+		if err := addExtendedSavingCategories(tx, isSQLite); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`,
 		migration.Version,
@@ -408,6 +431,65 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 		return err
 	}
 	return tx.Commit()
+}
+
+func addExtendedSavingCategories(tx *sql.Tx, isSQLite bool) error {
+	if !isSQLite {
+		if _, err := tx.Exec(`ALTER TABLE saving_records DROP CONSTRAINT IF EXISTS saving_records_category_check`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`ALTER TABLE saving_records ADD CONSTRAINT saving_records_category_check CHECK (category IN ('pokok', 'wajib', 'sukarela', 'shu', 'khusus')) NOT VALID`)
+		return err
+	}
+	var tableName string
+	if err := tx.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='saving_records'`).Scan(&tableName); err == sql.ErrNoRows {
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	statements := []string{
+		`DROP TRIGGER IF EXISTS saving_records_amount_aggregate_insert`,
+		`DROP TRIGGER IF EXISTS saving_records_amount_aggregate_update`,
+		`DROP TRIGGER IF EXISTS saving_records_amount_aggregate_delete`,
+		`CREATE TABLE saving_records_v19 (
+			id TEXT PRIMARY KEY,
+			member_id TEXT NOT NULL,
+			type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal')),
+			amount INTEGER NOT NULL CHECK (amount > 0),
+			record_date TEXT NOT NULL,
+			reference_no TEXT NOT NULL DEFAULT '',
+			note TEXT NOT NULL DEFAULT '',
+			recorded_by TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			category TEXT NOT NULL DEFAULT 'sukarela' CHECK (category IN ('pokok', 'wajib', 'sukarela', 'shu', 'khusus')),
+			FOREIGN KEY (member_id) REFERENCES members(id),
+			FOREIGN KEY (recorded_by) REFERENCES users(id)
+		)`,
+		`INSERT INTO saving_records_v19 (id,member_id,type,amount,record_date,reference_no,note,recorded_by,created_at,category)
+		 SELECT id,member_id,type,amount,record_date,reference_no,note,recorded_by,created_at,category FROM saving_records`,
+		`DROP TABLE saving_records`,
+		`ALTER TABLE saving_records_v19 RENAME TO saving_records`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	for _, statement := range sqliteSavingRecordAggregateStatements() {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sqliteSavingRecordAggregateStatements() []string {
+	return []string{
+		`CREATE TRIGGER saving_records_amount_aggregate_insert BEFORE INSERT ON saving_records BEGIN UPDATE monetary_aggregate_totals SET saving_records_total=CASE WHEN typeof(NEW.amount)<>'integer' THEN RAISE(ABORT,'invalid monetary amount') WHEN NEW.amount>9223372036854775807-saving_records_total THEN RAISE(ABORT,'monetary aggregate capacity exceeded') ELSE saving_records_total+NEW.amount END WHERE singleton=1; SELECT CASE WHEN changes()<>1 THEN RAISE(ABORT,'monetary aggregate ledger is required') END; END`,
+		`CREATE TRIGGER saving_records_amount_aggregate_update BEFORE UPDATE OF amount ON saving_records BEGIN UPDATE monetary_aggregate_totals SET saving_records_total=CASE WHEN typeof(NEW.amount)<>'integer' OR typeof(OLD.amount)<>'integer' THEN RAISE(ABORT,'invalid monetary amount') WHEN NEW.amount>OLD.amount AND NEW.amount-OLD.amount>9223372036854775807-saving_records_total THEN RAISE(ABORT,'monetary aggregate capacity exceeded') WHEN NEW.amount<OLD.amount AND saving_records_total<OLD.amount-NEW.amount THEN RAISE(ABORT,'invalid monetary aggregate total') WHEN NEW.amount>OLD.amount THEN saving_records_total+(NEW.amount-OLD.amount) WHEN NEW.amount<OLD.amount THEN saving_records_total-(OLD.amount-NEW.amount) ELSE saving_records_total END WHERE singleton=1; SELECT CASE WHEN changes()<>1 THEN RAISE(ABORT,'monetary aggregate ledger is required') END; END`,
+		`CREATE TRIGGER saving_records_amount_aggregate_delete BEFORE DELETE ON saving_records BEGIN UPDATE monetary_aggregate_totals SET saving_records_total=CASE WHEN typeof(OLD.amount)<>'integer' OR saving_records_total<OLD.amount THEN RAISE(ABORT,'invalid monetary aggregate total') ELSE saving_records_total-OLD.amount END WHERE singleton=1; SELECT CASE WHEN changes()<>1 THEN RAISE(ABORT,'monetary aggregate ledger is required') END; END`,
+	}
 }
 
 func limitLoanAmountTo200M(tx *sql.Tx, isSQLite bool) error {

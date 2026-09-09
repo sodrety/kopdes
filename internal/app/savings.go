@@ -244,7 +244,7 @@ func validSavingType(recordType string) bool {
 }
 
 func validSavingCategory(category string) bool {
-	return category == "pokok" || category == "wajib" || category == "sukarela"
+	return category == "pokok" || category == "wajib" || category == "sukarela" || category == "shu" || category == "khusus"
 }
 
 func savingFiltersFromQuery(c *gin.Context) SavingFilters {
