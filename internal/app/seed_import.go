@@ -728,7 +728,7 @@ func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials
 	}
 	for _, saving := range prepared.Savings {
 		id := deterministicID("saving", saving.SourceKey)
-		if _, err := tx.Exec(`INSERT INTO saving_records (id,member_id,type,category,amount,record_date,reference_no,note,recorded_by,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$6 || ' 00:00:00')`, id, saving.MemberID, saving.Type, saving.Category, saving.Amount, saving.RecordDate, saving.Reference, saving.Note, importerID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO saving_records (id,member_id,type,category,amount,record_date,reference_no,note,recorded_by,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, id, saving.MemberID, saving.Type, saving.Category, saving.Amount, saving.RecordDate, saving.Reference, saving.Note, importerID, saving.RecordDate+" 00:00:00"); err != nil {
 			return fmt.Errorf("insert saving %s: %w", saving.SourceKey, err)
 		}
 		if err := insertSeedRecord(tx, runID, saving.SourceKey, "saving", id, saving.Raw); err != nil {
@@ -762,7 +762,7 @@ func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials
 		}
 		for _, repayment := range loan.Repayments {
 			id := deterministicID("repayment", repayment.SourceKey)
-			if _, err := tx.Exec(`INSERT INTO loan_repayments (id,loan_id,member_id,amount,record_date,reference_no,note,recorded_by,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$5 || ' 00:00:00')`, id, loan.ID, loan.MemberID, repayment.Amount, repayment.RecordDate, "seed-"+repayment.SourceKey, repayment.Note, importerID); err != nil {
+			if _, err := tx.Exec(`INSERT INTO loan_repayments (id,loan_id,member_id,amount,record_date,reference_no,note,recorded_by,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, loan.ID, loan.MemberID, repayment.Amount, repayment.RecordDate, "seed-"+repayment.SourceKey, repayment.Note, importerID, repayment.RecordDate+" 00:00:00"); err != nil {
 				return fmt.Errorf("insert repayment %s: %w", repayment.SourceKey, err)
 			}
 			if err := insertSeedRecord(tx, runID, repayment.SourceKey, "loan_repayment", id, repayment.Raw); err != nil {
