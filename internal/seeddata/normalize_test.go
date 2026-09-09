@@ -1,10 +1,14 @@
 package seeddata
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestNormalizeIsDeterministicForSeedWorkbooks(t *testing.T) {
 	primary := "../../docs/seed-data/01. Data Base Simpanan dan Pinjaman Koperasi Dharma Jaya tahun buku 2026 Rev2.xlsx"
 	secondary := "../../docs/seed-data/Rekap Pinjaman Sekunder KKSUK 2026.xlsx"
+	requireSeedWorkbookFixtures(t, primary, secondary)
 	first, err := Normalize(primary, secondary)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +46,9 @@ func TestNormalizeIsDeterministicForSeedWorkbooks(t *testing.T) {
 }
 
 func TestNormalizeSimpananTemplateWorkbook(t *testing.T) {
-	manifest, err := Normalize("../../docs/seed-data/seed-source-template-simpanan.xlsx", "")
+	primary := "../../docs/seed-data/seed-source-template-simpanan.xlsx"
+	requireSeedWorkbookFixtures(t, primary)
+	manifest, err := Normalize(primary, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +67,18 @@ func TestNormalizeSimpananTemplateWorkbook(t *testing.T) {
 	for _, member := range manifest.Members {
 		if member.JoinDate == "" {
 			t.Fatalf("template member %q has no normalized join date", member.FullName)
+		}
+	}
+}
+
+func requireSeedWorkbookFixtures(t *testing.T, paths ...string) {
+	t.Helper()
+	if os.Getenv("KOPDES_SEED_WORKBOOK_TESTS") != "1" {
+		t.Skip("seed workbook regression tests are opt-in; set KOPDES_SEED_WORKBOOK_TESTS=1 when the source workbooks are available")
+	}
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("seed workbook fixture %s is unavailable: %v", path, err)
 		}
 	}
 }
