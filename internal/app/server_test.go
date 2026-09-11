@@ -3963,13 +3963,61 @@ func TestMemberDashboardIsIsolatedAndIncludesLatestActivity(t *testing.T) {
 		t.Fatalf("expected member dashboard page status 200, got %d: %s", dashboardPageRec.Code, dashboardPageRec.Body.String())
 	}
 	pageBody := dashboardPageRec.Body.String()
-	for _, text := range []string{"member-dashboard-shell", "Saving balance", "700.000", "Remaining loan", "425.000", "Loan request status", "FIRST-DEP", "Latest repayment records", "100.000"} {
+	for _, text := range []string{"member-dashboard-shell", "Simpanan Wajib", "Simpanan Manasuka", "Simpanan SHU", "Saving balance", "Total deposits", "Total withdrawals", "700.000", "Loan request status", "FIRST-DEP", "Latest repayment records", "100.000"} {
 		if !strings.Contains(pageBody, text) {
 			t.Fatalf("expected member dashboard page to include %q, got %s", text, pageBody)
 		}
 	}
 	if strings.Contains(pageBody, "SECOND-DEP") {
 		t.Fatalf("expected member dashboard page not to expose second member data, got %s", pageBody)
+	}
+}
+
+func TestMemberDashboardCardsUseSavingsSummary(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-CARDS","full_name":"Cards Member","join_date":"2026-06-16","status":"active","email":"cards@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "cards@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "wajib", 100000, "CARD-WAJIB", "Wajib saving")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 250000, "CARD-MANASUKA", "Manasuka saving")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "shu", 50000, "CARD-SHU", "SHU saving")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/member/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected member dashboard status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var dashboard struct {
+		SavingBalance   int `json:"saving_balance"`
+		TotalDeposit    int `json:"total_deposit"`
+		TotalWithdrawal int `json:"total_withdrawal"`
+		WajibBalance    int `json:"wajib_balance"`
+		SukarelaBalance int `json:"sukarela_balance"`
+		SHUBalance      int `json:"shu_balance"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &dashboard); err != nil {
+		t.Fatalf("decode member dashboard: %v", err)
+	}
+	if dashboard.SavingBalance != 400000 || dashboard.TotalDeposit != 400000 || dashboard.TotalWithdrawal != 0 || dashboard.WajibBalance != 100000 || dashboard.SukarelaBalance != 250000 || dashboard.SHUBalance != 50000 {
+		t.Fatalf("unexpected member dashboard cards: %+v", dashboard)
+	}
+
+	cookie := fixture.browserLogin(t, "cards@coop.test", "member-password")
+	pageReq := httptest.NewRequest(http.MethodGet, "/member/dashboard", nil)
+	pageReq.AddCookie(cookie)
+	pageRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(pageRec, pageReq)
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("expected member dashboard page status 200, got %d: %s", pageRec.Code, pageRec.Body.String())
+	}
+	pageBody := pageRec.Body.String()
+	for _, text := range []string{"Simpanan Wajib</span><strong>100.000", "Simpanan Manasuka</span><strong>250.000", "Simpanan SHU</span><strong>50.000", "Saving balance</span><strong>400.000", "Total deposits</span><strong>400.000", "Total withdrawals</span><strong>0"} {
+		if !strings.Contains(pageBody, text) {
+			t.Fatalf("expected member dashboard card %q, got %s", text, pageBody)
+		}
 	}
 }
 

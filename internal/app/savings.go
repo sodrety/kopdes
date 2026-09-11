@@ -358,6 +358,7 @@ type SavingSummary struct {
 	PokokBalance               int64 `json:"pokok_balance"`
 	WajibBalance               int64 `json:"wajib_balance"`
 	SukarelaBalance            int64 `json:"sukarela_balance"`
+	SHUBalance                 int64 `json:"shu_balance"`
 	AvailableWithdrawalBalance int64 `json:"available_withdrawal_balance"`
 }
 
@@ -369,6 +370,8 @@ func (s SavingSummary) BalanceForCategory(category string) int64 {
 		return s.WajibBalance
 	case "sukarela":
 		return s.SukarelaBalance
+	case "shu":
+		return s.SHUBalance
 	default:
 		return 0
 	}
@@ -399,11 +402,12 @@ func savingSummary(q savingSummaryQuerier, memberID string) (SavingSummary, erro
 			COALESCE(SUM(CASE WHEN type = 'withdrawal' THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN category = 'pokok' AND type = 'deposit' THEN amount WHEN category = 'pokok' AND type = 'withdrawal' THEN -amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN category = 'wajib' AND type = 'deposit' THEN amount WHEN category = 'wajib' AND type = 'withdrawal' THEN -amount ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN category = 'sukarela' AND type = 'deposit' THEN amount WHEN category = 'sukarela' AND type = 'withdrawal' THEN -amount ELSE 0 END), 0)
+			COALESCE(SUM(CASE WHEN category = 'sukarela' AND type = 'deposit' THEN amount WHEN category = 'sukarela' AND type = 'withdrawal' THEN -amount ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN category = 'shu' AND type = 'deposit' THEN amount WHEN category = 'shu' AND type = 'withdrawal' THEN -amount ELSE 0 END), 0)
 		FROM saving_records
 		WHERE member_id = $1`,
 		memberID,
-	).Scan(&summary.TotalDeposit, &summary.TotalWithdrawal, &summary.PokokBalance, &summary.WajibBalance, &summary.SukarelaBalance)
+	).Scan(&summary.TotalDeposit, &summary.TotalWithdrawal, &summary.PokokBalance, &summary.WajibBalance, &summary.SukarelaBalance, &summary.SHUBalance)
 	if err != nil {
 		return SavingSummary{}, err
 	}

@@ -19,6 +19,11 @@ type AdminDashboardSummary struct {
 
 type MemberDashboardSummary struct {
 	SavingBalance        int64           `json:"saving_balance"`
+	TotalDeposit         int64           `json:"total_deposit"`
+	TotalWithdrawal      int64           `json:"total_withdrawal"`
+	WajibBalance         int64           `json:"wajib_balance"`
+	SukarelaBalance      int64           `json:"sukarela_balance"`
+	SHUBalance           int64           `json:"shu_balance"`
 	ActiveLoan           *Loan           `json:"active_loan"`
 	RemainingLoanBalance int64           `json:"remaining_loan_balance"`
 	LatestSavings        []SavingRecord  `json:"latest_savings"`
@@ -106,6 +111,11 @@ func (s *Server) memberDashboardSummary(memberID string) (MemberDashboardSummary
 	}
 	summary := MemberDashboardSummary{
 		SavingBalance:        savingSummary.CurrentBalance,
+		TotalDeposit:         savingSummary.TotalDeposit,
+		TotalWithdrawal:      savingSummary.TotalWithdrawal,
+		WajibBalance:         savingSummary.WajibBalance,
+		SukarelaBalance:      savingSummary.SukarelaBalance,
+		SHUBalance:           savingSummary.SHUBalance,
 		ActiveLoan:           activeLoan,
 		RemainingLoanBalance: remainingBalance,
 		LatestSavings:        savings,
