@@ -99,10 +99,10 @@
 {{define "member-profile"}}
 {{template "member-shell-start" .}}
     <section class="summary-grid">
-{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_pokok") "Value" (nominal .Summary.PokokBalance))}}
 {{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" (nominal .Summary.WajibBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" (nominal .Summary.SukarelaBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_manasuka") "Value" (nominal .Summary.SukarelaBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_shu") "Value" (nominal .Summary.SHUBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance))}}
 {{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" (nominal .Summary.TotalDeposit))}}
 {{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" (nominal .Summary.TotalWithdrawal))}}
     </section>

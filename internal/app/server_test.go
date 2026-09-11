@@ -1636,6 +1636,30 @@ func TestMemberCanUseBrowserLoginAndSeeProfilePage(t *testing.T) {
 	}
 }
 
+func TestMemberProfileCardsUseSavingsSummary(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-PROFILE-CARDS","full_name":"Profile Cards Member","join_date":"2026-06-16","status":"active","email":"profile-cards@coop.test","password":"member-password"}`)
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "wajib", 100000, "PROFILE-WAJIB", "Wajib saving")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 250000, "PROFILE-MANASUKA", "Manasuka saving")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "shu", 50000, "PROFILE-SHU", "SHU saving")
+
+	cookie := fixture.browserLogin(t, "profile-cards@coop.test", "member-password")
+	req := httptest.NewRequest(http.MethodGet, "/member/profile", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected member profile page status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	pageBody := rec.Body.String()
+	for _, text := range []string{"Simpanan Wajib</span><strong>100.000", "Simpanan Manasuka</span><strong>250.000", "Simpanan SHU</span><strong>50.000", "Saving balance</span><strong>400.000", "Total deposits</span><strong>400.000", "Total withdrawals</span><strong>0"} {
+		if !strings.Contains(pageBody, text) {
+			t.Fatalf("expected member profile card %q, got %s", text, pageBody)
+		}
+	}
+}
+
 func TestAdminCanRecordDepositAndMemberCanSeeSavingHistoryAndSummary(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
