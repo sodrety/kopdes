@@ -10,7 +10,7 @@ DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 DEPLOY_COMMIT="${DEPLOY_COMMIT:-}"
 SITE_URL="${SITE_URL:-https://koperasidj.id}"
 READY_URL="${READY_URL:-${SITE_URL%/}/ready}"
-BACKUP_DIR="${BACKUP_DIR:-$APP_DIR/backups}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/kopdes}"
 
 log() {
   printf '[deploy] %s\n' "$*"

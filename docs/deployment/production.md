@@ -454,23 +454,24 @@ The script refuses a dirty repository, fetches the selected commit, validates Co
 
 ## Backups
 
-The deploy script stores local backups under /opt/kopdes/backups. Prepare ownership once:
+The deploy script stores local backups outside the application checkout under /var/backups/kopdes. Prepare ownership once:
 
 ```sh
-sudo install -d -o deploy -g deploy -m 700 /opt/kopdes/backups
+sudo install -d -o deploy -g deploy -m 700 /var/backups/kopdes
 ```
 
 Manual backup:
 
 ```sh
 cd /opt/kopdes
+BACKUP_DIR=/var/backups/kopdes
 
 sudo -u deploy docker compose \
   --env-file .env.production \
   -f compose.production.yml \
   exec -T postgres \
   sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' | \
-  gzip -9 > "backups/kopdes-$(date -u +%Y%m%d-%H%M%S).sql.gz"
+  gzip -9 > "$BACKUP_DIR/kopdes-$(date -u +%Y%m%d-%H%M%S).sql.gz"
 ```
 
 Copy backups off the VPS. A backup that exists only on the VPS is not a production backup.
@@ -492,7 +493,7 @@ sudo -u deploy docker compose \
 Restore the selected backup:
 
 ```sh
-gunzip -c backups/kopdes-YYYYMMDD-HHMMSS.sql.gz | \
+gunzip -c /var/backups/kopdes/kopdes-YYYYMMDD-HHMMSS.sql.gz | \
 sudo -u deploy docker compose \
   --env-file .env.production \
   -f compose.production.yml \
@@ -527,8 +528,8 @@ sudo -u deploy git pull --ff-only origin main
 The backup directory is not owned by deploy:
 
 ```sh
-sudo chown deploy:deploy /opt/kopdes/backups
-sudo chmod 700 /opt/kopdes/backups
+sudo chown deploy:deploy /var/backups/kopdes
+sudo chmod 700 /var/backups/kopdes
 ```
 
 ### App shows Restarting (1)
