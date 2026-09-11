@@ -1,12 +1,16 @@
 {{define "member-dashboard"}}
 {{template "member-shell-start" .}}
     <section class="summary-grid">
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" (nominal .Dashboard.WajibBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_manasuka") "Value" (nominal .Dashboard.SukarelaBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_shu") "Value" (nominal .Dashboard.SHUBalance))}}
 {{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Dashboard.SavingBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" (nominal .Dashboard.TotalDeposit))}}
-{{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" (nominal .Dashboard.TotalWithdrawal))}}
+{{template "summary-card" (dict "Label" (t .Lang "remaining_loan") "Value" (nominal .Dashboard.RemainingLoanBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "next_due_date") "Value" .Dashboard.EarliestDueDate)}}
+{{template "summary-card" (dict "Label" (t .Lang "final_due_date") "Value" .Dashboard.LatestFinalDueDate)}}
+{{if .Dashboard.HasOverdueLoan}}{{template "summary-card" (dict "Label" (t .Lang "payment_status") "Value" (t .Lang "overdue"))}}{{end}}
+{{if .Dashboard.ActiveLoan}}
+{{template "summary-card" (dict "Label" (t .Lang "active_loan") "Value" (nominal .Dashboard.ActiveLoan.ApprovedAmount))}}
+{{else}}
+{{template "summary-card" (dict "Label" (t .Lang "active_loan") "Value" (t .Lang "none"))}}
+{{end}}
     </section>
     <section class="panel">
       <h2>{{t .Lang "loan_request_status"}}</h2>
