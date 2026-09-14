@@ -501,7 +501,7 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 		t.Fatalf("PostgreSQL repayment=%d remaining=%d", repaymentAmount, remaining)
 	}
 
-	deposit := url.Values{"member_id": {"pg-borrower"}, "type": {"deposit"}, "category": {"sukarela"}, "amount": {"Rp 4.000.000.000"}, "record_date": {startDate}}
+	deposit := url.Values{"member_id": {"pg-borrower"}, "type": {"deposit"}, "category": {"sukarela"}, "amount": {"Rp 4.000.000.000"}, "record_date": {startDate}, "note": {"PostgreSQL BIGINT saving"}}
 	deposited := request(http.MethodPost, "/api/admin/savings", login("manager-pg@coop.test"), "application/x-www-form-urlencoded", deposit.Encode())
 	if deposited.Code != http.StatusSeeOther {
 		t.Fatalf("record PostgreSQL BIGINT saving: %d %s", deposited.Code, deposited.Body.String())
@@ -512,7 +512,7 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 		t.Fatalf("submit PostgreSQL BIGINT withdrawal: %d %s", withdrawn.Code, withdrawn.Body.String())
 	}
 	var savingAmount, withdrawalAmount, reservationAmount int64
-	if err := db.QueryRow(`SELECT amount FROM saving_records WHERE member_id='pg-borrower' AND type='deposit'`).Scan(&savingAmount); err != nil {
+	if err := db.QueryRow(`SELECT amount FROM saving_records WHERE member_id='pg-borrower' AND type='deposit' AND note='PostgreSQL BIGINT saving'`).Scan(&savingAmount); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.QueryRow(`SELECT wr.amount,r.amount FROM withdrawal_requests wr JOIN withdrawal_reservations r ON r.request_id=wr.id WHERE wr.member_id='pg-borrower'`).Scan(&withdrawalAmount, &reservationAmount); err != nil {
