@@ -357,11 +357,20 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 
 	seedIdentity := func(id, number, email, role string) {
 		t.Helper()
-		if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ($1,$2,$3,$4,'active')`, id, number, number, "2026-07-15"); err != nil {
+		if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status,bank_name,bank_account) VALUES ($1,$2,$3,$4,'active','Test Bank','0000000000')`, id, number, number, "2026-07-15"); err != nil {
 			t.Fatalf("seed %s Member: %v", role, err)
 		}
 		if _, err := CreateMemberUser(db, email, "password", id); err != nil {
 			t.Fatalf("seed %s User: %v", role, err)
+		}
+		if id == "pg-borrower" {
+			var userID string
+			if err := db.QueryRow(`SELECT id FROM users WHERE member_id=$1 AND historical_identity=FALSE`, id).Scan(&userID); err != nil {
+				t.Fatalf("find %s User for saving fixture: %v", role, err)
+			}
+			if _, err := db.Exec(`INSERT INTO saving_records (id,member_id,type,category,amount,record_date,reference_no,note,recorded_by) VALUES ('saving-pg-borrower',$1,'deposit','sukarela',50000000,'2026-07-15','','PostgreSQL loan capacity fixture',$2)`, id, userID); err != nil {
+				t.Fatalf("seed %s savings: %v", role, err)
+			}
 		}
 		// These fixture accounts are established test identities. Production-created
 		// member accounts intentionally require a password change on first login.

@@ -16,14 +16,13 @@ ALTER TABLE loans
 CREATE OR REPLACE FUNCTION validate_loan_request_amount_against_savings()
 RETURNS trigger
 LANGUAGE plpgsql
-SET search_path = pg_catalog
 AS $$
 DECLARE
     saving_balance NUMERIC;
 BEGIN
     SELECT COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount::NUMERIC ELSE -amount::NUMERIC END), 0)
     INTO saving_balance
-    FROM public.saving_records
+    FROM saving_records
     WHERE member_id = NEW.member_id;
 
     IF NEW.requested_amount::NUMERIC > saving_balance * 4 THEN
@@ -42,14 +41,13 @@ FOR EACH ROW EXECUTE FUNCTION validate_loan_request_amount_against_savings();
 CREATE OR REPLACE FUNCTION validate_loan_proposed_amount_against_savings()
 RETURNS trigger
 LANGUAGE plpgsql
-SET search_path = pg_catalog
 AS $$
 DECLARE
     saving_balance NUMERIC;
 BEGIN
     SELECT COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount::NUMERIC ELSE -amount::NUMERIC END), 0)
     INTO saving_balance
-    FROM public.saving_records
+    FROM saving_records
     WHERE member_id = NEW.member_id;
 
     IF NEW.proposed_approved_amount IS NOT NULL AND NEW.proposed_approved_amount::NUMERIC > saving_balance * 4 THEN
@@ -68,14 +66,13 @@ FOR EACH ROW EXECUTE FUNCTION validate_loan_proposed_amount_against_savings();
 CREATE OR REPLACE FUNCTION validate_loan_approved_amount_against_savings()
 RETURNS trigger
 LANGUAGE plpgsql
-SET search_path = pg_catalog
 AS $$
 DECLARE
     saving_balance NUMERIC;
 BEGIN
     SELECT COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount::NUMERIC ELSE -amount::NUMERIC END), 0)
     INTO saving_balance
-    FROM public.saving_records
+    FROM saving_records
     WHERE member_id = NEW.member_id;
 
     IF NEW.approved_amount::NUMERIC > saving_balance * 4 THEN
