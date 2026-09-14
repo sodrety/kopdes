@@ -310,6 +310,59 @@ create trigger loan_repayments_aggregate_total before insert or delete or update
 create trigger loan_installments_scheduled_aggregate_total before insert or delete or update of scheduled_amount on public.loan_installments for each row execute function private.maintain_monetary_aggregate_total('loan_installments_scheduled_total', 'scheduled_amount', 'private');
 create trigger loan_installments_paid_aggregate_total before insert or delete or update of paid_amount on public.loan_installments for each row execute function private.maintain_monetary_aggregate_total('loan_installments_paid_total', 'paid_amount', 'private');
 
+-- Historical imports may preserve secondary/pay-later product identity while
+-- using legacy source terms. The legacy fee policy remains immutable, but is
+-- valid for every supported product type.
+alter table public.loans drop constraint if exists loans_admin_fee_policy_identity_check;
+alter table public.loan_requests drop constraint if exists loan_requests_admin_fee_policy_identity_check;
+alter table public.loans add constraint loans_admin_fee_policy_identity_check check (
+    (loan_type='regular' and legacy_terms=false and admin_fee_policy='regular_tiered_monthly_v1') or
+    (loan_type='secondary_goods' and legacy_terms=false and admin_fee_policy='secondary_goods_one_time_v1') or
+    (loan_type='goods_purchase_paylater' and legacy_terms=false and admin_fee_policy='goods_purchase_paylater_one_time_v1') or
+    (legacy_terms=true and admin_fee_policy='legacy_flat_monthly')
+);
+alter table public.loan_requests add constraint loan_requests_admin_fee_policy_identity_check check (
+    proposed_admin_fee_policy is null or
+    (loan_type='regular' and legacy_terms=false and proposed_admin_fee_policy='regular_tiered_monthly_v1') or
+    (loan_type='secondary_goods' and legacy_terms=false and proposed_admin_fee_policy='secondary_goods_one_time_v1') or
+    (loan_type='goods_purchase_paylater' and legacy_terms=false and proposed_admin_fee_policy='goods_purchase_paylater_one_time_v1') or
+    (legacy_terms=true and proposed_admin_fee_policy='legacy_flat_monthly')
+);
+drop trigger if exists loans_admin_fee_policy_identity_insert on public.loans;
+drop trigger if exists loan_requests_admin_fee_policy_identity_insert on public.loan_requests;
+create function public.validate_loan_admin_fee_policy_identity() returns trigger language plpgsql set search_path = '' as $$
+begin
+    if not (
+        (new.legacy_terms=true and new.admin_fee_policy='legacy_flat_monthly') or
+        (new.legacy_terms=false and (
+            (new.loan_type='regular' and new.admin_fee_policy='regular_tiered_monthly_v1') or
+            (new.loan_type='secondary_goods' and new.admin_fee_policy='secondary_goods_one_time_v1') or
+            (new.loan_type='goods_purchase_paylater' and new.admin_fee_policy='goods_purchase_paylater_one_time_v1')
+        ))
+    ) then
+        raise exception 'loan admin fee policy does not match loan terms';
+    end if;
+    return new;
+end $$;
+create trigger loans_admin_fee_policy_identity_insert before insert on public.loans
+for each row execute function public.validate_loan_admin_fee_policy_identity();
+create function public.validate_proposed_loan_admin_fee_policy_identity() returns trigger language plpgsql set search_path = '' as $$
+begin
+    if new.proposed_admin_fee_policy is not null and not (
+        (new.legacy_terms=true and new.proposed_admin_fee_policy='legacy_flat_monthly') or
+        (new.legacy_terms=false and (
+            (new.loan_type='regular' and new.proposed_admin_fee_policy='regular_tiered_monthly_v1') or
+            (new.loan_type='secondary_goods' and new.proposed_admin_fee_policy='secondary_goods_one_time_v1') or
+            (new.loan_type='goods_purchase_paylater' and new.proposed_admin_fee_policy='goods_purchase_paylater_one_time_v1')
+        ))
+    ) then
+        raise exception 'proposed loan admin fee policy does not match loan terms';
+    end if;
+    return new;
+end $$;
+create trigger loan_requests_admin_fee_policy_identity_insert before insert on public.loan_requests
+for each row execute function public.validate_proposed_loan_admin_fee_policy_identity();
+
 insert into public.schema_migrations (version, name)
 values (16, 'add_regular_loan_admin_fee_terms')
 on conflict (version) do nothing;

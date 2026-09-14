@@ -11,30 +11,36 @@ import (
 )
 
 type LoanRepayment struct {
-	ID          string `json:"id"`
-	LoanID      string `json:"loan_id"`
-	MemberID    string `json:"member_id"`
-	Amount      int64  `json:"amount"`
-	RecordDate  string `json:"record_date"`
-	ReferenceNo string `json:"reference_no"`
-	Note        string `json:"note"`
-	RecordedBy  string `json:"recorded_by,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
+	ID               string `json:"id"`
+	LoanID           string `json:"loan_id"`
+	MemberID         string `json:"member_id"`
+	Amount           int64  `json:"amount"`
+	RecordDate       string `json:"record_date"`
+	ReferenceNo      string `json:"reference_no"`
+	Note             string `json:"note"`
+	RecordedBy       string `json:"recorded_by,omitempty"`
+	CreatedAt        string `json:"created_at,omitempty"`
+	Type             string `json:"type"`
+	Historical       bool   `json:"historical"`
+	IncludedInTotals bool   `json:"included_in_totals"`
 }
 
 type AdminLoanRepayment struct {
-	ID              string `json:"id"`
-	LoanID          string `json:"loan_id"`
-	MemberID        string `json:"member_id"`
-	MemberNo        string `json:"member_no"`
-	FullName        string `json:"full_name"`
-	MemberType      string `json:"member_type"`
-	MemberTypeLabel string `json:"member_type_label"`
-	Amount          int64  `json:"amount"`
-	RecordDate      string `json:"record_date"`
-	ReferenceNo     string `json:"reference_no"`
-	Note            string `json:"note"`
-	CreatedAt       string `json:"created_at,omitempty"`
+	ID               string `json:"id"`
+	LoanID           string `json:"loan_id"`
+	MemberID         string `json:"member_id"`
+	MemberNo         string `json:"member_no"`
+	FullName         string `json:"full_name"`
+	MemberType       string `json:"member_type"`
+	MemberTypeLabel  string `json:"member_type_label"`
+	Amount           int64  `json:"amount"`
+	RecordDate       string `json:"record_date"`
+	ReferenceNo      string `json:"reference_no"`
+	Note             string `json:"note"`
+	CreatedAt        string `json:"created_at,omitempty"`
+	Type             string `json:"type"`
+	Historical       bool   `json:"historical"`
+	IncludedInTotals bool   `json:"included_in_totals"`
 }
 
 type repaymentInput struct {
@@ -54,6 +60,15 @@ var (
 	errLoanNotFound         = errors.New("loan not found")
 	errLoanNotActive        = errors.New("loan not active")
 )
+
+const repaymentHistoryQuery = `
+	SELECT id, loan_id, member_id, amount, record_date, reference_no, note, recorded_by, created_at,
+	       'repayment' AS event_type, FALSE AS historical, TRUE AS included_in_totals
+	FROM loan_repayments
+	UNION ALL
+	SELECT id, loan_id, member_id, amount, record_date, reference_no, note, recorded_by, created_at,
+	       event_type, TRUE AS historical, FALSE AS included_in_totals
+	FROM loan_repayment_events`
 
 func (s *Server) recordLoanRepayment(c *gin.Context) {
 	lang := languageFromRequest(c)
@@ -267,15 +282,17 @@ func (s *Server) repaymentByID(id string) (LoanRepayment, error) {
 		WHERE id = $1`,
 		id,
 	).Scan(&repayment.ID, &repayment.LoanID, &repayment.MemberID, &repayment.Amount, &repayment.RecordDate, &repayment.ReferenceNo, &repayment.Note, &repayment.RecordedBy, &repayment.CreatedAt)
+	repayment.Type = "repayment"
+	repayment.IncludedInTotals = true
 	return repayment, err
 }
 
 func (s *Server) repaymentsByMember(memberID string) ([]LoanRepayment, error) {
 	rows, err := s.db.Query(
-		`SELECT id, loan_id, member_id, amount, record_date, reference_no, note, recorded_by, created_at
-		FROM loan_repayments
+		`SELECT id, loan_id, member_id, amount, record_date, reference_no, note, recorded_by, created_at, event_type, historical, included_in_totals
+		FROM (`+repaymentHistoryQuery+`) history
 		WHERE member_id = $1
-		ORDER BY record_date DESC, created_at DESC`,
+		ORDER BY record_date DESC, created_at DESC, id DESC`,
 		memberID,
 	)
 	if err != nil {
@@ -286,7 +303,7 @@ func (s *Server) repaymentsByMember(memberID string) ([]LoanRepayment, error) {
 	var repayments []LoanRepayment
 	for rows.Next() {
 		var repayment LoanRepayment
-		if err := rows.Scan(&repayment.ID, &repayment.LoanID, &repayment.MemberID, &repayment.Amount, &repayment.RecordDate, &repayment.ReferenceNo, &repayment.Note, &repayment.RecordedBy, &repayment.CreatedAt); err != nil {
+		if err := rows.Scan(&repayment.ID, &repayment.LoanID, &repayment.MemberID, &repayment.Amount, &repayment.RecordDate, &repayment.ReferenceNo, &repayment.Note, &repayment.RecordedBy, &repayment.CreatedAt, &repayment.Type, &repayment.Historical, &repayment.IncludedInTotals); err != nil {
 			return nil, err
 		}
 		repayments = append(repayments, repayment)
@@ -296,9 +313,9 @@ func (s *Server) repaymentsByMember(memberID string) ([]LoanRepayment, error) {
 
 func (s *Server) repaymentsForAdmin(filters RepaymentFilters) ([]AdminLoanRepayment, error) {
 	search := strings.TrimSpace(filters.Search)
-	query := `SELECT lr.id, lr.loan_id, lr.member_id, m.member_no, m.full_name, m.member_type, lr.amount, lr.record_date, lr.reference_no, lr.note, lr.created_at
-		FROM loan_repayments lr
-		INNER JOIN members m ON m.id = lr.member_id`
+	query := `SELECT history.id, history.loan_id, history.member_id, m.member_no, m.full_name, m.member_type, history.amount, history.record_date, history.reference_no, history.note, history.created_at, history.event_type, history.historical, history.included_in_totals
+		FROM (` + repaymentHistoryQuery + `) history
+		INNER JOIN members m ON m.id = history.member_id`
 	args := []any{}
 	if search != "" {
 		args = append(args, "%"+strings.ToLower(search)+"%")
@@ -306,7 +323,7 @@ func (s *Server) repaymentsForAdmin(filters RepaymentFilters) ([]AdminLoanRepaym
 		WHERE LOWER(m.full_name) LIKE $1 OR LOWER(m.member_no) LIKE $1`
 	}
 	query += `
-		ORDER BY lr.record_date DESC, lr.created_at DESC`
+		ORDER BY history.record_date DESC, history.created_at DESC, history.id DESC`
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -317,7 +334,7 @@ func (s *Server) repaymentsForAdmin(filters RepaymentFilters) ([]AdminLoanRepaym
 	var repayments []AdminLoanRepayment
 	for rows.Next() {
 		var repayment AdminLoanRepayment
-		if err := rows.Scan(&repayment.ID, &repayment.LoanID, &repayment.MemberID, &repayment.MemberNo, &repayment.FullName, &repayment.MemberType, &repayment.Amount, &repayment.RecordDate, &repayment.ReferenceNo, &repayment.Note, &repayment.CreatedAt); err != nil {
+		if err := rows.Scan(&repayment.ID, &repayment.LoanID, &repayment.MemberID, &repayment.MemberNo, &repayment.FullName, &repayment.MemberType, &repayment.Amount, &repayment.RecordDate, &repayment.ReferenceNo, &repayment.Note, &repayment.CreatedAt, &repayment.Type, &repayment.Historical, &repayment.IncludedInTotals); err != nil {
 			return nil, err
 		}
 		repayment.MemberTypeLabel = memberTypeLabel(repayment.MemberType)
@@ -334,10 +351,10 @@ func repaymentFiltersFromQuery(c *gin.Context) RepaymentFilters {
 
 func (s *Server) latestRepaymentsByMember(memberID string, limit int) ([]LoanRepayment, error) {
 	rows, err := s.db.Query(
-		`SELECT id, loan_id, member_id, amount, record_date, reference_no, note, recorded_by, created_at
-		FROM loan_repayments
+		`SELECT id, loan_id, member_id, amount, record_date, reference_no, note, recorded_by, created_at, event_type, historical, included_in_totals
+		FROM (`+repaymentHistoryQuery+`) history
 		WHERE member_id = $1
-		ORDER BY record_date DESC, created_at DESC
+		ORDER BY record_date DESC, created_at DESC, id DESC
 		LIMIT $2`,
 		memberID,
 		limit,
@@ -350,7 +367,7 @@ func (s *Server) latestRepaymentsByMember(memberID string, limit int) ([]LoanRep
 	var repayments []LoanRepayment
 	for rows.Next() {
 		var repayment LoanRepayment
-		if err := rows.Scan(&repayment.ID, &repayment.LoanID, &repayment.MemberID, &repayment.Amount, &repayment.RecordDate, &repayment.ReferenceNo, &repayment.Note, &repayment.RecordedBy, &repayment.CreatedAt); err != nil {
+		if err := rows.Scan(&repayment.ID, &repayment.LoanID, &repayment.MemberID, &repayment.Amount, &repayment.RecordDate, &repayment.ReferenceNo, &repayment.Note, &repayment.RecordedBy, &repayment.CreatedAt, &repayment.Type, &repayment.Historical, &repayment.IncludedInTotals); err != nil {
 			return nil, err
 		}
 		repayments = append(repayments, repayment)

@@ -145,6 +145,181 @@ func TestValidateSeedManifestStoresAllTemplateSavingCategoriesAndSkipsUnmatchedR
 	}
 }
 
+func TestValidateSeedManifestAttachesRepaymentsToStableLoanRecords(t *testing.T) {
+	manifest := seeddata.Manifest{
+		Version: seeddata.ManifestVersion,
+		Members: []seeddata.Member{{
+			Source:       seeddata.SourceRef{Source: "template.xlsx", Sheet: "01_Anggota", Row: 5},
+			CurrentNPP:   "KKSUK-000001",
+			FullName:     "Multi Loan Member",
+			SourceStatus: "Aktif",
+			JoinDate:     "2026-01-01",
+		}},
+		Loans: []seeddata.Loan{{
+			Source:             seeddata.SourceRef{Source: "template.xlsx", Sheet: "04_Pinjaman", Row: 5},
+			LoanType:           "regular",
+			MemberName:         "Multi Loan Member",
+			SourceHint:         "1",
+			Principal:          "100",
+			AdminFee:           "0",
+			TotalObligation:    "100",
+			MonthlyInstallment: "100",
+			DurationMonths:     1,
+			StartDate:          "2026-01-01",
+			SourceStatus:       "Lunas",
+		}, {
+			Source:             seeddata.SourceRef{Source: "template.xlsx", Sheet: "04_Pinjaman", Row: 6},
+			LoanType:           "regular",
+			MemberName:         "Multi Loan Member",
+			SourceHint:         "2",
+			Principal:          "200",
+			AdminFee:           "0",
+			TotalObligation:    "200",
+			MonthlyInstallment: "200",
+			DurationMonths:     1,
+			StartDate:          "2026-02-01",
+			SourceStatus:       "Lunas",
+		}},
+		LoanEvidence: []seeddata.LoanEvidence{{
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "05_Angsuran", Row: 5},
+			MemberName: "Multi Loan Member",
+			LoanHint:   "1",
+			Method:     "3. Cicilan",
+			Amount:     "100",
+			RecordDate: "2026-01-15",
+		}, {
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "05_Angsuran", Row: 6},
+			MemberName: "Multi Loan Member",
+			LoanHint:   "2",
+			Method:     "3. Cicilan",
+			Amount:     "200",
+			RecordDate: "2026-02-15",
+		}},
+	}
+
+	prepared, issues := validateSeedManifest(manifest)
+	if len(issues) != 0 {
+		t.Fatalf("multi-loan repayment fixture produced issues: %+v", issues)
+	}
+	if len(prepared.Loans) != 2 || len(prepared.Loans[0].Repayments) != 1 || len(prepared.Loans[1].Repayments) != 1 {
+		t.Fatalf("repayments were not attached to both loans: %+v", prepared.Loans)
+	}
+}
+
+func TestValidateSeedManifestQuarantinesRefundsAndSuspensions(t *testing.T) {
+	manifest := seeddata.Manifest{
+		Version: seeddata.ManifestVersion,
+		Members: []seeddata.Member{{
+			Source:       seeddata.SourceRef{Source: "template.xlsx", Sheet: "01_Anggota", Row: 5},
+			CurrentNPP:   "KKSUK-000001",
+			FullName:     "Adjustment Member",
+			SourceStatus: "Aktif",
+			JoinDate:     "2026-01-01",
+		}},
+		Loans: []seeddata.Loan{{
+			Source:             seeddata.SourceRef{Source: "template.xlsx", Sheet: "04_Pinjaman", Row: 5},
+			LoanType:           "regular",
+			MemberName:         "Adjustment Member",
+			SourceHint:         "1",
+			Principal:          "200",
+			AdminFee:           "0",
+			TotalObligation:    "200",
+			MonthlyInstallment: "200",
+			DurationMonths:     1,
+			StartDate:          "2026-01-01",
+		}},
+		LoanEvidence: []seeddata.LoanEvidence{{
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "05_Angsuran", Row: 5},
+			MemberName: "Adjustment Member",
+			LoanHint:   "1",
+			Method:     "3. Cicilan",
+			Amount:     "100",
+			RecordDate: "2026-01-15",
+		}, {
+			Source:      seeddata.SourceRef{Source: "template.xlsx", Sheet: "05_Angsuran", Row: 6},
+			MemberName:  "Adjustment Member",
+			LoanHint:    "1",
+			Method:      "3. Cicilan",
+			Amount:      "-25",
+			RecordDate:  "2026-01-20",
+			Description: "Pengembalian dana",
+		}, {
+			Source:      seeddata.SourceRef{Source: "template.xlsx", Sheet: "05_Angsuran", Row: 7},
+			MemberName:  "Adjustment Member",
+			LoanHint:    "1",
+			Method:      "3. Cicilan",
+			Amount:      "0",
+			RecordDate:  "2026-01-25",
+			Description: "Penangguhan Cicilan",
+		}, {
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "05_Angsuran", Row: 8},
+			MemberName: "Adjustment Member",
+			LoanHint:   "1",
+			Method:     "3. Cicilan",
+		}},
+	}
+
+	prepared, issues := validateSeedManifest(manifest)
+	if len(prepared.Loans) != 1 || len(prepared.Loans[0].Repayments) != 1 || prepared.Loans[0].Repayments[0].Amount != 100 {
+		t.Fatalf("unexpected prepared repayments: %+v", prepared.Loans)
+	}
+	if len(issues) != 3 {
+		t.Fatalf("issues = %d, want three audit warnings: %+v", len(issues), issues)
+	}
+	seen := map[string]bool{}
+	for _, issue := range issues {
+		if issue.Blocker {
+			t.Fatalf("unexpected blocker: %+v", issue)
+		}
+		seen[issue.Entity] = true
+	}
+	if !seen["loan_repayment_adjustment"] || !seen["loan_repayment_suspension"] {
+		t.Fatalf("refund/suspension issues missing: %+v", issues)
+	}
+}
+
+func TestValidateSeedManifestStagesPaidOverageForAdjustment(t *testing.T) {
+	manifest := seeddata.Manifest{
+		Version: seeddata.ManifestVersion,
+		Members: []seeddata.Member{{
+			Source:       seeddata.SourceRef{Source: "template.xlsx", Sheet: "01_Anggota", Row: 5},
+			CurrentNPP:   "KKSUK-000001",
+			FullName:     "Overpaid Member",
+			SourceStatus: "Aktif",
+			JoinDate:     "2026-01-01",
+		}},
+		Loans: []seeddata.Loan{{
+			Source:             seeddata.SourceRef{Source: "template.xlsx", Sheet: "04_Pinjaman", Row: 5},
+			LoanType:           "regular",
+			MemberName:         "Overpaid Member",
+			SourceHint:         "1",
+			Principal:          "200",
+			AdminFee:           "0",
+			TotalObligation:    "200",
+			MonthlyInstallment: "200",
+			DurationMonths:     1,
+			StartDate:          "2026-01-01",
+			SourceStatus:       "Lunas",
+		}},
+		LoanEvidence: []seeddata.LoanEvidence{{
+			Source:     seeddata.SourceRef{Source: "template.xlsx", Sheet: "05_Angsuran", Row: 5},
+			MemberName: "Overpaid Member",
+			LoanHint:   "1",
+			Method:     "3. Cicilan",
+			Amount:     "225",
+			RecordDate: "2026-01-15",
+		}},
+	}
+
+	prepared, issues := validateSeedManifest(manifest)
+	if len(prepared.Loans) != 1 || prepared.Loans[0].Status != "adjustment_due" || prepared.Loans[0].Remaining != 0 {
+		t.Fatalf("overpaid Lunas loan was not staged for adjustment: %+v", prepared.Loans)
+	}
+	if len(issues) != 1 || issues[0].Blocker || issues[0].Severity != "warning" || issues[0].Entity != "loan_reconciliation" {
+		t.Fatalf("unexpected overage issue: %+v", issues)
+	}
+}
+
 func TestSeedImportStoresExtendedCategoriesSkipsUnmatchedAndCreatesCredentials(t *testing.T) {
 	db := v14TestDatabase(t)
 	manifest := seeddata.Manifest{

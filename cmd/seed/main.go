@@ -29,6 +29,10 @@ func main() {
 		if err := importManifest(os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
+	case "backfill-repayment-events":
+		if err := backfillRepaymentEvents(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
 	case "rename-emails":
 		if err := renameEmails(os.Args[2:]); err != nil {
 			log.Fatal(err)
@@ -74,6 +78,7 @@ func importManifest(args []string) error {
 	manifestPath := flags.String("manifest", "docs/seed-data/generated/seed-manifest.json", "normalized manifest")
 	dryRun := flags.Bool("dry-run", false, "validate and report without inserting operational data")
 	appendMode := flags.Bool("append", false, "append members and savings to an existing operational database")
+	historicalLoans := flags.Bool("historical-loans", false, "append historical loans and repayments while preserving the complete source audit")
 	credentials := flags.String("credentials", "", "restricted output path for new member credentials")
 	report := flags.String("report", "", "output path for the reconciliation report")
 	if err := flags.Parse(args); err != nil {
@@ -106,13 +111,64 @@ func importManifest(args []string) error {
 	if err := db.Ping(); err != nil {
 		return err
 	}
-	result, err := app.RunSeedImport(db, manifest, app.SeedImportOptions{DryRun: *dryRun, Append: *appendMode, CredentialsPath: *credentials, ReportPath: *report})
+	result, err := app.RunSeedImport(db, manifest, app.SeedImportOptions{DryRun: *dryRun, Append: *appendMode, HistoricalLoans: *historicalLoans, CredentialsPath: *credentials, ReportPath: *report})
 	encoded, encodeErr := json.MarshalIndent(result, "", "  ")
 	if encodeErr == nil {
 		fmt.Println(string(encoded))
 	}
 	if err != nil {
 		return err
+	}
+	return encodeErr
+}
+
+func backfillRepaymentEvents(args []string) error {
+	flags := flag.NewFlagSet("backfill-repayment-events", flag.ContinueOnError)
+	manifestPath := flags.String("manifest", "docs/seed-data/generated/seed-manifest.json", "normalized manifest")
+	reportPath := flags.String("report", "", "output path for the backfill report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	payload, err := os.ReadFile(*manifestPath)
+	if err != nil {
+		return err
+	}
+	var manifest seeddata.Manifest
+	if err := json.Unmarshal(payload, &manifest); err != nil {
+		return fmt.Errorf("decode manifest: %w", err)
+	}
+	if *reportPath == "" {
+		*reportPath = filepath.Join("output", "seed", manifest.SnapshotID+"-repayment-events-report.json")
+	}
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	databaseDriver := os.Getenv("DATABASE_DRIVER")
+	if databaseDriver == "" {
+		databaseDriver = "pgx"
+	}
+	db, err := app.OpenDatabase(app.Config{DatabaseDriver: databaseDriver, DatabaseURL: databaseURL})
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := db.Ping(); err != nil {
+		return err
+	}
+	result, runErr := app.RunHistoricalRepaymentEventBackfill(db, manifest)
+	encoded, encodeErr := json.MarshalIndent(result, "", "  ")
+	if encodeErr == nil {
+		if err := os.MkdirAll(filepath.Dir(*reportPath), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(*reportPath, append(encoded, '\n'), 0o600); err != nil {
+			return err
+		}
+		fmt.Println(string(encoded))
+	}
+	if runErr != nil {
+		return runErr
 	}
 	return encodeErr
 }
@@ -157,5 +213,5 @@ func renameEmails(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: go run ./cmd/seed normalize|import|rename-emails [options]")
+	fmt.Fprintln(os.Stderr, "usage: go run ./cmd/seed normalize|import|backfill-repayment-events|rename-emails [options]")
 }

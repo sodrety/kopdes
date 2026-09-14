@@ -79,14 +79,16 @@
         <thead>
           <tr>
             <th>{{t $.Lang "date"}}</th>
+            <th>{{t $.Lang "repayment_type"}}</th>
             <th>{{t $.Lang "amount"}}</th>
             <th>{{t $.Lang "reference"}}</th>
           </tr>
         </thead>
         <tbody>
           {{range .Dashboard.LatestRepayments}}
-          <tr>
+          <tr class="{{if eq .Type "adjustment"}}historical-adjustment-row{{else if eq .Type "suspension"}}historical-suspension-row{{end}}">
             <td>{{.RecordDate}}</td>
+            <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
             <td>{{nominal .Amount}}</td>
             <td>{{.ReferenceNo}}</td>
           </tr>
@@ -97,6 +99,74 @@
 {{template "empty-state" (t .Lang "no_repayment_records")}}
       {{end}}
     </section>
+{{template "member-shell-end" .}}
+{{end}}
+
+{{define "member-loan-request-detail"}}
+{{template "member-shell-start" .}}
+    <section class="page-actions">
+      <a class="button-link button-link-secondary" href="/member/loan-requests">{{t .Lang "loan_requests"}}</a>
+    </section>
+    <section class="panel">
+      <h2>{{t .Lang "loan_detail"}}</h2>
+      <div class="detail-grid">
+        <div><span>{{t .Lang "loan_type"}}</span><strong>{{template "loan-type-label" (dict "Lang" .Lang "LoanType" .Request.LoanType "LegacyTerms" .Request.LegacyTerms)}}</strong></div>
+        <div><span>{{t .Lang "requested_amount"}}</span><strong>Rp {{nominal .Request.RequestedAmount}}</strong></div>
+        <div><span>{{t .Lang "duration"}}</span><strong>{{.Request.DurationMonths}} {{t .Lang "months"}}</strong></div>
+        <div><span>{{t .Lang "status"}}</span><strong>{{template "status-badge" (dict "Lang" .Lang "Status" .Request.Status)}}</strong></div>
+        <div><span>{{t .Lang "purpose"}}</span><strong>{{.Request.Purpose}}</strong></div>
+        {{if .Request.RejectionReason}}<div><span>{{t .Lang "rejection_reason"}}</span><strong>{{.Request.RejectionReason}}</strong></div>{{end}}
+      </div>
+    </section>
+    {{if .Loan}}
+    <section class="panel">
+      <h2>{{t .Lang "approved_loan"}}</h2>
+      <div class="detail-grid">
+        <div><span>{{t .Lang "loan_id"}}</span><strong>{{.Loan.ID}}</strong></div>
+        <div><span>{{t .Lang "approved_amount"}}</span><strong>Rp {{nominal .Loan.ApprovedAmount}}</strong></div>
+        <div><span>{{t .Lang "monthly_installment"}}</span><strong>Rp {{nominal .Loan.MonthlyInstallment}}</strong></div>
+        <div><span>{{t .Lang "total_obligation"}}</span><strong>Rp {{nominal .Loan.TotalObligation}}</strong></div>
+        <div><span>{{t .Lang "remaining_balance"}}</span><strong>Rp {{nominal .Loan.RemainingBalance}}</strong></div>
+        <div><span>{{t .Lang "start_date"}}</span><strong>{{.Loan.StartDate}}</strong></div>
+        <div><span>{{t .Lang "next_due_date"}}</span><strong>{{.Loan.NextDueDate}}</strong></div>
+        <div><span>{{t .Lang "final_due_date"}}</span><strong>{{.Loan.FinalDueDate}}</strong></div>
+        <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang (printf "status_%s" .Loan.Status)}}</strong></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>{{t .Lang "repayment_history"}}</h2>
+      {{if .Repayments}}
+{{template "table-open" .}}
+        <thead>
+          <tr>
+            <th>{{t $.Lang "date"}}</th>
+            <th>{{t $.Lang "repayment_type"}}</th>
+            <th>{{t $.Lang "amount"}}</th>
+            <th>{{t $.Lang "reference"}}</th>
+            <th>{{t $.Lang "note"}}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Repayments}}
+          <tr class="{{if eq .Type "adjustment"}}historical-adjustment-row{{else if eq .Type "suspension"}}historical-suspension-row{{end}}">
+            <td>{{.RecordDate}}</td>
+            <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
+            <td>{{nominal .Amount}}</td>
+            <td>{{.ReferenceNo}}</td>
+            <td>{{.Note}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+{{template "table-close" .}}
+      {{else}}
+{{template "empty-state" (t .Lang "no_repayments")}}
+      {{end}}
+    </section>
+    {{else}}
+    <section class="panel">
+{{template "empty-state" (t .Lang "no_approved_loan")}}
+    </section>
+    {{end}}
 {{template "member-shell-end" .}}
 {{end}}
 
@@ -184,6 +254,7 @@
         <thead>
           <tr>
             <th>{{t $.Lang "date"}}</th>
+            <th>{{t $.Lang "repayment_type"}}</th>
             <th>{{t $.Lang "amount"}}</th>
             <th>{{t $.Lang "reference"}}</th>
             <th>{{t $.Lang "note"}}</th>
@@ -191,8 +262,9 @@
         </thead>
         <tbody>
           {{range .Repayments}}
-          <tr>
+          <tr class="{{if eq .Type "adjustment"}}historical-adjustment-row{{else if eq .Type "suspension"}}historical-suspension-row{{end}}">
             <td>{{.RecordDate}}</td>
+            <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
             <td>{{nominal .Amount}}</td>
             <td>{{.ReferenceNo}}</td>
             <td>{{.Note}}</td>
@@ -323,6 +395,7 @@
               <th>{{t $.Lang "duration"}}</th>
               <th>{{t $.Lang "status"}}</th>
               <th>{{t $.Lang "purpose"}}</th>
+              <th>{{t $.Lang "details"}}</th>
               <th>{{t $.Lang "review"}}</th>
             </tr>
           </thead>
@@ -334,6 +407,7 @@
               <td>{{.DurationMonths}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
               <td>{{.Purpose}}</td>
+              <td><a class="button-link button-link-secondary" href="/member/loan-requests/{{.ID}}">{{t $.Lang "view_details"}}</a></td>
               <td>{{if .CurrentApprovalStage}}{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}{{end}}{{if .LatestDecision}}<div>{{t $.Lang (printf "role_%s" .LatestDecision.OfficerRole)}} — {{t $.Lang (printf "status_%s" .LatestDecision.Decision)}} — {{.LatestDecision.CreatedAt}}{{if .LatestDecision.Note}} · {{.LatestDecision.Note}}{{end}}{{if .LatestDecision.Reason}} · {{.LatestDecision.Reason}}{{end}}</div>{{end}}{{if eq .Status "pending"}}<form method="post" action="/api/member/loan-requests/{{.ID}}/cancel" hx-post="/api/member/loan-requests/{{.ID}}/cancel"><button class="button-secondary" type="submit">{{t $.Lang "cancel"}}</button></form>{{end}}</td>
             </tr>
             {{end}}

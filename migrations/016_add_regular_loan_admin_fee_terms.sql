@@ -301,6 +301,59 @@ CREATE TRIGGER loan_repayments_aggregate_total BEFORE INSERT OR DELETE OR UPDATE
 CREATE TRIGGER loan_installments_scheduled_aggregate_total BEFORE INSERT OR DELETE OR UPDATE OF scheduled_amount ON loan_installments FOR EACH ROW EXECUTE FUNCTION maintain_monetary_aggregate_total('loan_installments_scheduled_total','scheduled_amount');
 CREATE TRIGGER loan_installments_paid_aggregate_total BEFORE INSERT OR DELETE OR UPDATE OF paid_amount ON loan_installments FOR EACH ROW EXECUTE FUNCTION maintain_monetary_aggregate_total('loan_installments_paid_total','paid_amount');
 
+-- Historical imports may preserve secondary/pay-later product identity while
+-- using legacy source terms. The legacy fee policy remains immutable, but is
+-- valid for every supported product type.
+ALTER TABLE loans DROP CONSTRAINT IF EXISTS loans_admin_fee_policy_identity_check;
+ALTER TABLE loan_requests DROP CONSTRAINT IF EXISTS loan_requests_admin_fee_policy_identity_check;
+ALTER TABLE loans ADD CONSTRAINT loans_admin_fee_policy_identity_check CHECK (
+    (loan_type='regular' AND legacy_terms=FALSE AND admin_fee_policy='regular_tiered_monthly_v1') OR
+    (loan_type='secondary_goods' AND legacy_terms=FALSE AND admin_fee_policy='secondary_goods_one_time_v1') OR
+    (loan_type='goods_purchase_paylater' AND legacy_terms=FALSE AND admin_fee_policy='goods_purchase_paylater_one_time_v1') OR
+    (legacy_terms=TRUE AND admin_fee_policy='legacy_flat_monthly')
+);
+ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_admin_fee_policy_identity_check CHECK (
+    proposed_admin_fee_policy IS NULL OR
+    (loan_type='regular' AND legacy_terms=FALSE AND proposed_admin_fee_policy='regular_tiered_monthly_v1') OR
+    (loan_type='secondary_goods' AND legacy_terms=FALSE AND proposed_admin_fee_policy='secondary_goods_one_time_v1') OR
+    (loan_type='goods_purchase_paylater' AND legacy_terms=FALSE AND proposed_admin_fee_policy='goods_purchase_paylater_one_time_v1') OR
+    (legacy_terms=TRUE AND proposed_admin_fee_policy='legacy_flat_monthly')
+);
+DROP TRIGGER IF EXISTS loans_admin_fee_policy_identity_insert ON loans;
+DROP TRIGGER IF EXISTS loan_requests_admin_fee_policy_identity_insert ON loan_requests;
+CREATE FUNCTION validate_loan_admin_fee_policy_identity() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
+BEGIN
+    IF NOT (
+        (NEW.legacy_terms=TRUE AND NEW.admin_fee_policy='legacy_flat_monthly') OR
+        (NEW.legacy_terms=FALSE AND (
+            (NEW.loan_type='regular' AND NEW.admin_fee_policy='regular_tiered_monthly_v1') OR
+            (NEW.loan_type='secondary_goods' AND NEW.admin_fee_policy='secondary_goods_one_time_v1') OR
+            (NEW.loan_type='goods_purchase_paylater' AND NEW.admin_fee_policy='goods_purchase_paylater_one_time_v1')
+        ))
+    ) THEN
+        RAISE EXCEPTION 'loan admin fee policy does not match loan terms';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER loans_admin_fee_policy_identity_insert BEFORE INSERT ON loans
+FOR EACH ROW EXECUTE FUNCTION validate_loan_admin_fee_policy_identity();
+CREATE FUNCTION validate_proposed_loan_admin_fee_policy_identity() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
+BEGIN
+    IF NEW.proposed_admin_fee_policy IS NOT NULL AND NOT (
+        (NEW.legacy_terms=TRUE AND NEW.proposed_admin_fee_policy='legacy_flat_monthly') OR
+        (NEW.legacy_terms=FALSE AND (
+            (NEW.loan_type='regular' AND NEW.proposed_admin_fee_policy='regular_tiered_monthly_v1') OR
+            (NEW.loan_type='secondary_goods' AND NEW.proposed_admin_fee_policy='secondary_goods_one_time_v1') OR
+            (NEW.loan_type='goods_purchase_paylater' AND NEW.proposed_admin_fee_policy='goods_purchase_paylater_one_time_v1')
+        ))
+    ) THEN
+        RAISE EXCEPTION 'proposed loan admin fee policy does not match loan terms';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER loan_requests_admin_fee_policy_identity_insert BEFORE INSERT ON loan_requests
+FOR EACH ROW EXECUTE FUNCTION validate_proposed_loan_admin_fee_policy_identity();
+
 INSERT INTO schema_migrations (version, name)
 VALUES (16, 'add_regular_loan_admin_fee_terms');
 

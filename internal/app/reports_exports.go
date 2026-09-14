@@ -1015,9 +1015,10 @@ func (s *Server) exportRepaymentsCSV(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	writeCSV(c, "angsuran-export.csv", []string{"member_no", "member", translate(languageFromRequest(c), "member_type"), "loan_id", "amount", "date", "reference_no", "note"}, func(w *csv.Writer) error {
+	lang := languageFromRequest(c)
+	writeCSV(c, "angsuran-export.csv", []string{"member_no", "member", translate(lang, "member_type"), "loan_id", translate(lang, "repayment_type"), "amount", "date", "reference_no", "note"}, func(w *csv.Writer) error {
 		for _, repayment := range repayments {
-			if err := w.Write([]string{repayment.MemberNo, repayment.FullName, repayment.MemberTypeLabel, repayment.LoanID, strconv.FormatInt(repayment.Amount, 10), repayment.RecordDate, repayment.ReferenceNo, repayment.Note}); err != nil {
+			if err := w.Write([]string{repayment.MemberNo, repayment.FullName, repayment.MemberTypeLabel, repayment.LoanID, translate(lang, "repayment_type_"+repayment.Type), strconv.FormatInt(repayment.Amount, 10), repayment.RecordDate, repayment.ReferenceNo, repayment.Note}); err != nil {
 				return err
 			}
 		}

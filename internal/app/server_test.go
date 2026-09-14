@@ -207,15 +207,15 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 20 {
-		t.Fatalf("expected twenty tracked migrations, got %d", migrationCount)
+	if migrationCount != 21 {
+		t.Fatalf("expected twenty-one tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 20`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 21`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "add_member_bank_details_and_saving_based_loan_limit" {
+	if latestName != "create_historical_loan_repayment_events" {
 		t.Fatalf("expected latest bank details and loan limit migration, got %q", latestName)
 	}
 
@@ -2171,7 +2171,7 @@ func TestAdminCanExportPinjamanAndAngsuranCSV(t *testing.T) {
 		t.Fatalf("expected angsuran export status 200, got %d: %s", repaymentRec.Code, repaymentRec.Body.String())
 	}
 	repaymentBody := repaymentRec.Body.String()
-	for _, text := range []string{"member_no,member,Member type,loan_id,amount,date,reference_no,note", "M-LOAN-EXP,Loan Export,Karyawan," + loan.ID + ",100000,2026-06-16,RPY-TEST,Test repayment"} {
+	for _, text := range []string{"member_no,member,Member type,loan_id,Record type,amount,date,reference_no,note", "M-LOAN-EXP,Loan Export,Karyawan," + loan.ID + ",Repayment,100000,2026-06-16,RPY-TEST,Test repayment"} {
 		if !strings.Contains(repaymentBody, text) {
 			t.Fatalf("expected angsuran export to include %q, got %s", text, repaymentBody)
 		}
@@ -3066,6 +3066,64 @@ func TestMemberLoanRequestPageRendersFormAndHistory(t *testing.T) {
 	}
 }
 
+func TestMemberCanOpenLoanRequestDetailAndSeeRepaymentHistory(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-DETAIL-LOAN","full_name":"Loan Detail Member","join_date":"2026-06-16","status":"active","email":"loan-detail@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "loan-detail@coop.test", "member-password")
+	requestID := fixture.createLoanRequest(t, memberToken, 800000, 4)
+	loan := fixture.approveLoanRequest(t, adminToken, requestID, 800000, 4)
+	fixture.recordRepayment(t, adminToken, loan.ID, 200000)
+	if _, err := fixture.db.Exec(`INSERT INTO loan_repayment_events (id,loan_id,member_id,event_type,amount,record_date,reference_no,note,recorded_by,source_key) VALUES ('detail-historical-adjustment',$1,$2,'adjustment',-500,'2026-05-01','DETAIL-NEG','Historical refund','admin','detail-negative'),('detail-historical-suspension',$1,$2,'suspension',0,'2026-04-01','DETAIL-ZERO','Historical penangguhan','admin','detail-zero')`, loan.ID, member.ID); err != nil {
+		t.Fatalf("insert historical detail events: %v", err)
+	}
+
+	memberCookie := fixture.browserLogin(t, "loan-detail@coop.test", "member-password")
+	listReq := httptest.NewRequest(http.MethodGet, "/member/loan-requests", nil)
+	listReq.AddCookie(memberCookie)
+	listRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK || !strings.Contains(listRec.Body.String(), `href="/member/loan-requests/`+requestID+`"`) {
+		t.Fatalf("expected loan request list to link to detail, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/member/loan-requests/"+requestID, nil)
+	req.AddCookie(memberCookie)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected loan detail page status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, text := range []string{"Loan detail", "Approved loan", loan.ID, "Repayment history", "200.000", "RPY-TEST", "Test repayment", "Historical adjustment", "Deferral (Penangguhan)", "-500"} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected loan detail page to include %q, got %s", text, body)
+		}
+	}
+}
+
+func TestMemberCannotOpenAnotherMembersLoanRequestDetail(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	fixture.createMember(t, adminToken, `{"member_no":"M-DETAIL-OWNER","full_name":"Loan Detail Owner","join_date":"2026-06-16","status":"active","email":"loan-detail-owner@coop.test","password":"member-password"}`)
+	fixture.createMember(t, adminToken, `{"member_no":"M-DETAIL-OTHER","full_name":"Loan Detail Other","join_date":"2026-06-16","status":"active","email":"loan-detail-other@coop.test","password":"member-password"}`)
+	ownerToken := fixture.login(t, "loan-detail-owner@coop.test", "member-password")
+	otherToken := fixture.login(t, "loan-detail-other@coop.test", "member-password")
+	requestID := fixture.createLoanRequest(t, ownerToken, 400000, 2)
+
+	req := httptest.NewRequest(http.MethodGet, "/member/loan-requests/"+requestID, nil)
+	req.Header.Set("Authorization", "Bearer "+otherToken)
+	rec := httptest.NewRecorder()
+
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected another member loan detail to be hidden, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminCanListPendingLoanRequestsForReview(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
@@ -3614,6 +3672,78 @@ func TestAdminCanRecordRepaymentAndMemberCanViewHistory(t *testing.T) {
 	}
 	if len(history.Repayments) != 1 || history.Repayments[0].ID != repayment.ID || history.Repayments[0].Amount != 250000 {
 		t.Fatalf("unexpected repayment history: %+v", history.Repayments)
+	}
+}
+
+func TestHistoricalRepaymentEventsAreVisibleButExcludedFromTotals(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-HIST-REPAY","full_name":"Historical Repayment","join_date":"2026-06-16","status":"active","email":"historical-repayment@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "historical-repayment@coop.test", "member-password")
+	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 1000000, 5), 1000000, 5)
+	fixture.recordRepayment(t, adminToken, loan.ID, 250000)
+	if _, err := fixture.db.Exec(`INSERT INTO loan_repayment_events (id,loan_id,member_id,event_type,amount,record_date,reference_no,note,recorded_by,source_key) VALUES ('historical-adjustment',$1,$2,'adjustment',-500,'2026-05-01','LEGACY-NEG','Historical refund','admin','legacy-negative')`, loan.ID, member.ID); err != nil {
+		t.Fatalf("insert historical adjustment: %v", err)
+	}
+	if _, err := fixture.db.Exec(`INSERT INTO loan_repayment_events (id,loan_id,member_id,event_type,amount,record_date,reference_no,note,recorded_by,source_key) VALUES ('historical-suspension',$1,$2,'suspension',0,'2026-04-01','LEGACY-ZERO','Historical penangguhan','admin','legacy-zero')`, loan.ID, member.ID); err != nil {
+		t.Fatalf("insert historical suspension: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/member/repayments", nil)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	rec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected repayment history status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var history struct {
+		Repayments []struct {
+			ID               string `json:"id"`
+			Amount           int64  `json:"amount"`
+			Type             string `json:"type"`
+			Historical       bool   `json:"historical"`
+			IncludedInTotals bool   `json:"included_in_totals"`
+		} `json:"repayments"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &history); err != nil {
+		t.Fatalf("decode repayment history: %v", err)
+	}
+	if len(history.Repayments) != 3 {
+		t.Fatalf("expected normal and historical repayment records, got %+v", history.Repayments)
+	}
+	seen := map[string]bool{}
+	for _, repayment := range history.Repayments {
+		seen[repayment.Type] = true
+		if repayment.Type == "repayment" && (!repayment.IncludedInTotals || repayment.Historical) {
+			t.Fatalf("normal repayment flags are wrong: %+v", repayment)
+		}
+		if repayment.Type != "repayment" && (!repayment.Historical || repayment.IncludedInTotals) {
+			t.Fatalf("historical repayment flags are wrong: %+v", repayment)
+		}
+	}
+	if !seen["repayment"] || !seen["adjustment"] || !seen["suspension"] {
+		t.Fatalf("expected all repayment event types, got %+v", history.Repayments)
+	}
+	var operationalTotal int64
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM loan_repayments WHERE loan_id=$1`, loan.ID).Scan(&operationalTotal); err != nil {
+		t.Fatalf("read operational repayment total: %v", err)
+	}
+	if operationalTotal != 250000 {
+		t.Fatalf("historical events changed operational repayment total: %d", operationalTotal)
+	}
+
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	adminReq := httptest.NewRequest(http.MethodGet, "/admin/repayments", nil)
+	adminReq.AddCookie(adminCookie)
+	adminRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(adminRec, adminReq)
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("expected admin repayment history status 200, got %d: %s", adminRec.Code, adminRec.Body.String())
+	}
+	for _, text := range []string{"Historical adjustment", "Deferral (Penangguhan)", "-500", "historical-adjustment-row"} {
+		if !strings.Contains(adminRec.Body.String(), text) {
+			t.Fatalf("expected admin history to include %q, got %s", text, adminRec.Body.String())
+		}
 	}
 }
 

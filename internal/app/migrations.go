@@ -252,6 +252,30 @@ var migrations = []migration{
 		Version: 20,
 		Name:    "add_member_bank_details_and_saving_based_loan_limit",
 	},
+	{
+		Version: 21,
+		Name:    "create_historical_loan_repayment_events",
+		Statements: []string{
+			`CREATE TABLE IF NOT EXISTS loan_repayment_events (
+				id TEXT PRIMARY KEY,
+				loan_id TEXT NOT NULL,
+				member_id TEXT NOT NULL,
+				event_type TEXT NOT NULL CHECK (event_type IN ('adjustment', 'suspension')),
+				amount BIGINT NOT NULL CHECK ((event_type = 'adjustment' AND amount < 0) OR (event_type = 'suspension' AND amount = 0)),
+				record_date TEXT NOT NULL DEFAULT '',
+				reference_no TEXT NOT NULL DEFAULT '',
+				note TEXT NOT NULL DEFAULT '',
+				recorded_by TEXT NOT NULL,
+				created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				source_key TEXT NOT NULL UNIQUE,
+				FOREIGN KEY (loan_id) REFERENCES loans(id),
+				FOREIGN KEY (member_id) REFERENCES members(id),
+				FOREIGN KEY (recorded_by) REFERENCES users(id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_loan_repayment_events_member_date ON loan_repayment_events(member_id, record_date, created_at)`,
+			`CREATE INDEX IF NOT EXISTS idx_loan_repayment_events_loan_date ON loan_repayment_events(loan_id, record_date, created_at)`,
+		},
+	},
 }
 
 func Migrate(db *sql.DB) error {
@@ -651,6 +675,31 @@ func addRegularLoanAdminFeeTerms(tx *sql.Tx, isSQLite bool) error {
 	} else {
 		statements = append(statements, postgresMonetaryAggregateStatements()...)
 		statements = append(statements, postgresLoanStateIntegrityStatements()...)
+	}
+	// Historical secondary and pay-later loans still need legacy provenance
+	// because their source terms cannot be reconstructed from the current fee
+	// calculators. Keep the fee policy legacy-only, but allow any supported
+	// product type to carry that provenance marker.
+	if isSQLite {
+		statements = append(statements,
+			`DROP TRIGGER IF EXISTS loans_admin_fee_policy_identity_insert`,
+			`DROP TRIGGER IF EXISTS loan_requests_admin_fee_policy_identity_insert`,
+			`DROP TRIGGER IF EXISTS loan_requests_admin_fee_policy_first_update`,
+			`CREATE TRIGGER loans_admin_fee_policy_identity_insert BEFORE INSERT ON loans WHEN NOT ((NEW.legacy_terms=1 AND NEW.admin_fee_policy='legacy_flat_monthly') OR (NEW.legacy_terms=0 AND ((NEW.loan_type='regular' AND NEW.admin_fee_policy='regular_tiered_monthly_v1') OR (NEW.loan_type='secondary_goods' AND NEW.admin_fee_policy='secondary_goods_one_time_v1') OR (NEW.loan_type='goods_purchase_paylater' AND NEW.admin_fee_policy='goods_purchase_paylater_one_time_v1')))) BEGIN SELECT RAISE(ABORT,'loan admin fee policy does not match loan terms'); END`,
+			`CREATE TRIGGER loan_requests_admin_fee_policy_identity_insert BEFORE INSERT ON loan_requests WHEN NEW.proposed_admin_fee_policy IS NOT NULL AND (NEW.status<>'pending' OR NEW.current_approval_stage<>'manager' OR NOT ((NEW.legacy_terms=1 AND NEW.proposed_admin_fee_policy='legacy_flat_monthly') OR (NEW.legacy_terms=0 AND ((NEW.loan_type='regular' AND NEW.proposed_admin_fee_policy='regular_tiered_monthly_v1') OR (NEW.loan_type='secondary_goods' AND NEW.proposed_admin_fee_policy='secondary_goods_one_time_v1') OR (NEW.loan_type='goods_purchase_paylater' AND NEW.proposed_admin_fee_policy='goods_purchase_paylater_one_time_v1'))))) BEGIN SELECT RAISE(ABORT,'proposed loan admin fee policy does not match Manager-stage terms'); END`,
+			`CREATE TRIGGER loan_requests_admin_fee_policy_first_update BEFORE UPDATE OF proposed_admin_fee_policy ON loan_requests WHEN OLD.proposed_admin_fee_policy IS NULL AND NEW.proposed_admin_fee_policy IS NOT NULL AND (OLD.status<>'pending' OR OLD.current_approval_stage<>'manager' OR NOT ((NEW.legacy_terms=1 AND NEW.proposed_admin_fee_policy='legacy_flat_monthly') OR (NEW.legacy_terms=0 AND ((NEW.loan_type='regular' AND NEW.proposed_admin_fee_policy='regular_tiered_monthly_v1') OR (NEW.loan_type='secondary_goods' AND NEW.proposed_admin_fee_policy='secondary_goods_one_time_v1') OR (NEW.loan_type='goods_purchase_paylater' AND NEW.proposed_admin_fee_policy='goods_purchase_paylater_one_time_v1'))))) BEGIN SELECT RAISE(ABORT,'proposed loan admin fee snapshot must be assigned at Manager stage'); END`)
+	} else {
+		statements = append(statements,
+			`ALTER TABLE loans DROP CONSTRAINT IF EXISTS loans_admin_fee_policy_identity_check`,
+			`ALTER TABLE loan_requests DROP CONSTRAINT IF EXISTS loan_requests_admin_fee_policy_identity_check`,
+			`ALTER TABLE loans ADD CONSTRAINT loans_admin_fee_policy_identity_check CHECK (((loan_type='regular' AND legacy_terms=FALSE AND admin_fee_policy='regular_tiered_monthly_v1') OR (loan_type='secondary_goods' AND legacy_terms=FALSE AND admin_fee_policy='secondary_goods_one_time_v1') OR (loan_type='goods_purchase_paylater' AND legacy_terms=FALSE AND admin_fee_policy='goods_purchase_paylater_one_time_v1') OR (legacy_terms=TRUE AND admin_fee_policy='legacy_flat_monthly')))`,
+			`ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_admin_fee_policy_identity_check CHECK (proposed_admin_fee_policy IS NULL OR ((loan_type='regular' AND legacy_terms=FALSE AND proposed_admin_fee_policy='regular_tiered_monthly_v1') OR (loan_type='secondary_goods' AND legacy_terms=FALSE AND proposed_admin_fee_policy='secondary_goods_one_time_v1') OR (loan_type='goods_purchase_paylater' AND legacy_terms=FALSE AND proposed_admin_fee_policy='goods_purchase_paylater_one_time_v1') OR (legacy_terms=TRUE AND proposed_admin_fee_policy='legacy_flat_monthly')))`,
+			`DROP TRIGGER IF EXISTS loans_admin_fee_policy_identity_insert ON loans`,
+			`DROP TRIGGER IF EXISTS loan_requests_admin_fee_policy_identity_insert ON loan_requests`,
+			`CREATE FUNCTION validate_loan_admin_fee_policy_identity() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN IF NOT ((NEW.legacy_terms=TRUE AND NEW.admin_fee_policy='legacy_flat_monthly') OR (NEW.legacy_terms=FALSE AND ((NEW.loan_type='regular' AND NEW.admin_fee_policy='regular_tiered_monthly_v1') OR (NEW.loan_type='secondary_goods' AND NEW.admin_fee_policy='secondary_goods_one_time_v1') OR (NEW.loan_type='goods_purchase_paylater' AND NEW.admin_fee_policy='goods_purchase_paylater_one_time_v1')))) THEN RAISE EXCEPTION 'loan admin fee policy does not match loan terms'; END IF; RETURN NEW; END $$`,
+			`CREATE TRIGGER loans_admin_fee_policy_identity_insert BEFORE INSERT ON loans FOR EACH ROW EXECUTE FUNCTION validate_loan_admin_fee_policy_identity()`,
+			`CREATE FUNCTION validate_proposed_loan_admin_fee_policy_identity() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN IF NEW.proposed_admin_fee_policy IS NOT NULL AND NOT ((NEW.legacy_terms=TRUE AND NEW.proposed_admin_fee_policy='legacy_flat_monthly') OR (NEW.legacy_terms=FALSE AND ((NEW.loan_type='regular' AND NEW.proposed_admin_fee_policy='regular_tiered_monthly_v1') OR (NEW.loan_type='secondary_goods' AND NEW.proposed_admin_fee_policy='secondary_goods_one_time_v1') OR (NEW.loan_type='goods_purchase_paylater' AND NEW.proposed_admin_fee_policy='goods_purchase_paylater_one_time_v1')))) THEN RAISE EXCEPTION 'proposed loan admin fee policy does not match loan terms'; END IF; RETURN NEW; END $$`,
+			`CREATE TRIGGER loan_requests_admin_fee_policy_identity_insert BEFORE INSERT ON loan_requests FOR EACH ROW EXECUTE FUNCTION validate_proposed_loan_admin_fee_policy_identity()`)
 	}
 	for _, statement := range statements {
 		if _, err := tx.Exec(statement); err != nil {

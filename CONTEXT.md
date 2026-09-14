@@ -383,6 +383,7 @@ _Avoid_: Renaming stable internal enum values only to match display text
 - "last active Ketua Utama" applies to both appointment administration and membership status. Resolved: routine operations must preserve at least one active **Ketua Utama**.
 - "switching roles" could imply changing the Member's identity or Officer Appointment. Resolved: an **Officer** switches between **Member Area** and **Admin Area** while retaining both capacities in one session.
 - "Officer password" could imply separate Admin Area credentials. Resolved: a Member has one **User** credential shared across Member and Admin Areas.
+- "predefined user" can imply a standalone production admin identity. Resolved: production bootstrap starts from an active **Member** whose linked **User** becomes usable in the Admin Area through a **Ketua Utama** **Officer Appointment**.
 - "notification inbox" could imply one mixed list for the shared User. Resolved: notifications retain a Member or Officer **Notification Audience** and appear in the corresponding area.
 - "deciding Officer" could become ambiguous after profile, credential, or appointment changes. Resolved: **Approval History** stores immutable Member, User, display-name, and Officer Role snapshots from decision time.
 - "User role" could imply that login identity and cooperative authority are the same concept. Resolved: the **User** is only the shared login identity; officer authority belongs to the **Officer Appointment**.

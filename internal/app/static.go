@@ -1566,6 +1566,13 @@ th {
 tbody tr:hover {
   background: #f8f9fc;
 }
+.historical-adjustment-row {
+  background: var(--negative-pale);
+  color: var(--negative);
+}
+.historical-suspension-row {
+  background: var(--warning-pale);
+}
 td:nth-child(n+2):not(.review-cell) {
   font-variant-numeric: tabular-nums;
 }

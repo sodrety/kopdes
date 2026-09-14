@@ -17,8 +17,9 @@ import (
 
 const (
 	openingBalanceDate = "2025-12-31"
-	fallbackJoinDate   = "2026-09-07"
 )
+
+var fallbackJoinDate = time.Date(time.Now().Year(), time.January, 1, 0, 0, 0, 0, time.Local).Format("2006-01-02")
 
 var nonAlphaNumeric = regexp.MustCompile(`[^a-z0-9]+`)
 
@@ -93,6 +94,16 @@ func normalizeSimpananTemplate(sourcePath string, file *excelize.File) (Manifest
 	}
 	if err := parseTemplateSavings(sourcePath, file, &manifest); err != nil {
 		return Manifest{}, err
+	}
+	if hasWorkbookSheet(file, "04_Pinjaman") {
+		if err := parseTemplateLoans(sourcePath, file, &manifest); err != nil {
+			return Manifest{}, err
+		}
+	}
+	if hasWorkbookSheet(file, "05_Angsuran") {
+		if err := parseTemplateRepayments(sourcePath, file, &manifest); err != nil {
+			return Manifest{}, err
+		}
 	}
 	return manifest, nil
 }
@@ -279,6 +290,90 @@ func parseTemplateSavings(sourcePath string, file *excelize.File, manifest *Mani
 		})
 	}
 	return nil
+}
+
+func parseTemplateLoans(sourcePath string, file *excelize.File, manifest *Manifest) error {
+	rows, err := getStreamingRows(file, "04_Pinjaman")
+	if err != nil {
+		return err
+	}
+	headerRow, headers := findHeader(rows, func(row []string) bool {
+		return findColumn(row, "no pinjaman") >= 0 && findColumn(row, "nama anggota") >= 0 && findColumn(row, "pokok") >= 0 && findColumn(row, "lama cicilan") >= 0 && findColumn(row, "tanggal cair") >= 0
+	})
+	if headerRow < 0 {
+		return fmt.Errorf("%s: could not find 04_Pinjaman header", sourcePath)
+	}
+	for rowIndex := headerRow + 1; rowIndex < len(rows); rowIndex++ {
+		row := rows[rowIndex]
+		loanNumber := cell(row, findColumn(headers, "no pinjaman"))
+		name := cell(row, findColumn(headers, "nama anggota"))
+		if loanNumber == "" && name == "" {
+			continue
+		}
+		typeValue := cell(row, findColumn(headers, "jenis pinjaman"))
+		manifest.Loans = append(manifest.Loans, Loan{
+			Source:             SourceRef{Source: filepathBase(sourcePath), Sheet: "04_Pinjaman", Row: rowIndex + 1},
+			LoanType:           templateLoanType(typeValue),
+			MemberName:         name,
+			SourceNPP:          cell(row, findColumn(headers, "npp")),
+			SourceHint:         loanNumber,
+			Principal:          cell(row, findColumn(headers, "pokok")),
+			AdminFee:           cell(row, findColumn(headers, "admin")),
+			TotalObligation:    cell(row, findColumn(headers, "total kewajiban")),
+			MonthlyInstallment: "",
+			DurationMonths:     intCell(row, headers, "lama cicilan"),
+			StartDate:          parseDate(cell(row, findColumn(headers, "tanggal cair"))),
+			SourceStatus:       cell(row, findColumn(headers, "status")),
+			Purpose:            typeValue,
+		})
+	}
+	return nil
+}
+
+func parseTemplateRepayments(sourcePath string, file *excelize.File, manifest *Manifest) error {
+	rows, err := getStreamingRows(file, "05_Angsuran")
+	if err != nil {
+		return err
+	}
+	headerRow, headers := findHeader(rows, func(row []string) bool {
+		return findColumn(row, "no pinjaman") >= 0 && findColumn(row, "tanggal") >= 0 && findColumn(row, "jumlah") >= 0
+	})
+	if headerRow < 0 {
+		return fmt.Errorf("%s: could not find 05_Angsuran header", sourcePath)
+	}
+	for rowIndex := headerRow + 1; rowIndex < len(rows); rowIndex++ {
+		row := rows[rowIndex]
+		loanNumber := cell(row, findColumn(headers, "no pinjaman"))
+		dateValue := cell(row, findColumn(headers, "tanggal"))
+		amount := cell(row, findColumn(headers, "jumlah"))
+		if loanNumber == "" && dateValue == "" && amount == "" {
+			continue
+		}
+		manifest.LoanEvidence = append(manifest.LoanEvidence, LoanEvidence{
+			Source:      SourceRef{Source: filepathBase(sourcePath), Sheet: "05_Angsuran", Row: rowIndex + 1},
+			MemberName:  cell(row, findColumn(headers, "nama anggota")),
+			SourceNPP:   cell(row, findColumn(headers, "npp")),
+			LoanHint:    loanNumber,
+			Method:      "3. Cicilan",
+			Amount:      amount,
+			RecordDate:  parseDate(dateValue),
+			Description: cell(row, findColumn(headers, "catatan")),
+		})
+	}
+	return nil
+}
+
+func templateLoanType(value string) string {
+	switch normalizeHeader(value) {
+	case "reguler", "regular":
+		return "regular"
+	case "barang sekunder", "secondary goods":
+		return "secondary_goods"
+	case "paylater", "goods purchase paylater", "barang primer harian", "voucher belanja koka":
+		return "goods_purchase_paylater"
+	default:
+		return ""
+	}
 }
 
 func getStreamingRows(file *excelize.File, sheet string) ([][]string, error) {

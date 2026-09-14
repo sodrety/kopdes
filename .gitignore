@@ -1,7 +1,10 @@
 /api
 /kopdes-dev.db
+/backups/
+output/seed/*-credentials.csv
 .env
 .env.*
 !.env.example
+!.env.production.example
 !.env.supabase.example
 /supabase/.temp/

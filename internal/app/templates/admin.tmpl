@@ -31,7 +31,7 @@
               {{range .Reports.Repayments}}
               <tr>
                 <td>{{.RecordDate}}</td>
-                <td>{{t $.Lang "repayment"}}</td>
+                <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
                 <td>{{.FullName}} - {{.ReferenceNo}}</td>
                 <td>{{nominal .Amount}}</td>
               </tr>
@@ -213,16 +213,18 @@
               <th>{{t $.Lang "date"}}</th>
               <th>{{t $.Lang "member"}}</th>
               <th>{{t $.Lang "member_type"}}</th>
+              <th>{{t $.Lang "repayment_type"}}</th>
               <th>{{t $.Lang "amount"}}</th>
               <th>{{t $.Lang "reference"}}</th>
             </tr>
           </thead>
           <tbody>
             {{range .Reports.Repayments}}
-            <tr>
+            <tr class="{{if eq .Type "adjustment"}}historical-adjustment-row{{else if eq .Type "suspension"}}historical-suspension-row{{end}}">
               <td>{{.RecordDate}}</td>
               <td>{{template "member-table-cell" .}}</td>
               <td>{{.MemberTypeLabel}}</td>
+              <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
               <td>{{nominal .Amount}}</td>
               <td>{{.ReferenceNo}}</td>
             </tr>
@@ -972,6 +974,7 @@
           <thead>
             <tr>
               <th>{{t $.Lang "date"}}</th>
+              <th>{{t $.Lang "repayment_type"}}</th>
               <th>{{t $.Lang "amount"}}</th>
               <th>{{t $.Lang "reference"}}</th>
               <th>{{t $.Lang "note"}}</th>
@@ -979,8 +982,9 @@
           </thead>
           <tbody>
             {{range .Repayments}}
-            <tr>
+            <tr class="{{if eq .Type "adjustment"}}historical-adjustment-row{{else if eq .Type "suspension"}}historical-suspension-row{{end}}">
               <td>{{.RecordDate}}</td>
+              <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
               <td>{{nominal .Amount}}</td>
               <td>{{.ReferenceNo}}</td>
               <td>{{.Note}}</td>
@@ -1236,6 +1240,7 @@
             <tr>
               <th>{{t $.Lang "date"}}</th>
               <th>{{t $.Lang "member"}}</th>
+              <th>{{t $.Lang "repayment_type"}}</th>
               <th>{{t $.Lang "amount"}}</th>
               <th>{{t $.Lang "reference"}}</th>
               <th>{{t $.Lang "note"}}</th>
@@ -1243,9 +1248,10 @@
           </thead>
           <tbody>
             {{range .Repayments}}
-            <tr>
+            <tr class="{{if eq .Type "adjustment"}}historical-adjustment-row{{else if eq .Type "suspension"}}historical-suspension-row{{end}}">
               <td>{{.RecordDate}}</td>
               <td>{{template "member-table-cell" .}}</td>
+              <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
               <td>{{nominal .Amount}}</td>
               <td>{{.ReferenceNo}}</td>
               <td>{{.Note}}</td>

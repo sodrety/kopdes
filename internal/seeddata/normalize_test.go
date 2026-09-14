@@ -71,6 +71,24 @@ func TestNormalizeSimpananTemplateWorkbook(t *testing.T) {
 	}
 }
 
+func TestNormalizeLoanTemplateWorkbook(t *testing.T) {
+	primary := "../../docs/seed-data/seed-source-template-pinjaman.xlsx"
+	requireSeedWorkbookFixtures(t, primary)
+	manifest, err := Normalize(primary, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Members) != 209 || len(manifest.Savings) != 1735 || len(manifest.Loans) != 77 || len(manifest.LoanEvidence) != 519 {
+		t.Fatalf("unexpected loan template counts: members=%d savings=%d loans=%d evidence=%d", len(manifest.Members), len(manifest.Savings), len(manifest.Loans), len(manifest.LoanEvidence))
+	}
+	if manifest.Loans[0].Source.Sheet != "04_Pinjaman" || manifest.Loans[0].LoanType != "regular" || manifest.Loans[0].SourceHint != "1" || manifest.Loans[0].TotalObligation == "" {
+		t.Fatalf("unexpected first template loan: %+v", manifest.Loans[0])
+	}
+	if manifest.LoanEvidence[0].Source.Sheet != "05_Angsuran" || manifest.LoanEvidence[0].LoanHint != "1" || manifest.LoanEvidence[0].Method != "3. Cicilan" {
+		t.Fatalf("unexpected first template repayment: %+v", manifest.LoanEvidence[0])
+	}
+}
+
 func requireSeedWorkbookFixtures(t *testing.T, paths ...string) {
 	t.Helper()
 	if os.Getenv("KOPDES_SEED_WORKBOOK_TESTS") != "1" {

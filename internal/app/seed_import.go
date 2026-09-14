@@ -31,6 +31,7 @@ const (
 type SeedImportOptions struct {
 	DryRun          bool
 	Append          bool
+	HistoricalLoans bool
 	CredentialsPath string
 	ReportPath      string
 }
@@ -89,6 +90,16 @@ type preparedRepayment struct {
 	Raw        string
 }
 
+type preparedRepaymentEvent struct {
+	SourceKey   string
+	EventType   string
+	Amount      int64
+	RecordDate  string
+	ReferenceNo string
+	Note        string
+	Raw         string
+}
+
 type preparedLoan struct {
 	Source      seeddata.Loan
 	ID          string
@@ -101,6 +112,7 @@ type preparedLoan struct {
 	Installment int64
 	Status      string
 	Repayments  []preparedRepayment
+	Events      []preparedRepaymentEvent
 	Schedule    []preparedInstallment
 }
 
@@ -125,6 +137,9 @@ type seedEmailAllocator struct {
 }
 
 func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOptions) (SeedImportReport, error) {
+	if options.HistoricalLoans && !options.Append {
+		return SeedImportReport{}, errors.New("historical loan import requires append mode")
+	}
 	manifestHash, err := manifest.Hash()
 	if err != nil {
 		return SeedImportReport{}, fmt.Errorf("hash manifest: %w", err)
@@ -149,10 +164,13 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 		return SeedImportReport{}, err
 	}
 	if !options.Append && maxVersion > 14 {
-		return SeedImportReport{}, fmt.Errorf("database is already migrated through version %d; initial seed import must run before migrations 15-18", maxVersion)
+		return SeedImportReport{}, fmt.Errorf("database is already migrated through version %d; initial seed import must run before migrations 15-19", maxVersion)
 	}
 	if options.Append && maxVersion < 18 {
 		return SeedImportReport{}, fmt.Errorf("append seed import requires schema version 18 or later; current version is %d", maxVersion)
+	}
+	if options.HistoricalLoans && strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite") {
+		return SeedImportReport{}, errors.New("historical loan append requires PostgreSQL")
 	}
 
 	// Each attempt gets its own audit run so a failed validation can be
@@ -167,6 +185,11 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 	}
 
 	prepared, issues := validateSeedManifest(manifest)
+	if options.HistoricalLoans {
+		// The source audit remains complete because it was persisted above. Only
+		// the operational replay of savings is skipped for this loan-focused run.
+		prepared.Savings = nil
+	}
 	report.Issues = issues
 	report.Counts = seedCounts(prepared, issues)
 	if options.DryRun || hasBlockers(issues) {
@@ -189,10 +212,14 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 	}
 	needsExtendedSavingCategories := hasExtendedSavingCategories(prepared)
 	if options.Append {
-		if len(prepared.Loans) != 0 {
+		if len(prepared.Loans) != 0 && !options.HistoricalLoans {
 			return report, errors.New("append seed import currently supports members and savings only")
 		}
-		if err := MigrateTo(db, 20); err != nil {
+		targetSchemaVersion := 20
+		if options.HistoricalLoans {
+			targetSchemaVersion = 21
+		}
+		if err := MigrateTo(db, targetSchemaVersion); err != nil {
 			return report, fmt.Errorf("prepare append schema: %w", err)
 		}
 		prepared, err = reconcileAppendMemberIDs(db, prepared)
@@ -223,7 +250,7 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 	}
 
 	credentials := make([]SeedImportCredential, 0)
-	if err := seedBaseSchema(db, runID, prepared, &credentials, options.Append); err != nil {
+	if err := seedBaseSchema(db, runID, prepared, &credentials, options.Append, options.HistoricalLoans); err != nil {
 		report.Status = "failed"
 		_ = updateSeedRun(db, runID, report.Status)
 		_ = writeSeedReport(options.ReportPath, report)
@@ -269,6 +296,86 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 	if err := writeSeedReport(options.ReportPath, report); err != nil {
 		return report, err
 	}
+	return report, nil
+}
+
+// RunHistoricalRepaymentEventBackfill materializes the negative and zero
+// repayment rows from an already-imported manifest without replaying loans or
+// positive repayments. It is intentionally idempotent on source_key.
+func RunHistoricalRepaymentEventBackfill(db *sql.DB, manifest seeddata.Manifest) (SeedImportReport, error) {
+	manifestHash, err := manifest.Hash()
+	if err != nil {
+		return SeedImportReport{}, fmt.Errorf("hash manifest: %w", err)
+	}
+	if err := MigrateTo(db, 21); err != nil {
+		return SeedImportReport{}, fmt.Errorf("prepare historical repayment event schema: %w", err)
+	}
+	prepared, issues := validateSeedManifest(manifest)
+	report := SeedImportReport{
+		RunID:        deterministicID("seed-event-backfill", fmt.Sprintf("%s:%d", manifest.SnapshotID, time.Now().UTC().UnixNano())),
+		SnapshotID:   manifest.SnapshotID,
+		ManifestHash: manifestHash,
+		Status:       "validating",
+		Counts:       seedCounts(prepared, issues),
+		Issues:       issues,
+	}
+	if hasBlockers(issues) {
+		report.Status = "validation_failed"
+		return report, errors.New("historical repayment event backfill validation failed")
+	}
+	prepared, err = reconcileAppendMemberIDs(db, prepared)
+	if err != nil {
+		report.Status = "validation_failed"
+		report.Issues = append(report.Issues, SeedImportIssue{Severity: "error", Blocker: true, Entity: "member", Reason: err.Error()})
+		return report, fmt.Errorf("reconcile existing members for historical repayment events: %w", err)
+	}
+	for _, loan := range prepared.Loans {
+		var memberID string
+		if err := db.QueryRow(`SELECT member_id FROM loans WHERE id=$1`, loan.ID).Scan(&memberID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				report.Issues = append(report.Issues, SeedImportIssue{Severity: "error", Blocker: true, Entity: "loan_repayment_event", SourceKey: loan.Source.Source.Key(), Reason: "historical source loan is not present in the operational database"})
+			}
+			return report, fmt.Errorf("find historical loan %s: %w", loan.Source.Source.Key(), err)
+		}
+		if memberID != loan.MemberID {
+			return report, fmt.Errorf("historical loan %s belongs to member %s, expected %s", loan.Source.Source.Key(), memberID, loan.MemberID)
+		}
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return report, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	importerID, err := ensureHistoricalImporter(tx)
+	if err != nil {
+		return report, err
+	}
+	inserted := 0
+	existing := 0
+	for _, loan := range prepared.Loans {
+		for _, event := range loan.Events {
+			result, err := tx.Exec(`INSERT INTO loan_repayment_events (id,loan_id,member_id,event_type,amount,record_date,reference_no,note,recorded_by,created_at,source_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (source_key) DO NOTHING`, deterministicID("repayment-event", event.SourceKey), loan.ID, loan.MemberID, event.EventType, event.Amount, event.RecordDate, event.ReferenceNo, event.Note, importerID, loan.Source.StartDate+" 00:00:00", event.SourceKey)
+			if err != nil {
+				return report, fmt.Errorf("backfill historical repayment event %s: %w", event.SourceKey, err)
+			}
+			rowsAffected, err := result.RowsAffected()
+			if err != nil {
+				return report, err
+			}
+			if rowsAffected == 0 {
+				existing++
+			} else {
+				inserted++
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return report, err
+	}
+	report.Status = "succeeded"
+	report.Counts["inserted_events"] = inserted
+	report.Counts["existing_events"] = existing
 	return report, nil
 }
 
@@ -477,7 +584,8 @@ func validateSeedManifest(manifest seeddata.Manifest) (preparedSeed, []SeedImpor
 		}
 	}
 
-	loanByMember := map[string][]*preparedLoan{}
+	loanByMember := map[string][]string{}
+	loanIndexByID := map[string]int{}
 	for _, sourceLoan := range manifest.Loans {
 		member, ok := result.MemberByName[normalizedName(sourceLoan.MemberName)]
 		if !ok {
@@ -542,7 +650,8 @@ func validateSeedManifest(manifest seeddata.Manifest) (preparedSeed, []SeedImpor
 		loan := preparedLoan{Source: sourceLoan, ID: deterministicID("loan", sourceLoan.Source.Key()), RequestID: deterministicID("loan-request", sourceLoan.Source.Key()), MemberID: member.ID, Principal: principal, AdminFee: adminFee, Obligation: obligation, Installment: installment, Status: "active"}
 		result.Loans = append(result.Loans, loan)
 		result.LoanByID[loan.ID] = loan
-		loanByMember[member.ID] = append(loanByMember[member.ID], &result.Loans[len(result.Loans)-1])
+		loanIndexByID[loan.ID] = len(result.Loans) - 1
+		loanByMember[member.ID] = append(loanByMember[member.ID], loan.ID)
 	}
 
 	for evidenceIndex, evidence := range manifest.LoanEvidence {
@@ -569,7 +678,8 @@ func validateSeedManifest(manifest seeddata.Manifest) (preparedSeed, []SeedImpor
 			// Detail Pinjaman's No column is a detail-row number, not the
 			// master-loan number. For that workbook, use the source date window
 			// and require a single candidate when a member has overlapping loans.
-			for _, candidate := range candidates {
+			for _, loanID := range candidates {
+				candidate := &result.Loans[loanIndexByID[loanID]]
 				if candidate.Source.StartDate == "" || evidence.RecordDate < candidate.Source.StartDate {
 					continue
 				}
@@ -583,7 +693,8 @@ func validateSeedManifest(manifest seeddata.Manifest) (preparedSeed, []SeedImpor
 				selected = candidate
 			}
 		} else {
-			for _, candidate := range candidates {
+			for _, loanID := range candidates {
+				candidate := &result.Loans[loanIndexByID[loanID]]
 				if evidence.LoanHint != "" && strings.EqualFold(strings.TrimSpace(evidence.LoanHint), strings.TrimSpace(candidate.Source.SourceHint)) {
 					if selected != nil {
 						selected = nil
@@ -594,22 +705,37 @@ func validateSeedManifest(manifest seeddata.Manifest) (preparedSeed, []SeedImpor
 			}
 		}
 		if selected == nil && len(candidates) == 1 {
-			selected = candidates[0]
+			selected = &result.Loans[loanIndexByID[candidates[0]]]
 		}
 		if selected == nil {
 			add("error", true, "loan_repayment", evidence.Source.Key(), "repayment cannot be matched to exactly one source loan", evidence)
 			continue
 		}
 		amount, fractional, err := parseSeedMoney(evidence.Amount)
-		if err == nil && amount < 0 {
-			if amount == math.MinInt64 {
-				err = errors.New("repayment amount overflows int64 when converted to positive")
-			} else {
-				amount = -amount
-			}
+		if err != nil || fractional {
+			add("error", true, "loan_repayment", evidence.Source.Key(), "repayment amount must be a whole Rupiah amount", evidence)
+			continue
 		}
-		if err != nil || fractional || amount <= 0 {
-			add("error", true, "loan_repayment", evidence.Source.Key(), "repayment amount must be a positive whole Rupiah amount", evidence)
+		if amount < 0 {
+			add("warning", false, "loan_repayment_adjustment", evidence.Source.Key(), "negative amount preserved as a refund/adjustment event and excluded from normal repayment totals until adjustment support is modeled", evidence)
+			eventSourceKey := fmt.Sprintf("%s:repayment-event-%d", evidence.Source.Key(), evidenceIndex)
+			selected.Events = append(selected.Events, preparedRepaymentEvent{
+				SourceKey: eventSourceKey, EventType: "adjustment", Amount: amount, RecordDate: evidence.RecordDate,
+				ReferenceNo: "seed-" + eventSourceKey, Note: "Historical import; source Metod=" + evidence.Method, Raw: evidence.Amount,
+			})
+			continue
+		}
+		if amount == 0 {
+			reason := "zero amount treated as a penangguhan event and excluded from normal repayment totals"
+			if evidence.RecordDate == "" {
+				reason += "; source date is also blank"
+			}
+			add("warning", false, "loan_repayment_suspension", evidence.Source.Key(), reason, evidence)
+			eventSourceKey := fmt.Sprintf("%s:repayment-event-%d", evidence.Source.Key(), evidenceIndex)
+			selected.Events = append(selected.Events, preparedRepaymentEvent{
+				SourceKey: eventSourceKey, EventType: "suspension", Amount: 0, RecordDate: evidence.RecordDate,
+				ReferenceNo: "seed-" + eventSourceKey, Note: "Historical import; source Metod=" + evidence.Method, Raw: evidence.Amount,
+			})
 			continue
 		}
 		if evidence.RecordDate == "" {
@@ -627,10 +753,17 @@ func validateSeedManifest(manifest seeddata.Manifest) (preparedSeed, []SeedImpor
 		}
 		loan.Remaining = loan.Obligation - repaid
 		if loan.Remaining < 0 {
-			add("error", true, "loan_reconciliation", loan.Source.Source.Key(), "repayments exceed total obligation", loan.Source)
-			continue
+			if strings.Contains(strings.ToLower(loan.Source.SourceStatus), "lunas") {
+				overage := -loan.Remaining
+				loan.Remaining = 0
+				loan.Status = "adjustment_due"
+				add("warning", false, "loan_reconciliation", loan.Source.Source.Key(), fmt.Sprintf("positive repayments exceed total obligation by %d; staged as adjustment_due pending refund/overpayment review", overage), loan.Source)
+			} else {
+				add("error", true, "loan_reconciliation", loan.Source.Source.Key(), "repayments exceed total obligation", loan.Source)
+				continue
+			}
 		}
-		if loan.Remaining == 0 {
+		if loan.Remaining == 0 && loan.Status != "adjustment_due" {
 			loan.Status = "paid"
 		}
 		if sourceRemaining := strings.TrimSpace(loan.Source.SourceRemaining); sourceRemaining != "" {
@@ -639,7 +772,7 @@ func validateSeedManifest(manifest seeddata.Manifest) (preparedSeed, []SeedImpor
 				add("error", true, "loan_reconciliation", loan.Source.Source.Key(), fmt.Sprintf("derived remaining balance %d does not match source remaining balance %q", loan.Remaining, sourceRemaining), loan.Source)
 			}
 		}
-		if strings.Contains(strings.ToLower(loan.Source.SourceStatus), "lunas") && loan.Status != "paid" {
+		if strings.Contains(strings.ToLower(loan.Source.SourceStatus), "lunas") && loan.Status != "paid" && loan.Status != "adjustment_due" {
 			add("error", true, "loan_reconciliation", loan.Source.Source.Key(), "source status Lunas conflicts with derived outstanding balance", loan.Source)
 		}
 		if strings.Contains(strings.ToLower(loan.Source.SourceStatus), "cicilan") && loan.Status == "paid" {
@@ -659,25 +792,13 @@ func validateSeedManifest(manifest seeddata.Manifest) (preparedSeed, []SeedImpor
 			}
 		}
 	}
-	for memberID, loans := range loanByMember {
-		active := 0
-		for _, loan := range loans {
-			for index := range result.Loans {
-				if result.Loans[index].ID == loan.ID {
-					if result.Loans[index].Status == "active" && result.Loans[index].Remaining > 0 {
-						active++
-					}
-				}
-			}
-		}
-		if active > 1 {
-			add("error", true, "loan_overlap", memberID, fmt.Sprintf("member has %d outstanding active source loans; app requires an explicit overlap resolution", active), nil)
-		}
-	}
+	// Multiple active loans per member are valid. Repayments are matched to
+	// each source loan by its explicit loan hint or, for legacy detail rows,
+	// by the source date window.
 	return result, issues
 }
 
-func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials *[]SeedImportCredential, appendMode bool) error {
+func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials *[]SeedImportCredential, appendMode, historicalLoanAppend bool) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -686,6 +807,11 @@ func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials
 	importerID, err := ensureHistoricalImporter(tx)
 	if err != nil {
 		return err
+	}
+	if historicalLoanAppend {
+		if err := setHistoricalLoanTriggerState(tx, false); err != nil {
+			return err
+		}
 	}
 	emailAllocator, err := newSeedEmailAllocator(tx, prepared.Members)
 	if err != nil {
@@ -751,7 +877,11 @@ func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials
 	}
 	for _, loan := range prepared.Loans {
 		createdAt := loan.Source.StartDate + " 00:00:00"
-		if _, err := tx.Exec(`INSERT INTO loan_requests (id,member_id,requested_amount,duration_months,purpose,status,reviewed_by,reviewed_at,rejection_reason,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,'approved',$6,$7,$8,$7,$7)`, loan.RequestID, loan.MemberID, loan.Principal, loan.Source.DurationMonths, "Historical import: "+loan.Source.Purpose, importerID, createdAt, "Historical source request; no source approval records"); err != nil {
+		if historicalLoanAppend {
+			if _, err := tx.Exec(`INSERT INTO loan_requests (id,member_id,requested_amount,duration_months,purpose,status,reviewed_by,reviewed_at,rejection_reason,created_at,updated_at,loan_type,legacy_terms) VALUES ($1,$2,$3,$4,$5,'approved',$6,$7,$8,$7,$7,$9,TRUE)`, loan.RequestID, loan.MemberID, loan.Principal, loan.Source.DurationMonths, "Historical import: "+loan.Source.Purpose, importerID, createdAt, "Historical source request; no source approval records", loan.Source.LoanType); err != nil {
+				return fmt.Errorf("insert historical loan request %s: %w", loan.Source.Source.Key(), err)
+			}
+		} else if _, err := tx.Exec(`INSERT INTO loan_requests (id,member_id,requested_amount,duration_months,purpose,status,reviewed_by,reviewed_at,rejection_reason,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,'approved',$6,$7,$8,$7,$7)`, loan.RequestID, loan.MemberID, loan.Principal, loan.Source.DurationMonths, "Historical import: "+loan.Source.Purpose, importerID, createdAt, "Historical source request; no source approval records"); err != nil {
 			return fmt.Errorf("insert historical loan request %s: %w", loan.Source.Source.Key(), err)
 		}
 		finalDate := loan.Source.EndDate
@@ -766,8 +896,14 @@ func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials
 				break
 			}
 		}
-		if _, err := tx.Exec(`INSERT INTO loans (id,loan_request_id,member_id,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_by,approved_at,start_date,interest_rate_bps,total_interest,total_obligation,next_due_date,final_due_date,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,0,$11,$12,$13,$14,$10,$10)`, loan.ID, loan.RequestID, loan.MemberID, loan.Principal, loan.Source.DurationMonths, loan.Installment, loan.Remaining, loan.Status, importerID, createdAt, loan.AdminFee, loan.Obligation, nextDate, finalDate); err != nil {
-			return fmt.Errorf("insert historical loan %s: %w", loan.Source.Source.Key(), err)
+		var loanInsertErr error
+		if historicalLoanAppend {
+			_, loanInsertErr = tx.Exec(`INSERT INTO loans (id,loan_request_id,member_id,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_by,approved_at,start_date,interest_rate_bps,total_interest,total_obligation,next_due_date,final_due_date,created_at,updated_at,loan_type,legacy_terms,admin_fee_policy,monthly_admin_fee,total_admin_fee) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$16,0,$11,$12,$13,$14,$10,$10,$15,TRUE,'legacy_flat_monthly',NULL,$11)`, loan.ID, loan.RequestID, loan.MemberID, loan.Principal, loan.Source.DurationMonths, loan.Installment, loan.Remaining, loan.Status, importerID, createdAt, loan.AdminFee, loan.Obligation, nextDate, finalDate, loan.Source.LoanType, loan.Source.StartDate)
+		} else {
+			_, loanInsertErr = tx.Exec(`INSERT INTO loans (id,loan_request_id,member_id,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_by,approved_at,start_date,interest_rate_bps,total_interest,total_obligation,next_due_date,final_due_date,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$15,0,$11,$12,$13,$14,$10,$10)`, loan.ID, loan.RequestID, loan.MemberID, loan.Principal, loan.Source.DurationMonths, loan.Installment, loan.Remaining, loan.Status, importerID, createdAt, loan.AdminFee, loan.Obligation, nextDate, finalDate, loan.Source.StartDate)
+		}
+		if loanInsertErr != nil {
+			return fmt.Errorf("insert historical loan %s: %w", loan.Source.Source.Key(), loanInsertErr)
 		}
 		for _, installment := range loan.Schedule {
 			if _, err := tx.Exec(`INSERT INTO loan_installments (id,loan_id,installment_no,due_date,scheduled_amount,paid_amount,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`, deterministicID("installment", fmt.Sprintf("%s:%d", loan.ID, installment.Number)), loan.ID, installment.Number, installment.DueDate, installment.Scheduled, installment.Paid, installment.DueDate+" 00:00:00"); err != nil {
@@ -783,11 +919,49 @@ func seedBaseSchema(db *sql.DB, runID string, prepared preparedSeed, credentials
 				return err
 			}
 		}
+		if historicalLoanAppend {
+			for _, event := range loan.Events {
+				id := deterministicID("repayment-event", event.SourceKey)
+				if _, err := tx.Exec(`INSERT INTO loan_repayment_events (id,loan_id,member_id,event_type,amount,record_date,reference_no,note,recorded_by,created_at,source_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, id, loan.ID, loan.MemberID, event.EventType, event.Amount, event.RecordDate, event.ReferenceNo, event.Note, importerID, loan.Source.StartDate+" 00:00:00", event.SourceKey); err != nil {
+					return fmt.Errorf("insert historical repayment event %s: %w", event.SourceKey, err)
+				}
+				if err := insertSeedRecord(tx, runID, event.SourceKey, "loan_repayment_event", id, event.Raw); err != nil {
+					return err
+				}
+			}
+		}
 		if err := insertSeedRecord(tx, runID, loan.Source.Source.Key(), "loan", loan.ID, loan.Source); err != nil {
 			return err
 		}
 	}
+	if historicalLoanAppend {
+		if err := setHistoricalLoanTriggerState(tx, true); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+func setHistoricalLoanTriggerState(tx *sql.Tx, enabled bool) error {
+	action := "DISABLE"
+	if enabled {
+		action = "ENABLE"
+	}
+	triggers := []struct {
+		table string
+		name  string
+	}{
+		{table: "loan_requests", name: "validate_loan_request_origin_insert"},
+		{table: "loan_requests", name: "loan_requests_requested_amount_savings_limit"},
+		{table: "loans", name: "protect_loan_legacy_provenance"},
+		{table: "loans", name: "loans_approved_amount_savings_limit"},
+	}
+	for _, trigger := range triggers {
+		if _, err := tx.Exec(fmt.Sprintf("ALTER TABLE %s %s TRIGGER %s", trigger.table, action, trigger.name)); err != nil {
+			return fmt.Errorf("%s historical loan trigger %s.%s: %w", strings.ToLower(action), trigger.table, trigger.name, err)
+		}
+	}
+	return nil
 }
 
 func newSeedEmailAllocator(tx *sql.Tx, members []preparedMember) (*seedEmailAllocator, error) {
@@ -1027,7 +1201,7 @@ func hasBlockers(issues []SeedImportIssue) bool {
 func seedCounts(prepared preparedSeed, issues []SeedImportIssue) map[string]int {
 	counts := map[string]int{
 		"members": len(prepared.Members), "savings": len(prepared.Savings),
-		"loans": len(prepared.Loans), "repayments": 0, "installments": 0,
+		"loans": len(prepared.Loans), "repayments": 0, "historical_events": 0, "installments": 0,
 		"accounts": 0, "issues": len(issues), "blockers": 0, "warnings": 0,
 	}
 	for _, member := range prepared.Members {
@@ -1037,6 +1211,7 @@ func seedCounts(prepared preparedSeed, issues []SeedImportIssue) map[string]int 
 	}
 	for _, loan := range prepared.Loans {
 		counts["repayments"] += len(loan.Repayments)
+		counts["historical_events"] += len(loan.Events)
 		counts["installments"] += len(loan.Schedule)
 	}
 	for _, issue := range issues {
