@@ -106,8 +106,16 @@ func (s *Server) createOfficer(c *gin.Context) {
 		return
 	}
 	officer, err := s.insertOfficer(actor, req)
-	if errors.Is(err, errInvalidOfficer) || errors.Is(err, errInvalidTemporaryPassword) || errors.Is(err, errInactiveOfficerMember) || errors.Is(err, errMemberLoginRequired) {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid Officer details")
+	if errors.Is(err, errMemberLoginRequired) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_member_login_required"))
+		return
+	}
+	if errors.Is(err, errInvalidTemporaryPassword) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_temporary_password"))
+		return
+	}
+	if errors.Is(err, errInvalidOfficer) || errors.Is(err, errInactiveOfficerMember) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_officer"))
 		return
 	}
 	if errors.Is(err, errMemberAlreadyOfficer) {
@@ -279,7 +287,22 @@ func (s *Server) insertOfficer(actor User, req createOfficerInput) (Officer, err
 	var mustChange bool
 	err = tx.QueryRow(`SELECT id,email,must_change_password FROM users WHERE member_id=$1 AND historical_identity=FALSE`, memberID).Scan(&userID, &userEmail, &mustChange)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Officer{}, errMemberLoginRequired
+		userEmail = strings.ToLower(strings.TrimSpace(req.Email))
+		if userEmail == "" {
+			return Officer{}, errMemberLoginRequired
+		}
+		if len(strings.TrimSpace(req.Password)) < 8 {
+			return Officer{}, errInvalidTemporaryPassword
+		}
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return Officer{}, hashErr
+		}
+		userID = newID()
+		mustChange = true
+		if _, err := tx.Exec(`INSERT INTO users (id,email,password_hash,role,member_id,full_name,active,must_change_password,historical_identity) VALUES ($1,$2,$3,'member',$4,$5,TRUE,TRUE,FALSE)`, userID, userEmail, string(hash), memberID, name); err != nil {
+			return Officer{}, err
+		}
 	} else if err != nil {
 		return Officer{}, err
 	}

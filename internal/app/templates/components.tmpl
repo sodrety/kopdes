@@ -1,5 +1,5 @@
 {{define "summary-card"}}
-        <article class="summary-card"><span>{{.Label}}</span><strong>{{.Value}}</strong></article>
+        <article class="summary-card"><span>{{.Label}}</span><strong>{{.Value}}</strong>{{if .Icon}}<i class="summary-card-icon" data-lucide="{{.Icon}}" aria-hidden="true"></i>{{end}}</article>
 {{end}}
 
 {{define "status-badge"}}

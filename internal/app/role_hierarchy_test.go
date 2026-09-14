@@ -370,6 +370,7 @@ func TestManagerChangedLoanTermsNotifyMember(t *testing.T) {
 	}
 	memberToken := fixture.login(t, "member@coop.test", "password")
 	requestID := fixture.createLoanRequest(t, memberToken, 500_000, 5)
+	fixture.recordDeposit(t, managerToken, member.ID, 25_000)
 
 	managerBody := `{"approved_amount":600000,"duration_months":5,"start_date":"` + time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02") + `"}`
 	if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, managerBody); response.Code != http.StatusOK {

@@ -248,6 +248,10 @@ var migrations = []migration{
 		Version: 19,
 		Name:    "add_extended_saving_categories",
 	},
+	{
+		Version: 20,
+		Name:    "add_member_bank_details_and_saving_based_loan_limit",
+	},
 }
 
 func Migrate(db *sql.DB) error {
@@ -423,6 +427,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 			return err
 		}
 	}
+	if migration.Version == 20 {
+		if err := addMemberBankDetailsAndSavingBasedLoanLimit(tx, isSQLite); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`,
 		migration.Version,
@@ -510,6 +519,66 @@ func limitLoanAmountTo200M(tx *sql.Tx, isSQLite bool) error {
 			`ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_requested_amount_max CHECK (requested_amount <= 200000000) NOT VALID`,
 			`ALTER TABLE loan_requests ADD CONSTRAINT loan_requests_proposed_approved_amount_max CHECK (proposed_approved_amount IS NULL OR proposed_approved_amount <= 200000000) NOT VALID`,
 			`ALTER TABLE loans ADD CONSTRAINT loans_approved_amount_max CHECK (approved_amount <= 200000000) NOT VALID`,
+		}
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func addMemberBankDetailsAndSavingBasedLoanLimit(tx *sql.Tx, isSQLite bool) error {
+	statements := []string{
+		`ALTER TABLE members ADD COLUMN bank_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE members ADD COLUMN bank_account TEXT NOT NULL DEFAULT ''`,
+	}
+	if isSQLite {
+		var loanTableCount int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('loan_requests','saving_records','loans')`).Scan(&loanTableCount); err != nil {
+			return err
+		}
+		if loanTableCount < 3 {
+			for _, statement := range statements {
+				if _, err := tx.Exec(statement); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		statements = []string{
+			`ALTER TABLE members ADD COLUMN bank_name TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE members ADD COLUMN bank_account TEXT NOT NULL DEFAULT ''`,
+			`DROP TRIGGER IF EXISTS loan_requests_requested_amount_limit_insert`,
+			`DROP TRIGGER IF EXISTS loan_requests_requested_amount_limit_update`,
+			`DROP TRIGGER IF EXISTS loan_requests_proposed_amount_limit_insert`,
+			`DROP TRIGGER IF EXISTS loan_requests_proposed_amount_limit_update`,
+			`DROP TRIGGER IF EXISTS loans_approved_amount_limit_insert`,
+			`DROP TRIGGER IF EXISTS loans_approved_amount_limit_update`,
+			`CREATE TRIGGER loan_requests_requested_amount_savings_limit_insert BEFORE INSERT ON loan_requests WHEN NEW.requested_amount > COALESCE((SELECT SUM(CASE WHEN type='deposit' THEN amount ELSE -amount END) FROM saving_records WHERE member_id=NEW.member_id),0) * 4 BEGIN SELECT RAISE(ABORT,'loan amount exceeds four times saving balance'); END`,
+			`CREATE TRIGGER loan_requests_requested_amount_savings_limit_update BEFORE UPDATE OF requested_amount,member_id ON loan_requests WHEN NEW.requested_amount > COALESCE((SELECT SUM(CASE WHEN type='deposit' THEN amount ELSE -amount END) FROM saving_records WHERE member_id=NEW.member_id),0) * 4 BEGIN SELECT RAISE(ABORT,'loan amount exceeds four times saving balance'); END`,
+			`CREATE TRIGGER loan_requests_proposed_amount_savings_limit_insert BEFORE INSERT ON loan_requests WHEN NEW.proposed_approved_amount IS NOT NULL AND NEW.proposed_approved_amount > COALESCE((SELECT SUM(CASE WHEN type='deposit' THEN amount ELSE -amount END) FROM saving_records WHERE member_id=NEW.member_id),0) * 4 BEGIN SELECT RAISE(ABORT,'approved loan amount exceeds four times saving balance'); END`,
+			`CREATE TRIGGER loan_requests_proposed_amount_savings_limit_update BEFORE UPDATE OF proposed_approved_amount,member_id ON loan_requests WHEN NEW.proposed_approved_amount IS NOT NULL AND NEW.proposed_approved_amount > COALESCE((SELECT SUM(CASE WHEN type='deposit' THEN amount ELSE -amount END) FROM saving_records WHERE member_id=NEW.member_id),0) * 4 BEGIN SELECT RAISE(ABORT,'approved loan amount exceeds four times saving balance'); END`,
+			`CREATE TRIGGER loans_approved_amount_savings_limit_insert BEFORE INSERT ON loans WHEN NEW.approved_amount > COALESCE((SELECT SUM(CASE WHEN type='deposit' THEN amount ELSE -amount END) FROM saving_records WHERE member_id=NEW.member_id),0) * 4 BEGIN SELECT RAISE(ABORT,'approved loan amount exceeds four times saving balance'); END`,
+			`CREATE TRIGGER loans_approved_amount_savings_limit_update BEFORE UPDATE OF approved_amount,member_id ON loans WHEN NEW.approved_amount > COALESCE((SELECT SUM(CASE WHEN type='deposit' THEN amount ELSE -amount END) FROM saving_records WHERE member_id=NEW.member_id),0) * 4 BEGIN SELECT RAISE(ABORT,'approved loan amount exceeds four times saving balance'); END`,
+		}
+	} else {
+		statements = []string{
+			`ALTER TABLE members ADD COLUMN bank_name TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE members ADD COLUMN bank_account TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE loan_requests DROP CONSTRAINT IF EXISTS loan_requests_requested_amount_max`,
+			`ALTER TABLE loan_requests DROP CONSTRAINT IF EXISTS loan_requests_proposed_approved_amount_max`,
+			`ALTER TABLE loans DROP CONSTRAINT IF EXISTS loans_approved_amount_max`,
+			`CREATE OR REPLACE FUNCTION public.validate_loan_request_amount_against_savings() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ DECLARE saving_balance NUMERIC; BEGIN SELECT COALESCE(SUM(CASE WHEN type='deposit' THEN amount::NUMERIC ELSE -amount::NUMERIC END),0) INTO saving_balance FROM public.saving_records WHERE member_id=NEW.member_id; IF NEW.requested_amount::NUMERIC > saving_balance * 4 THEN RAISE EXCEPTION 'loan amount exceeds four times saving balance'; END IF; RETURN NEW; END $$`,
+			`DROP TRIGGER IF EXISTS loan_requests_requested_amount_savings_limit ON loan_requests`,
+			`CREATE TRIGGER loan_requests_requested_amount_savings_limit BEFORE INSERT OR UPDATE OF requested_amount,member_id ON loan_requests FOR EACH ROW EXECUTE FUNCTION public.validate_loan_request_amount_against_savings()`,
+			`CREATE OR REPLACE FUNCTION public.validate_loan_proposed_amount_against_savings() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ DECLARE saving_balance NUMERIC; BEGIN SELECT COALESCE(SUM(CASE WHEN type='deposit' THEN amount::NUMERIC ELSE -amount::NUMERIC END),0) INTO saving_balance FROM public.saving_records WHERE member_id=NEW.member_id; IF NEW.proposed_approved_amount IS NOT NULL AND NEW.proposed_approved_amount::NUMERIC > saving_balance * 4 THEN RAISE EXCEPTION 'approved loan amount exceeds four times saving balance'; END IF; RETURN NEW; END $$`,
+			`DROP TRIGGER IF EXISTS loan_requests_proposed_amount_savings_limit ON loan_requests`,
+			`CREATE TRIGGER loan_requests_proposed_amount_savings_limit BEFORE INSERT OR UPDATE OF proposed_approved_amount,member_id ON loan_requests FOR EACH ROW EXECUTE FUNCTION public.validate_loan_proposed_amount_against_savings()`,
+			`CREATE OR REPLACE FUNCTION public.validate_loan_approved_amount_against_savings() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ DECLARE saving_balance NUMERIC; BEGIN SELECT COALESCE(SUM(CASE WHEN type='deposit' THEN amount::NUMERIC ELSE -amount::NUMERIC END),0) INTO saving_balance FROM public.saving_records WHERE member_id=NEW.member_id; IF NEW.approved_amount::NUMERIC > saving_balance * 4 THEN RAISE EXCEPTION 'approved loan amount exceeds four times saving balance'; END IF; RETURN NEW; END $$`,
+			`DROP TRIGGER IF EXISTS loans_approved_amount_savings_limit ON loans`,
+			`CREATE TRIGGER loans_approved_amount_savings_limit BEFORE INSERT OR UPDATE OF approved_amount,member_id ON loans FOR EACH ROW EXECUTE FUNCTION public.validate_loan_approved_amount_against_savings()`,
 		}
 	}
 	for _, statement := range statements {

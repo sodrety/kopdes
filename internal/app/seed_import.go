@@ -192,7 +192,7 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 		if len(prepared.Loans) != 0 {
 			return report, errors.New("append seed import currently supports members and savings only")
 		}
-		if err := MigrateTo(db, 19); err != nil {
+		if err := MigrateTo(db, 20); err != nil {
 			return report, fmt.Errorf("prepare append schema: %w", err)
 		}
 		prepared, err = reconcileAppendMemberIDs(db, prepared)
@@ -240,8 +240,13 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 		}
 	}
 	if !options.Append && !needsExtendedSavingCategories {
-		if err := MigrateTo(db, 19); err != nil {
+		if err := MigrateTo(db, 20); err != nil {
 			return report, fmt.Errorf("finish schema migrations after seed staging: %w", err)
+		}
+	}
+	if !options.Append && needsExtendedSavingCategories {
+		if err := MigrateTo(db, 20); err != nil {
+			return report, fmt.Errorf("finish schema migrations after extended-category seed staging: %w", err)
 		}
 	}
 	if err := updateImportedMemberTypes(db, prepared.Members); err != nil {

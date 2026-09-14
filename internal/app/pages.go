@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -408,6 +409,11 @@ func (s *Server) memberLoanRequestsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	summary, err := savingSummary(s.db, member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
 	var total int64
 	for _, loan := range outstanding {
 		total += loan.RemainingBalance
@@ -416,6 +422,8 @@ func (s *Server) memberLoanRequestsPage(c *gin.Context) {
 		"LoanRequests":     requests,
 		"OutstandingLoans": outstanding,
 		"TotalOutstanding": total,
+		"MaxLoanAmount":    maxLoanAmountForSavingBalance(summary.CurrentBalance),
+		"BankDetailsReady": strings.TrimSpace(member.BankName) != "" && strings.TrimSpace(member.BankAccount) != "",
 		"ShellClass":       "member-loan-requests-shell",
 	}))
 }

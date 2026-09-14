@@ -1,15 +1,15 @@
 {{define "member-dashboard"}}
 {{template "member-shell-start" .}}
     <section class="summary-grid">
-{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Dashboard.SavingBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "remaining_loan") "Value" (nominal .Dashboard.RemainingLoanBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "next_due_date") "Value" .Dashboard.EarliestDueDate)}}
-{{template "summary-card" (dict "Label" (t .Lang "final_due_date") "Value" .Dashboard.LatestFinalDueDate)}}
-{{if .Dashboard.HasOverdueLoan}}{{template "summary-card" (dict "Label" (t .Lang "payment_status") "Value" (t .Lang "overdue"))}}{{end}}
+{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Dashboard.SavingBalance) "Icon" "piggy-bank")}}
+{{template "summary-card" (dict "Label" (t .Lang "remaining_loan") "Value" (nominal .Dashboard.RemainingLoanBalance) "Icon" "banknote")}}
+{{template "summary-card" (dict "Label" (t .Lang "next_due_date") "Value" .Dashboard.EarliestDueDate "Icon" "calendar-days")}}
+{{template "summary-card" (dict "Label" (t .Lang "final_due_date") "Value" .Dashboard.LatestFinalDueDate "Icon" "calendar-check-2")}}
+{{if .Dashboard.HasOverdueLoan}}{{template "summary-card" (dict "Label" (t .Lang "payment_status") "Value" (t .Lang "overdue") "Icon" "triangle-alert")}}{{end}}
 {{if .Dashboard.ActiveLoan}}
-{{template "summary-card" (dict "Label" (t .Lang "active_loan") "Value" (nominal .Dashboard.ActiveLoan.ApprovedAmount))}}
+{{template "summary-card" (dict "Label" (t .Lang "active_loan") "Value" (nominal .Dashboard.ActiveLoan.ApprovedAmount) "Icon" "landmark")}}
 {{else}}
-{{template "summary-card" (dict "Label" (t .Lang "active_loan") "Value" (t .Lang "none"))}}
+{{template "summary-card" (dict "Label" (t .Lang "active_loan") "Value" (t .Lang "none") "Icon" "landmark")}}
 {{end}}
     </section>
     <section class="panel">
@@ -103,12 +103,12 @@
 {{define "member-profile"}}
 {{template "member-shell-start" .}}
     <section class="summary-grid">
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" (nominal .Summary.WajibBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_manasuka") "Value" (nominal .Summary.SukarelaBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_shu") "Value" (nominal .Summary.SHUBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" (nominal .Summary.TotalDeposit))}}
-{{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" (nominal .Summary.TotalWithdrawal))}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" (nominal .Summary.WajibBalance) "Icon" "wallet")}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_manasuka") "Value" (nominal .Summary.SukarelaBalance) "Icon" "coins")}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_shu") "Value" (nominal .Summary.SHUBalance) "Icon" "wallet-cards")}}
+{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance) "Icon" "piggy-bank")}}
+{{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" (nominal .Summary.TotalDeposit) "Icon" "arrow-down-to-line")}}
+{{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" (nominal .Summary.TotalWithdrawal) "Icon" "arrow-up-from-line")}}
     </section>
     {{if .OutstandingLoans}}
     <section class="panel">
@@ -135,6 +135,16 @@
       <div><span>{{t .Lang "join_date"}}</span><strong>{{.Member.JoinDate}}</strong></div>
       <div><span>{{t .Lang "member_type"}}</span><strong>{{.Member.MemberTypeLabel}}</strong></div>
       <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .Member.Status}}</strong></div>
+    </section>
+    <section class="panel form-panel">
+      <h2>{{t .Lang "bank_details"}}</h2>
+      <p class="field-help">{{t .Lang "bank_details_description"}}</p>
+      <form method="post" action="/api/member/profile/bank-details" hx-post="/api/member/profile/bank-details" hx-target="#member-bank-details-error" hx-swap="innerHTML">
+        <label>{{t .Lang "bank_name"}} <input name="bank_name" value="{{.Member.BankName}}" required autocomplete="organization"></label>
+        <label>{{t .Lang "bank_account"}} <input name="bank_account" value="{{.Member.BankAccount}}" inputmode="numeric" required autocomplete="off"></label>
+        <button type="submit">{{t .Lang "save_bank_details"}}</button>
+      </form>
+{{template "form-error" (dict "ID" "member-bank-details-error")}}
     </section>
     <section class="panel">
       <h2>{{t .Lang "saving_history"}}</h2>
@@ -200,9 +210,9 @@
 {{define "member-withdrawal-requests"}}
 {{template "member-shell-start" .}}
     <section class="summary-grid">
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" (nominal .Summary.SukarelaBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "available_withdrawal_balance") "Value" (nominal .Summary.AvailableWithdrawalBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" (nominal .Summary.SukarelaBalance) "Icon" "coins")}}
+{{template "summary-card" (dict "Label" (t .Lang "available_withdrawal_balance") "Value" (nominal .Summary.AvailableWithdrawalBalance) "Icon" "wallet-cards")}}
+{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance) "Icon" "piggy-bank")}}
     </section>
     <section class="two-column">
       <article class="panel">
@@ -278,17 +288,27 @@
     <section class="two-column">
       <article class="panel">
         <h2>{{t .Lang "submit_loan_request"}}</h2>
+        {{if not .BankDetailsReady}}
+        <div class="form-notice" role="alert">
+          <p>{{t .Lang "bank_details_required_before_loan"}}</p>
+          <a class="button-link button-link-secondary" href="/member/profile">{{t .Lang "profile"}}</a>
+        </div>
+        {{else if eq .MaxLoanAmount 0}}
+        <div class="form-notice" role="alert">
+          <p>{{t .Lang "no_saving_balance_for_loan"}}</p>
+        </div>
+        {{end}}
         <form method="post" action="/api/member/loan-requests" hx-post="/api/member/loan-requests" hx-target="#loan-request-error" hx-swap="innerHTML" data-loan-fee-preview data-monthly-admin-fee-label="{{t .Lang "monthly_admin_fee"}}" data-total-admin-fee-label="{{t .Lang "total_admin_fee"}}" data-total-obligation-label="{{t .Lang "total_obligation"}}" data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}">
           <label>{{t .Lang "loan_type"}} <select name="loan_type" data-loan-type required><option value="">{{t .Lang "select_loan_type"}}</option><option value="regular">{{t .Lang "loan_type_regular"}}</option><option value="secondary_goods">{{t .Lang "loan_type_secondary_goods"}}</option><option value="goods_purchase_paylater">{{t .Lang "loan_type_goods_purchase_paylater"}}</option></select></label>
 		  <label>{{t .Lang "requested_amount"}}
-            <input name="requested_amount" type="text" inputmode="numeric" placeholder="Rp 0" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="200000000" data-rupiah-max-invalid="{{t .Lang "error_loan_amount_limit"}}" aria-describedby="loan-request-amount-hint" aria-errormessage="loan-request-amount-error" required>
+            <input name="requested_amount" type="text" inputmode="numeric" placeholder="{{t .Lang "rupiah_placeholder"}}" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="{{.MaxLoanAmount}}" data-rupiah-max-invalid="{{t .Lang "error_loan_amount_limit"}}" aria-describedby="loan-request-amount-hint" aria-errormessage="loan-request-amount-error" autocomplete="off" spellcheck="false" {{if not .BankDetailsReady}}disabled{{end}} required>
             <small id="loan-request-amount-hint">{{t .Lang "loan_amount_limit_hint"}}</small>
             <small id="loan-request-amount-error" class="form-error-message" aria-live="polite" hidden></small>
           </label>
 		  <label>{{t .Lang "duration_months"}} <input name="duration_months" type="number" min="1" max="24" data-loan-duration required></label>
           <p class="loan-fee-preview" data-loan-fee-output aria-live="polite" hidden></p>
 		  <label>{{t .Lang "purpose"}} <input name="purpose" required></label>
-          <button type="submit">{{t .Lang "submit_loan_request"}}</button>
+          <button type="submit" {{if or (not .BankDetailsReady) (eq .MaxLoanAmount 0)}}disabled{{end}}>{{t .Lang "submit_loan_request"}}</button>
         </form>
 {{template "form-error" (dict "ID" "loan-request-error")}}
       </article>

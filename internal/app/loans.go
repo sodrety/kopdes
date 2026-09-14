@@ -325,7 +325,15 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		if req.ApprovedAmount <= 0 || req.DurationMonths <= 0 || startDate == "" {
 			return LoanApprovalResult{}, errInvalidLoanApproval
 		}
-		if req.ApprovedAmount > maxLoanPrincipalAmount {
+		var lockedMemberID string
+		if err := tx.QueryRow(`SELECT id FROM members WHERE id = $1`+rowLockClause(s.db), request.MemberID).Scan(&lockedMemberID); err != nil {
+			return LoanApprovalResult{}, err
+		}
+		summary, err := savingSummary(tx, request.MemberID)
+		if err != nil {
+			return LoanApprovalResult{}, err
+		}
+		if req.ApprovedAmount > maxLoanAmountForSavingBalance(summary.CurrentBalance) {
 			return LoanApprovalResult{}, errLoanAmountLimitExceeded
 		}
 		start, parseErr := parseLoanDate(startDate)
@@ -405,6 +413,13 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 	var lockedMemberID string
 	if err = tx.QueryRow(`SELECT id FROM members WHERE id = $1`+rowLockClause(s.db), request.MemberID).Scan(&lockedMemberID); err != nil {
 		return LoanApprovalResult{}, err
+	}
+	summary, err := savingSummary(tx, request.MemberID)
+	if err != nil {
+		return LoanApprovalResult{}, err
+	}
+	if request.ProposedApprovedAmount > maxLoanAmountForSavingBalance(summary.CurrentBalance) {
+		return LoanApprovalResult{}, errLoanAmountLimitExceeded
 	}
 
 	if err := validateLoanFeeSnapshot(request.ProposedAdminFeePolicy, request.ProposedApprovedAmount, request.ProposedDurationMonths, request.ProposedMonthlyAdminFee, request.ProposedTotalAdminFee, request.ProposedTotalObligation); err != nil {

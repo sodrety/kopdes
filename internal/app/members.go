@@ -17,6 +17,8 @@ type Member struct {
 	Phone              string `json:"phone"`
 	Address            string `json:"address"`
 	JoinDate           string `json:"join_date"`
+	BankName           string `json:"bank_name"`
+	BankAccount        string `json:"bank_account"`
 	Status             string `json:"status"`
 	MemberType         string `json:"member_type"`
 	MemberTypeLabel    string `json:"member_type_label"`
@@ -32,15 +34,17 @@ type Member struct {
 }
 
 type memberRequest struct {
-	MemberNo   string `json:"member_no" form:"member_no"`
-	FullName   string `json:"full_name" form:"full_name"`
-	Phone      string `json:"phone" form:"phone"`
-	Address    string `json:"address" form:"address"`
-	JoinDate   string `json:"join_date" form:"join_date"`
-	Status     string `json:"status" form:"status"`
-	MemberType string `json:"member_type" form:"member_type"`
-	Email      string `json:"email" form:"email"`
-	Password   string `json:"password" form:"password"`
+	MemberNo    string `json:"member_no" form:"member_no"`
+	FullName    string `json:"full_name" form:"full_name"`
+	Phone       string `json:"phone" form:"phone"`
+	Address     string `json:"address" form:"address"`
+	JoinDate    string `json:"join_date" form:"join_date"`
+	BankName    string `json:"bank_name" form:"bank_name"`
+	BankAccount string `json:"bank_account" form:"bank_account"`
+	Status      string `json:"status" form:"status"`
+	MemberType  string `json:"member_type" form:"member_type"`
+	Email       string `json:"email" form:"email"`
+	Password    string `json:"password" form:"password"`
 }
 
 func (s *Server) createMember(c *gin.Context) {
@@ -91,6 +95,8 @@ func (s *Server) createMember(c *gin.Context) {
 		"phone":             member.Phone,
 		"address":           member.Address,
 		"join_date":         member.JoinDate,
+		"bank_name":         member.BankName,
+		"bank_account":      member.BankAccount,
 		"status":            member.Status,
 		"member_type":       member.MemberType,
 		"member_type_label": member.MemberTypeLabel,
@@ -143,6 +149,71 @@ func (s *Server) updateMemberType(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, member)
+}
+
+type memberBankDetailsInput struct {
+	BankName    string `json:"bank_name" form:"bank_name"`
+	BankAccount string `json:"bank_account" form:"bank_account"`
+}
+
+var errInvalidMemberBankDetails = errors.New("invalid member bank details")
+
+func (s *Server) updateMemberBankDetails(c *gin.Context) {
+	member, err := s.updateMemberBankDetailsByID(c.Param("id"), c)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_member_not_found"))
+		return
+	}
+	if errors.Is(err, errInvalidMemberBankDetails) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_member_bank_details_required"))
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	respondOKOrHXRedirect(c, "/admin/members/"+member.ID, member)
+}
+
+func (s *Server) updateOwnMemberBankDetails(c *gin.Context) {
+	member, ok := s.profileMember(c)
+	if !ok {
+		return
+	}
+	updated, err := s.updateMemberBankDetailsByID(member.ID, c)
+	if errors.Is(err, errInvalidMemberBankDetails) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_member_bank_details_required"))
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	respondOKOrHXRedirect(c, "/member/profile", updated)
+}
+
+func (s *Server) updateMemberBankDetailsByID(id string, c *gin.Context) (Member, error) {
+	var req memberBankDetailsInput
+	if err := c.ShouldBind(&req); err != nil {
+		return Member{}, errInvalidMemberBankDetails
+	}
+	req.BankName = strings.TrimSpace(req.BankName)
+	req.BankAccount = strings.TrimSpace(req.BankAccount)
+	if req.BankName == "" || req.BankAccount == "" {
+		return Member{}, errInvalidMemberBankDetails
+	}
+	result, err := s.db.Exec(`UPDATE members SET bank_name=$1,bank_account=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$3`, req.BankName, req.BankAccount, id)
+	if err != nil {
+		return Member{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return Member{}, err
+	}
+	if affected == 0 {
+		return Member{}, sql.ErrNoRows
+	}
+	return s.memberByID(id)
 }
 
 func (s *Server) createMemberUser(c *gin.Context) {
@@ -312,14 +383,16 @@ func (s *Server) insertMember(req memberRequest) (Member, error) {
 		status = "active"
 	}
 	member := Member{
-		ID:         newID(),
-		MemberNo:   strings.TrimSpace(req.MemberNo),
-		FullName:   strings.TrimSpace(req.FullName),
-		Phone:      strings.TrimSpace(req.Phone),
-		Address:    strings.TrimSpace(req.Address),
-		JoinDate:   strings.TrimSpace(req.JoinDate),
-		Status:     strings.TrimSpace(status),
-		MemberType: strings.TrimSpace(req.MemberType),
+		ID:          newID(),
+		MemberNo:    strings.TrimSpace(req.MemberNo),
+		FullName:    strings.TrimSpace(req.FullName),
+		Phone:       strings.TrimSpace(req.Phone),
+		Address:     strings.TrimSpace(req.Address),
+		JoinDate:    strings.TrimSpace(req.JoinDate),
+		BankName:    strings.TrimSpace(req.BankName),
+		BankAccount: strings.TrimSpace(req.BankAccount),
+		Status:      strings.TrimSpace(status),
+		MemberType:  strings.TrimSpace(req.MemberType),
 	}
 	if member.MemberType == "" {
 		member.MemberType = memberTypeEmployee
@@ -330,13 +403,15 @@ func (s *Server) insertMember(req memberRequest) (Member, error) {
 	member.MemberTypeLabel = memberTypeLabel(member.MemberType)
 
 	_, err := s.db.Exec(
-		`INSERT INTO members (id, member_no, full_name, phone, address, join_date, status, member_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		`INSERT INTO members (id, member_no, full_name, phone, address, join_date, bank_name, bank_account, status, member_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		member.ID,
 		member.MemberNo,
 		member.FullName,
 		member.Phone,
 		member.Address,
 		member.JoinDate,
+		member.BankName,
+		member.BankAccount,
 		member.Status,
 		member.MemberType,
 	)
@@ -347,7 +422,7 @@ func (s *Server) insertMember(req memberRequest) (Member, error) {
 }
 
 func (s *Server) allMembers() ([]Member, error) {
-	rows, err := s.db.Query(`SELECT m.id, m.member_no, m.full_name, m.phone, m.address, m.join_date, m.status, m.member_type,
+	rows, err := s.db.Query(`SELECT m.id, m.member_no, m.full_name, m.phone, m.address, m.join_date, COALESCE(m.bank_name,''), COALESCE(m.bank_account,''), m.status, m.member_type,
 		COALESCE(u.email,''), COALESCE(u.active,FALSE), COALESCE(u.must_change_password,FALSE),
 		COALESCE(oa.id,''), COALESCE(oa.role,''), COALESCE(oa.active,FALSE)
 		FROM members m
@@ -362,7 +437,7 @@ func (s *Server) allMembers() ([]Member, error) {
 	var members []Member
 	for rows.Next() {
 		var member Member
-		if err := rows.Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Phone, &member.Address, &member.JoinDate, &member.Status, &member.MemberType,
+		if err := rows.Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Phone, &member.Address, &member.JoinDate, &member.BankName, &member.BankAccount, &member.Status, &member.MemberType,
 			&member.LoginEmail, &member.LoginActive, &member.MustChangePassword, &member.OfficerID, &member.OfficerRole, &member.OfficerActive); err != nil {
 			return nil, err
 		}
@@ -376,7 +451,7 @@ func (s *Server) allMembers() ([]Member, error) {
 func (s *Server) memberByID(id string) (Member, error) {
 	var member Member
 	err := s.db.QueryRow(
-		`SELECT m.id, m.member_no, m.full_name, m.phone, m.address, m.join_date, m.status, m.member_type,
+		`SELECT m.id, m.member_no, m.full_name, m.phone, m.address, m.join_date, COALESCE(m.bank_name,''), COALESCE(m.bank_account,''), m.status, m.member_type,
 			COALESCE(u.email,''), COALESCE(u.active,FALSE), COALESCE(u.must_change_password,FALSE),
 			COALESCE(oa.id,''), COALESCE(oa.role,''), COALESCE(oa.active,FALSE)
 			FROM members m
@@ -384,7 +459,7 @@ func (s *Server) memberByID(id string) (Member, error) {
 			LEFT JOIN officer_appointments oa ON oa.member_id=m.id
 			WHERE m.id = $1`,
 		id,
-	).Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Phone, &member.Address, &member.JoinDate, &member.Status, &member.MemberType,
+	).Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Phone, &member.Address, &member.JoinDate, &member.BankName, &member.BankAccount, &member.Status, &member.MemberType,
 		&member.LoginEmail, &member.LoginActive, &member.MustChangePassword, &member.OfficerID, &member.OfficerRole, &member.OfficerActive)
 	member.MemberTypeLabel = memberTypeLabel(member.MemberType)
 	member.HasLogin = member.LoginEmail != ""

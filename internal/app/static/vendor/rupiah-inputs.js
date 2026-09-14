@@ -45,6 +45,29 @@
     }
   }
 
+  function digitsBeforeCursor(value, cursor) {
+    return (value.slice(0, cursor).match(/\d/g) || []).length;
+  }
+
+  function cursorAfterDigits(value, digitCount) {
+    if (digitCount === null) {
+      return null;
+    }
+    if (digitCount === 0) {
+      return value.search(/\d/) >= 0 ? value.search(/\d/) : value.length;
+    }
+    var seen = 0;
+    for (var index = 0; index < value.length; index += 1) {
+      if (/\d/.test(value.charAt(index))) {
+        seen += 1;
+        if (seen === digitCount) {
+          return index + 1;
+        }
+      }
+    }
+    return value.length;
+  }
+
   function validateRupiah(field) {
     var digits = rupiahDigits(field.value);
     if (digits === null || !/[1-9]/.test(digits)) {
@@ -72,6 +95,8 @@
       setError(field, "");
       return;
     }
+    var cursor = typeof field.selectionStart === "number" ? field.selectionStart : null;
+    var digitsAtCursor = cursor === null ? null : digitsBeforeCursor(field.value, cursor);
     var digits = rupiahDigits(field.value);
     if (digits === null || !/[1-9]/.test(digits)) {
       setError(field, field.dataset.rupiahInvalid);
@@ -80,6 +105,10 @@
     digits = canonicalDigits(digits);
     var group = field.dataset.rupiahGroup || ",";
     field.value = "Rp " + digits.replace(/\B(?=(\d{3})+(?!\d))/g, group);
+    var nextCursor = cursorAfterDigits(field.value, digitsAtCursor);
+    if (nextCursor !== null && typeof field.setSelectionRange === "function") {
+      field.setSelectionRange(nextCursor, nextCursor);
+    }
     validateRupiah(field);
   }
 

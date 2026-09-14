@@ -682,6 +682,17 @@ button:disabled {
   min-height: 20px;
   color: var(--negative);
 }
+.form-notice {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #f6c23e;
+  border-radius: var(--radius-md);
+  background: #fff8e1;
+  color: #7a5a00;
+}
+.form-notice p {
+  margin: 0;
+}
 .toast-region {
   position: fixed;
   top: 18px;
@@ -1306,17 +1317,24 @@ button:disabled {
   border-radius: 6px;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.10), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
-.summary-card::after {
-  content: "";
+.summary-card-icon {
+  display: grid;
+  place-items: center;
   position: absolute;
   right: 18px;
   top: 50%;
   width: 42px;
   height: 42px;
+  padding: 10px;
   border-radius: 9999px;
   transform: translateY(-50%);
   background: var(--primary);
+  color: #fff;
   opacity: 0.92;
+}
+.summary-card-icon svg {
+  width: 100%;
+  height: 100%;
 }
 .summary-card span {
   color: var(--primary);
@@ -1334,7 +1352,7 @@ button:disabled {
 .summary-grid .summary-card:nth-child(2) {
   border-left-color: #1cc88a;
 }
-.summary-grid .summary-card:nth-child(2)::after {
+.summary-grid .summary-card:nth-child(2) .summary-card-icon {
   background: #1cc88a;
 }
 .summary-grid .summary-card:nth-child(2) span {
@@ -1343,7 +1361,7 @@ button:disabled {
 .summary-grid .summary-card:nth-child(3) {
   border-left-color: #36b9cc;
 }
-.summary-grid .summary-card:nth-child(3)::after {
+.summary-grid .summary-card:nth-child(3) .summary-card-icon {
   background: #36b9cc;
 }
 .summary-grid .summary-card:nth-child(3) span {
@@ -1352,7 +1370,7 @@ button:disabled {
 .summary-grid .summary-card:nth-child(4) {
   border-left-color: #f6c23e;
 }
-.summary-grid .summary-card:nth-child(4)::after {
+.summary-grid .summary-card:nth-child(4) .summary-card-icon {
   background: #f6c23e;
 }
 .summary-grid .summary-card:nth-child(4) span {
@@ -1361,13 +1379,13 @@ button:disabled {
 .summary-grid .summary-card:nth-child(5) {
   border-left-color: #4e73df;
 }
-.summary-grid .summary-card:nth-child(5)::after {
+.summary-grid .summary-card:nth-child(5) .summary-card-icon {
   background: #4e73df;
 }
 .summary-grid .summary-card:nth-child(6) {
   border-left-color: #858796;
 }
-.summary-grid .summary-card:nth-child(6)::after {
+.summary-grid .summary-card:nth-child(6) .summary-card-icon {
   background: #858796;
 }
 .dashboard-home-grid {
@@ -1819,16 +1837,23 @@ td:nth-child(n+2):not(.review-cell) {
   background: #fff;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.10), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
-.balance-kpi-card::after {
-  content: "";
+.kpi-card-icon {
+  display: grid;
+  place-items: center;
   position: absolute;
   right: 20px;
   top: 50%;
   width: 42px;
   height: 42px;
+  padding: 10px;
   border-radius: 9999px;
   transform: translateY(-50%);
   background: #4e73df;
+  color: #fff;
+}
+.kpi-card-icon svg {
+  width: 100%;
+  height: 100%;
 }
 .balance-kpi-card span {
   color: #4e73df;
@@ -1851,7 +1876,7 @@ td:nth-child(n+2):not(.review-cell) {
 .balance-kpi-warning {
   border-left-color: #f6c23e;
 }
-.balance-kpi-warning::after {
+.balance-kpi-warning .kpi-card-icon {
   background: #f6c23e;
 }
 .balance-kpi-warning span {
@@ -1860,7 +1885,7 @@ td:nth-child(n+2):not(.review-cell) {
 .balance-kpi-success {
   border-left-color: #1cc88a;
 }
-.balance-kpi-success::after {
+.balance-kpi-success .kpi-card-icon {
   background: #1cc88a;
 }
 .balance-kpi-success span {
@@ -2005,17 +2030,6 @@ td:nth-child(n+2):not(.review-cell) {
   background: #fff;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.10), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
-.profit-kpi-card::after {
-  content: "";
-  position: absolute;
-  right: 20px;
-  top: 50%;
-  width: 42px;
-  height: 42px;
-  border-radius: 9999px;
-  transform: translateY(-50%);
-  background: #1cc88a;
-}
 .profit-kpi-card span {
   color: #1cc88a;
   font-size: 12px;
@@ -2040,7 +2054,7 @@ td:nth-child(n+2):not(.review-cell) {
 .profit-kpi-cost {
   border-left-color: #e74a3b;
 }
-.profit-kpi-cost::after,
+.profit-kpi-cost .kpi-card-icon,
 .profit-kpi-cost small {
   background: #e74a3b;
 }
@@ -2050,7 +2064,7 @@ td:nth-child(n+2):not(.review-cell) {
 .profit-kpi-net {
   border-left-color: #4e73df;
 }
-.profit-kpi-net::after,
+.profit-kpi-net .kpi-card-icon,
 .profit-kpi-net small {
   background: #4e73df;
 }

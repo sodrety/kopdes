@@ -207,23 +207,23 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 19 {
-		t.Fatalf("expected nineteen tracked migrations, got %d", migrationCount)
+	if migrationCount != 20 {
+		t.Fatalf("expected twenty tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 19`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 20`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "add_extended_saving_categories" {
-		t.Fatalf("expected latest extended saving categories migration, got %q", latestName)
+	if latestName != "add_member_bank_details_and_saving_based_loan_limit" {
+		t.Fatalf("expected latest bank details and loan limit migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
 		t.Fatalf("expected migrated members table to be usable: %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO loan_requests (id, member_id, requested_amount, duration_months, purpose, status, loan_type, current_approval_stage) VALUES ('migrate-over-limit-loan', 'migrate-member', 200000001, 1, 'Over limit', 'pending', 'regular', 'manager')`); err == nil {
-		t.Fatal("expected migrated loan request amount limit to reject values above Rp200,000,000")
+		t.Fatal("expected migrated loan request amount limit to reject values above four times saving balance")
 	}
 	var memberType string
 	if err := db.QueryRow(`SELECT member_type FROM members WHERE id='migrate-member'`).Scan(&memberType); err != nil {
@@ -588,6 +588,7 @@ func TestConcurrentLoanRequestSubmissionsCreateOnlyOnePendingRequest(t *testing.
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-RACE-LOAN","full_name":"Loan Race","join_date":"2026-06-17","status":"active"}`)
 	fixture.createMemberUser(t, adminToken, member.ID, "loan-race@coop.test", "secret-password")
 	memberToken := fixture.login(t, "loan-race@coop.test", "secret-password")
+	fixture.recordDeposit(t, adminToken, member.ID, 125_000)
 	statuses := make(chan int, 2)
 	var wg sync.WaitGroup
 	for range 2 {
@@ -2847,6 +2848,7 @@ func TestMemberCanSubmitAndTrackLoanRequest(t *testing.T) {
 		"password":"member-password"
 	}`)
 	memberToken := fixture.login(t, "loan-member@coop.test", "member-password")
+	fixture.recordDeposit(t, adminToken, member.ID, 750_000)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{
 		"requested_amount":3000000,
@@ -2917,7 +2919,8 @@ func TestMemberCanSubmitAndTrackLoanRequest(t *testing.T) {
 func TestLoanRequestValidationAndEligibility(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
-	fixture.createMember(t, adminToken, `{"member_no":"M-0017","full_name":"Active Loan","join_date":"2026-06-16","status":"active","email":"active-loan@coop.test","password":"member-password"}`)
+	active := fixture.createMember(t, adminToken, `{"member_no":"M-0017","full_name":"Active Loan","join_date":"2026-06-16","status":"active","email":"active-loan@coop.test","password":"member-password"}`)
+	fixture.recordDeposit(t, adminToken, active.ID, 50_000_000)
 	inactive := fixture.createMember(t, adminToken, `{"member_no":"M-0018","full_name":"Inactive Loan","join_date":"2026-06-16","status":"active","email":"inactive-loan@coop.test","password":"member-password"}`)
 	activeToken := fixture.login(t, "active-loan@coop.test", "member-password")
 	inactiveToken := fixture.login(t, "inactive-loan@coop.test", "member-password")
@@ -2975,7 +2978,7 @@ func TestLoanRequestValidationAndEligibility(t *testing.T) {
 		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Loan Type is required and requested amount and duration months must be greater than zero")
 	})
 
-	t.Run("requested amount cannot exceed 200 million rupiah", func(t *testing.T) {
+	t.Run("requested amount cannot exceed four times saving balance", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{"requested_amount":200000001,"duration_months":4,"purpose":"Too large","loan_type":"regular"}`))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+activeToken)
@@ -2986,10 +2989,10 @@ func TestLoanRequestValidationAndEligibility(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Loan amount cannot exceed Rp 200,000,000")
+		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Loan amount cannot exceed four times the member's current Saving Balance")
 	})
 
-	t.Run("approved amount cannot exceed 200 million rupiah", func(t *testing.T) {
+	t.Run("approved amount cannot exceed four times saving balance", func(t *testing.T) {
 		fixture.createMember(t, adminToken, `{"member_no":"M-0017B","full_name":"Approval Cap","join_date":"2026-06-16","status":"active","email":"approval-cap@coop.test","password":"member-password"}`)
 		capToken := fixture.login(t, "approval-cap@coop.test", "member-password")
 		requestID := fixture.createLoanRequest(t, capToken, 200000000, 4)
@@ -3005,7 +3008,7 @@ func TestLoanRequestValidationAndEligibility(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Loan amount cannot exceed Rp 200,000,000")
+		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Loan amount cannot exceed four times the member's current Saving Balance")
 	})
 
 	t.Run("member must be active", func(t *testing.T) {
@@ -3296,6 +3299,7 @@ func TestLoanApprovalValidationAndConflicts(t *testing.T) {
 		fixture.createMember(t, adminToken, `{"member_no":"M-0023","full_name":"Approval Rules","join_date":"2026-06-16","status":"active","email":"approval-rules@coop.test","password":"member-password"}`)
 		memberToken := fixture.login(t, "approval-rules@coop.test", "member-password")
 		requestID := fixture.pendingLoanRequestID(t, memberToken)
+		fixture.ensureLoanCapacityForRequest(t, adminToken, requestID, 1_500_000)
 		body := fmt.Sprintf(`{"approved_amount":1500000,"duration_months":5,"start_date":%q}`, time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02"))
 		req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -4308,15 +4312,21 @@ func (f testFixture) createMember(t *testing.T, adminToken, body string) struct 
 		memberNo, _ := payload["member_no"].(string)
 		email, _ := payload["email"].(string)
 		hadEmail = strings.TrimSpace(email) != ""
+		if _, exists := payload["bank_name"]; !exists {
+			payload["bank_name"] = "Test Bank"
+		}
+		if _, exists := payload["bank_account"]; !exists {
+			payload["bank_account"] = "0000000000"
+		}
 		if strings.TrimSpace(email) == "" {
 			payload["email"] = strings.ToLower(memberNo) + "@test.local"
 			payload["password"] = "member-password"
-			encoded, encodeErr := json.Marshal(payload)
-			if encodeErr != nil {
-				t.Fatalf("encode test member: %v", encodeErr)
-			}
-			body = string(encoded)
 		}
+		encoded, encodeErr := json.Marshal(payload)
+		if encodeErr != nil {
+			t.Fatalf("encode test member: %v", encodeErr)
+		}
+		body = string(encoded)
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/members", bytes.NewBufferString(body))
@@ -4418,6 +4428,7 @@ func (f testFixture) createLoanRequest(t *testing.T, memberToken string, amount,
 
 func (f testFixture) createLoanRequestWithType(t *testing.T, memberToken, loanType string, amount, durationMonths int) string {
 	t.Helper()
+	f.ensureLoanCapacity(t, memberToken, amount)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/member/loan-requests", bytes.NewBufferString(`{
 		"requested_amount":`+strconv.Itoa(amount)+`,
@@ -4440,6 +4451,46 @@ func (f testFixture) createLoanRequestWithType(t *testing.T, memberToken, loanTy
 		t.Fatalf("decode loan request response: %v", err)
 	}
 	return response.ID
+}
+
+func (f testFixture) ensureLoanCapacity(t *testing.T, memberToken string, amount int) {
+	t.Helper()
+	profileReq := httptest.NewRequest(http.MethodGet, "/api/member/profile", nil)
+	profileReq.Header.Set("Authorization", "Bearer "+memberToken)
+	profileRec := httptest.NewRecorder()
+	f.server.ServeHTTP(profileRec, profileReq)
+	if profileRec.Code != http.StatusOK {
+		t.Fatalf("load member profile for loan capacity: %d %s", profileRec.Code, profileRec.Body.String())
+	}
+	var profile struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(profileRec.Body.Bytes(), &profile); err != nil {
+		t.Fatalf("decode member profile for loan capacity: %v", err)
+	}
+	f.ensureLoanCapacityForMember(t, f.login(t, "admin@coop.test", "password"), profile.ID, amount)
+}
+
+func (f testFixture) ensureLoanCapacityForRequest(t *testing.T, adminToken, requestID string, amount int) {
+	t.Helper()
+	var memberID string
+	if err := f.db.QueryRow(`SELECT member_id FROM loan_requests WHERE id=$1`, requestID).Scan(&memberID); err != nil {
+		t.Fatalf("load loan request member for capacity: %v", err)
+	}
+	f.ensureLoanCapacityForMember(t, adminToken, memberID, amount)
+}
+
+func (f testFixture) ensureLoanCapacityForMember(t *testing.T, adminToken, memberID string, amount int) {
+	t.Helper()
+	var balance int64
+	if err := f.db.QueryRow(`SELECT COALESCE(SUM(CASE WHEN type='deposit' THEN amount ELSE -amount END),0) FROM saving_records WHERE member_id=$1`, memberID).Scan(&balance); err != nil {
+		t.Fatalf("read member saving balance for loan capacity: %v", err)
+	}
+	targetBalance := (int64(amount) + 3) / 4
+	if balance >= targetBalance {
+		return
+	}
+	f.recordSaving(t, adminToken, memberID, "deposit", int(targetBalance-balance), "TEST-LOAN-CAPACITY", "Test loan capacity")
 }
 
 func (f testFixture) createWithdrawalRequest(t *testing.T, memberToken string, amount int, note string) string {
@@ -4514,6 +4565,7 @@ type testRepayment struct {
 
 func (f testFixture) approveLoanRequest(t *testing.T, adminToken, requestID string, approvedAmount, durationMonths int) testLoan {
 	t.Helper()
+	f.ensureLoanCapacityForRequest(t, adminToken, requestID, approvedAmount)
 
 	managerBody := `{
 		"approved_amount":` + strconv.Itoa(approvedAmount) + `,
@@ -4554,6 +4606,7 @@ func (f testFixture) approveLoanRequest(t *testing.T, adminToken, requestID stri
 
 func (f testFixture) approveLoanRequestWithStartDate(t *testing.T, adminToken, requestID string, approvedAmount, durationMonths int, startDate string) testLoan {
 	t.Helper()
+	f.ensureLoanCapacityForRequest(t, adminToken, requestID, approvedAmount)
 
 	managerBody := `{
 		"approved_amount":` + strconv.Itoa(approvedAmount) + `,
@@ -4759,7 +4812,7 @@ func seedUser(t *testing.T, db *sql.DB, id, email, password, role string) {
 	}
 	memberID := id + "-member"
 	memberNo := "TEST-" + strings.ToUpper(id)
-	if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ($1,$2,$3,'2026-01-01','active')`, memberID, memberNo, email); err != nil {
+	if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,bank_name,bank_account,status) VALUES ($1,$2,$3,'2026-01-01','Test Bank','0000000000','active')`, memberID, memberNo, email); err != nil {
 		t.Fatalf("seed Member: %v", err)
 	}
 	if _, err := db.Exec(

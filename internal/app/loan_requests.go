@@ -36,6 +36,7 @@ type AdminLoanRequest struct {
 	LoanRequest
 	MemberNo        string             `json:"member_no"`
 	FullName        string             `json:"full_name"`
+	MaxLoanAmount   int64              `json:"max_loan_amount"`
 	ApprovalHistory []ApprovalDecision `json:"approval_history"`
 	CanDecide       bool               `json:"can_decide"`
 }
@@ -51,7 +52,18 @@ type rejectLoanInput struct {
 	RejectionReason string `json:"rejection_reason" form:"rejection_reason"`
 }
 
-const maxLoanPrincipalAmount int64 = 200_000_000
+const maxLoanMultiplier int64 = 4
+
+func maxLoanAmountForSavingBalance(balance int64) int64 {
+	if balance <= 0 {
+		return 0
+	}
+	const maxInt64Value int64 = 1<<63 - 1
+	if balance > maxInt64Value/maxLoanMultiplier {
+		return maxInt64Value
+	}
+	return balance * maxLoanMultiplier
+}
 
 func (s *Server) submitLoanRequest(c *gin.Context) {
 	lang := languageFromRequest(c)
@@ -76,6 +88,10 @@ func (s *Server) submitLoanRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errLoanAmountLimitExceeded) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_amount_limit"))
+		return
+	}
+	if errors.Is(err, errMemberBankDetailsRequired) {
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_member_bank_details_required"))
 		return
 	}
 	if errors.Is(err, errInactiveLoanMember) {
@@ -164,12 +180,13 @@ func (s *Server) rejectLoanRequest(c *gin.Context) {
 }
 
 var (
-	errInvalidLoanRequest       = errors.New("invalid loan request")
-	errInactiveLoanMember       = errors.New("inactive loan member")
-	errPendingLoanRequestExists = errors.New("pending loan request exists")
-	errInvalidLoanRejection     = errors.New("invalid loan rejection")
-	errOutstandingLoanBalance   = errors.New("outstanding loan balance")
-	errLoanAmountLimitExceeded  = errors.New("loan amount limit exceeded")
+	errInvalidLoanRequest        = errors.New("invalid loan request")
+	errInactiveLoanMember        = errors.New("inactive loan member")
+	errPendingLoanRequestExists  = errors.New("pending loan request exists")
+	errInvalidLoanRejection      = errors.New("invalid loan rejection")
+	errOutstandingLoanBalance    = errors.New("outstanding loan balance")
+	errLoanAmountLimitExceeded   = errors.New("loan amount limit exceeded")
+	errMemberBankDetailsRequired = errors.New("member bank details required")
 )
 
 func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanRequest, error) {
@@ -188,12 +205,6 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 	if req.RequestedAmount <= 0 || req.DurationMonths <= 0 || req.DurationMonths > maxDuration || strings.TrimSpace(req.Purpose) == "" {
 		return LoanRequest{}, errInvalidLoanRequest
 	}
-	if req.RequestedAmount > maxLoanPrincipalAmount {
-		return LoanRequest{}, errLoanAmountLimitExceeded
-	}
-	if member.Status != "active" {
-		return LoanRequest{}, errInactiveLoanMember
-	}
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 	tx, err := s.db.Begin()
@@ -203,9 +214,22 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 	defer func() { _ = tx.Rollback() }()
 	// PostgreSQL serializes all outstanding/pending checks for this member.
 	// SQLite serializes writers and the in-process mutex avoids upgrade races.
-	var lockedMemberID string
-	if err := tx.QueryRow(`SELECT id FROM members WHERE id = $1`+rowLockClause(s.db), member.ID).Scan(&lockedMemberID); err != nil {
+	var lockedMemberID, memberStatus, bankName, bankAccount string
+	if err := tx.QueryRow(`SELECT id,status,COALESCE(bank_name,''),COALESCE(bank_account,'') FROM members WHERE id = $1`+rowLockClause(s.db), member.ID).Scan(&lockedMemberID, &memberStatus, &bankName, &bankAccount); err != nil {
 		return LoanRequest{}, err
+	}
+	if memberStatus != "active" {
+		return LoanRequest{}, errInactiveLoanMember
+	}
+	if strings.TrimSpace(bankName) == "" || strings.TrimSpace(bankAccount) == "" {
+		return LoanRequest{}, errMemberBankDetailsRequired
+	}
+	summary, err := savingSummary(tx, member.ID)
+	if err != nil {
+		return LoanRequest{}, err
+	}
+	if req.RequestedAmount > maxLoanAmountForSavingBalance(summary.CurrentBalance) {
+		return LoanRequest{}, errLoanAmountLimitExceeded
 	}
 	var pendingID string
 	err = tx.QueryRow(`SELECT id FROM loan_requests WHERE member_id = $1 AND status = 'pending' LIMIT 1`, member.ID).Scan(&pendingID)
@@ -320,6 +344,11 @@ func (s *Server) loanRequestsForAdmin(status string) ([]AdminLoanRequest, error)
 		return nil, err
 	}
 	for index := range requests {
+		summary, summaryErr := savingSummary(s.db, requests[index].MemberID)
+		if summaryErr != nil {
+			return nil, summaryErr
+		}
+		requests[index].MaxLoanAmount = maxLoanAmountForSavingBalance(summary.CurrentBalance)
 		requests[index].ApprovalHistory, err = approvalHistory(s.db, "loan_request_approvals", requests[index].ID, true)
 		if err != nil {
 			return nil, err

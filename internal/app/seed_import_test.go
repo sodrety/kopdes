@@ -291,8 +291,8 @@ func TestSeedImportAppendPreservesExistingBootstrapMember(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&maxVersion); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if maxVersion != 19 {
-		t.Fatalf("schema max version = %d, want 19", maxVersion)
+	if maxVersion != 20 {
+		t.Fatalf("schema max version = %d, want 20", maxVersion)
 	}
 	credentialFile, err := os.Open(credentialsPath)
 	if err != nil {
@@ -474,8 +474,8 @@ func TestSeedImportStagesHistoricalDataAndIsIdempotent(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&maxVersion); err != nil {
 		t.Fatal(err)
 	}
-	if maxVersion != 19 {
-		t.Fatalf("schema max version = %d, want 19", maxVersion)
+	if maxVersion != 20 {
+		t.Fatalf("schema max version = %d, want 20", maxVersion)
 	}
 	var legacyCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM loans WHERE legacy_terms=TRUE AND admin_fee_policy='legacy_flat_monthly'`).Scan(&legacyCount); err != nil {

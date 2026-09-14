@@ -1,12 +1,12 @@
 {{define "admin-dashboard"}}
 {{template "admin-shell-start" .}}
       <section class="summary-grid">
-{{template "summary-card" (dict "Label" (t .Lang "total_members") "Value" .Summary.TotalMembers)}}
-{{template "summary-card" (dict "Label" (t .Lang "active_members") "Value" .Summary.ActiveMembers)}}
-{{template "summary-card" (dict "Label" (t .Lang "total_savings") "Value" (nominal .Summary.TotalSavings))}}
-{{template "summary-card" (dict "Label" (t .Lang "active_loans") "Value" .Summary.ActiveLoans)}}
-{{template "summary-card" (dict "Label" (t .Lang "outstanding_loan") "Value" (nominal .Summary.TotalOutstandingLoan))}}
-{{template "summary-card" (dict "Label" (t .Lang "pending_requests") "Value" .Summary.PendingLoanRequests)}}
+{{template "summary-card" (dict "Label" (t .Lang "total_members") "Value" .Summary.TotalMembers "Icon" "users")}}
+{{template "summary-card" (dict "Label" (t .Lang "active_members") "Value" .Summary.ActiveMembers "Icon" "user-check")}}
+{{template "summary-card" (dict "Label" (t .Lang "total_savings") "Value" (nominal .Summary.TotalSavings) "Icon" "piggy-bank")}}
+{{template "summary-card" (dict "Label" (t .Lang "active_loans") "Value" .Summary.ActiveLoans "Icon" "landmark")}}
+{{template "summary-card" (dict "Label" (t .Lang "outstanding_loan") "Value" (nominal .Summary.TotalOutstandingLoan) "Icon" "banknote")}}
+{{template "summary-card" (dict "Label" (t .Lang "pending_requests") "Value" .Summary.PendingLoanRequests "Icon" "file-clock")}}
       </section>
       <section class="dashboard-line-grid">
 {{template "line-chart" (dict "Lang" .Lang "Chart" .Reports.SavingsLoanComparison "Size" "line-chart-wide")}}
@@ -326,16 +326,19 @@
 
           <section class="balance-kpi-grid">
             <article class="balance-kpi-card balance-kpi-primary">
+              <i class="kpi-card-icon" data-lucide="landmark" aria-hidden="true"></i>
               <span>{{t .Lang "total_assets"}}</span>
               <strong>Rp {{nominal .Report.TotalAssets}}</strong>
               <small>{{t .Lang "cash_plus_loan_receivable"}}</small>
             </article>
             <article class="balance-kpi-card balance-kpi-warning">
+              <i class="kpi-card-icon" data-lucide="piggy-bank" aria-hidden="true"></i>
               <span>{{t .Lang "total_liabilities"}}</span>
               <strong>Rp {{nominal .Report.TotalLiabilities}}</strong>
               <small>{{t .Lang "member_savings"}}</small>
             </article>
             <article class="balance-kpi-card balance-kpi-success">
+              <i class="kpi-card-icon" data-lucide="scale" aria-hidden="true"></i>
               <span>{{t .Lang "total_equity"}}</span>
               <strong>Rp {{nominal .Report.TotalEquity}}</strong>
               <small>{{t .Lang "assets_minus_liabilities"}}</small>
@@ -421,16 +424,19 @@
 
       <section class="profit-kpi-grid">
         <article class="profit-kpi-card profit-kpi-income">
+          <i class="kpi-card-icon" data-lucide="arrow-down-to-line" aria-hidden="true"></i>
           <span>{{t .Lang "total_income"}}</span>
           <strong>Rp {{nominal .Report.TotalIncome}}</strong>
           <small>{{.Report.IncomePercent}}%</small>
         </article>
         <article class="profit-kpi-card profit-kpi-cost">
+          <i class="kpi-card-icon" data-lucide="arrow-up-from-line" aria-hidden="true"></i>
           <span>{{t .Lang "total_cost"}}</span>
           <strong>Rp {{nominal .Report.TotalCost}}</strong>
           <small>{{.Report.CostPercent}}%</small>
         </article>
         <article class="profit-kpi-card profit-kpi-net">
+          <i class="kpi-card-icon" data-lucide="coins" aria-hidden="true"></i>
           <span>{{t .Lang "net_profit"}}</span>
           <strong>+ Rp {{nominal .Report.NetProfit}}</strong>
           <small>{{t .Lang "margin"}} {{.Report.MarginPercent}}%</small>
@@ -544,6 +550,8 @@
           <label>{{t .Lang "phone"}} <input name="phone"></label>
           <label>{{t .Lang "address"}} <input name="address"></label>
           <label>{{t .Lang "join_date"}} <input name="join_date" type="date" required></label>
+          <label>{{t .Lang "bank_name"}} <input name="bank_name" required autocomplete="organization"></label>
+          <label>{{t .Lang "bank_account"}} <input name="bank_account" inputmode="numeric" required autocomplete="off"></label>
           <label>{{t .Lang "member_type"}}
             <select name="member_type">
               <option value="daily_worker">{{t .Lang "member_type_daily_worker"}}</option>
@@ -679,9 +687,9 @@
 {{define "admin-transactions"}}
 {{template "admin-shell-start" .}}
       <section class="summary-grid">
-{{template "summary-card" (dict "Label" (t .Lang "total_cash_in") "Value" (nominal .Summary.TotalIncome))}}
-{{template "summary-card" (dict "Label" (t .Lang "total_cash_out") "Value" (nominal .Summary.TotalExpense))}}
-{{template "summary-card" (dict "Label" (t .Lang "ending_balance") "Value" (nominal .Summary.EndingBalance))}}
+{{template "summary-card" (dict "Label" (t .Lang "total_cash_in") "Value" (nominal .Summary.TotalIncome) "Icon" "arrow-down-to-line")}}
+{{template "summary-card" (dict "Label" (t .Lang "total_cash_out") "Value" (nominal .Summary.TotalExpense) "Icon" "arrow-up-from-line")}}
+{{template "summary-card" (dict "Label" (t .Lang "ending_balance") "Value" (nominal .Summary.EndingBalance) "Icon" "scale")}}
       </section>
       <section class="panel">
         <h2>{{t .Lang "transaction_list"}}</h2>
@@ -746,12 +754,12 @@
 {{define "admin-member-detail"}}
 {{template "admin-shell-start" .}}
       <section class="summary-grid">
-{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_pokok") "Value" (nominal .Summary.PokokBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" (nominal .Summary.WajibBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" (nominal .Summary.SukarelaBalance))}}
-{{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" (nominal .Summary.TotalDeposit))}}
-{{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" (nominal .Summary.TotalWithdrawal))}}
+{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance) "Icon" "piggy-bank")}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_pokok") "Value" (nominal .Summary.PokokBalance) "Icon" "wallet-cards")}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" (nominal .Summary.WajibBalance) "Icon" "wallet")}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_sukarela") "Value" (nominal .Summary.SukarelaBalance) "Icon" "coins")}}
+{{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" (nominal .Summary.TotalDeposit) "Icon" "arrow-down-to-line")}}
+{{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" (nominal .Summary.TotalWithdrawal) "Icon" "arrow-up-from-line")}}
       </section>
       <section class="panel detail-grid">
         <div><span>{{t .Lang "member_no"}}</span><strong>{{.Member.MemberNo}}</strong></div>
@@ -829,9 +837,36 @@
           </form>
           {{else}}
           <p>{{t .Lang "create_login_before_officer"}}</p>
+          <form method="post" action="/api/admin/officers" hx-post="/api/admin/officers" hx-target="#member-officer-error" hx-swap="innerHTML">
+            <input type="hidden" name="member_id" value="{{.Member.ID}}">
+            <label>{{t .Lang "officer_role"}}
+              <select name="role" required>
+                <option value="manager">{{t $.Lang "role_manager"}}</option>
+                <option value="ketua_i">{{t $.Lang "role_ketua_i"}}</option>
+                <option value="ketua_ii">{{t $.Lang "role_ketua_ii"}}</option>
+                <option value="ketua_utama">{{t $.Lang "role_ketua_utama"}}</option>
+              </select>
+            </label>
+            <label>{{t .Lang "login_email"}} <input name="email" type="email" required autocomplete="off"></label>
+            <label>{{t .Lang "temporary_password"}} <input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+            <p class="field-help">{{t .Lang "officer_login_help"}}</p>
+            <button type="submit">{{t .Lang "assign_officer"}}</button>
+          </form>
           {{end}}
           {{template "form-error" (dict "ID" "member-officer-error")}}
         </article>{{end}}
+      </section>
+      {{end}}
+      {{if index .Permissions "members.manage"}}
+      <section class="panel form-panel">
+        <h2>{{t .Lang "bank_details"}}</h2>
+        <p class="field-help">{{t .Lang "bank_details_description"}}</p>
+        <form method="post" action="/api/admin/members/{{.Member.ID}}/bank-details" hx-post="/api/admin/members/{{.Member.ID}}/bank-details" hx-target="#member-bank-details-error" hx-swap="innerHTML">
+          <label>{{t .Lang "bank_name"}} <input name="bank_name" value="{{.Member.BankName}}" required autocomplete="organization"></label>
+          <label>{{t .Lang "bank_account"}} <input name="bank_account" value="{{.Member.BankAccount}}" inputmode="numeric" required autocomplete="off"></label>
+          <button type="submit">{{t .Lang "save_bank_details"}}</button>
+        </form>
+        {{template "form-error" (dict "ID" "member-bank-details-error")}}
       </section>
       {{end}}
       {{if index .Permissions "members.manage"}}
@@ -1088,7 +1123,7 @@
                       <form class="inline-approval-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/approve" hx-post="/api/admin/loan-requests/{{.ID}}/approve" hx-target="#loan-review-error" hx-swap="innerHTML" data-loan-fee-preview data-loan-type-value="{{.LoanType}}" data-monthly-admin-fee-label="{{t $.Lang "monthly_admin_fee"}}" data-total-admin-fee-label="{{t $.Lang "total_admin_fee"}}" data-total-obligation-label="{{t $.Lang "total_obligation"}}" data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}">
                         {{if eq $.Role "manager"}}
                         <label>{{t $.Lang "approved_amount"}}
-                          <input name="approved_amount" type="text" inputmode="numeric" value="{{.RequestedAmount}}" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $.Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="200000000" data-rupiah-max-invalid="{{t $.Lang "error_loan_amount_limit"}}" aria-describedby="approved-amount-hint-{{.ID}}" aria-errormessage="approved-amount-error-{{.ID}}" required>
+                          <input name="approved_amount" type="text" inputmode="numeric" value="{{.RequestedAmount}}" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $.Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="{{.MaxLoanAmount}}" data-rupiah-max-invalid="{{t $.Lang "error_loan_amount_limit"}}" aria-describedby="approved-amount-hint-{{.ID}}" aria-errormessage="approved-amount-error-{{.ID}}" autocomplete="off" spellcheck="false" required>
                           <small id="approved-amount-hint-{{.ID}}">{{t $.Lang "loan_amount_limit_hint"}}</small>
                           <small id="approved-amount-error-{{.ID}}" class="form-error-message" aria-live="polite" hidden></small>
                         </label>
