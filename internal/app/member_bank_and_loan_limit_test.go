@@ -113,3 +113,38 @@ func TestOfficerAssignmentCreatesMemberLoginWhenMissing(t *testing.T) {
 		t.Fatal("expected created member login token")
 	}
 }
+
+func TestKetuaUtamaCanCreateMemberLoginDirectly(t *testing.T) {
+	fixture := newTestFixture(t)
+	ketuaUtamaToken := fixture.login(t, "ketua-utama@coop.test", "password")
+	memberID := "member-login-created-by-ketua-utama"
+	if _, err := fixture.db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ($1,'LOGIN-KETUA-01','Member Login Target','2026-06-18','active')`, memberID); err != nil {
+		t.Fatalf("seed member without login: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/members/"+memberID+"/user", strings.NewReader(`{"email":"created-by-ketua@coop.test","password":"temporary-password"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+ketuaUtamaToken)
+	record := httptest.NewRecorder()
+	fixture.server.ServeHTTP(record, request)
+	if record.Code != http.StatusCreated {
+		t.Fatalf("Ketua Utama create member login: %d %s", record.Code, record.Body.String())
+	}
+
+	var userID string
+	if err := fixture.db.QueryRow(`SELECT id FROM users WHERE member_id=$1 AND email='created-by-ketua@coop.test'`, memberID).Scan(&userID); err != nil {
+		t.Fatalf("created member login not found: %v", err)
+	}
+	if userID == "" {
+		t.Fatal("expected created member login ID")
+	}
+
+	denied := httptest.NewRequest(http.MethodPost, "/api/admin/members", strings.NewReader(`{"member_no":"KETUA-MEMBER-DENIED","full_name":"Should Stay Denied","join_date":"2026-06-18","status":"active","email":"denied@coop.test","password":"temporary-password"}`))
+	denied.Header.Set("Content-Type", "application/json")
+	denied.Header.Set("Authorization", "Bearer "+ketuaUtamaToken)
+	deniedRecord := httptest.NewRecorder()
+	fixture.server.ServeHTTP(deniedRecord, denied)
+	if deniedRecord.Code != http.StatusForbidden {
+		t.Fatalf("Ketua Utama should not create members, got %d: %s", deniedRecord.Code, deniedRecord.Body.String())
+	}
+}

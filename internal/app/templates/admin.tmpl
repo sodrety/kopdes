@@ -770,9 +770,9 @@
         <div><span>{{t .Lang "member_type"}}</span><strong>{{.Member.MemberTypeLabel}}</strong></div>
         <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .Member.Status}}</strong></div>
       </section>
-      {{if or (index .Permissions "members.manage") (index .Permissions "officers.manage")}}
+      {{if or (index .Permissions "member_accounts.manage") (index .Permissions "officers.manage")}}
       <section class="content-grid content-grid-two">
-        {{if index .Permissions "members.manage"}}
+        {{if index .Permissions "member_accounts.manage"}}
         <article class="panel form-panel">
           <h2>{{t .Lang "account_access"}}</h2>
           {{if .Member.HasLogin}}

@@ -9,25 +9,26 @@ import (
 type Permission string
 
 const (
-	PermissionDashboardView     Permission = "dashboard.view"
-	PermissionReportsView       Permission = "reports.view"
-	PermissionMembersView       Permission = "members.view"
-	PermissionMembersManage     Permission = "members.manage"
-	PermissionSavingsView       Permission = "savings.view"
-	PermissionSavingsRecord     Permission = "savings.record"
-	PermissionRequestsView      Permission = "requests.view"
-	PermissionRequestsDecide    Permission = "requests.decide"
-	PermissionLoansView         Permission = "loans.view"
-	PermissionRepaymentsView    Permission = "repayments.view"
-	PermissionRepaymentsRecord  Permission = "repayments.record"
-	PermissionOfficersManage    Permission = "officers.manage"
-	PermissionNotificationsView Permission = "notifications.view"
+	PermissionDashboardView        Permission = "dashboard.view"
+	PermissionReportsView          Permission = "reports.view"
+	PermissionMembersView          Permission = "members.view"
+	PermissionMembersManage        Permission = "members.manage"
+	PermissionMemberAccountsManage Permission = "member_accounts.manage"
+	PermissionSavingsView          Permission = "savings.view"
+	PermissionSavingsRecord        Permission = "savings.record"
+	PermissionRequestsView         Permission = "requests.view"
+	PermissionRequestsDecide       Permission = "requests.decide"
+	PermissionLoansView            Permission = "loans.view"
+	PermissionRepaymentsView       Permission = "repayments.view"
+	PermissionRepaymentsRecord     Permission = "repayments.record"
+	PermissionOfficersManage       Permission = "officers.manage"
+	PermissionNotificationsView    Permission = "notifications.view"
 )
 
 var officerPermissions = map[string]map[Permission]bool{
 	"manager": {
 		PermissionDashboardView: true, PermissionReportsView: true,
-		PermissionMembersView: true, PermissionMembersManage: true,
+		PermissionMembersView: true, PermissionMembersManage: true, PermissionMemberAccountsManage: true,
 		PermissionSavingsView: true, PermissionSavingsRecord: true,
 		PermissionRequestsView: true, PermissionRequestsDecide: true,
 		PermissionLoansView: true, PermissionRepaymentsView: true,
@@ -38,6 +39,7 @@ var officerPermissions = map[string]map[Permission]bool{
 	"ketua_utama": func() map[Permission]bool {
 		permissions := officerOversightPermissions()
 		permissions[PermissionOfficersManage] = true
+		permissions[PermissionMemberAccountsManage] = true
 		return permissions
 	}(),
 }
