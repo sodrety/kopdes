@@ -1,7 +1,7 @@
 {{define "member-dashboard"}}
 {{template "member-shell-start" .}}
     <section class="summary-grid">
-{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Dashboard.SavingBalance) "Icon" "piggy-bank")}}
+{{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Dashboard.SavingBalance) "Icon" "wallet-cards")}}
 {{template "summary-card" (dict "Label" (t .Lang "remaining_loan") "Value" (nominal .Dashboard.RemainingLoanBalance) "Icon" "banknote")}}
 {{template "summary-card" (dict "Label" (t .Lang "next_due_date") "Value" .Dashboard.EarliestDueDate "Icon" "calendar-days")}}
 {{template "summary-card" (dict "Label" (t .Lang "final_due_date") "Value" .Dashboard.LatestFinalDueDate "Icon" "calendar-check-2")}}
