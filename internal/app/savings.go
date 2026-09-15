@@ -377,6 +377,21 @@ func (s SavingSummary) BalanceForCategory(category string) int64 {
 	}
 }
 
+func maxWithdrawalAmountForSukarelaBalance(balance int64) int64 {
+	if balance <= 0 {
+		return 0
+	}
+	return (balance/100)*75 + ((balance%100)*75)/100
+}
+
+func availableWithdrawalAmountForSukarelaBalance(balance, reserved int64) int64 {
+	maximum := maxWithdrawalAmountForSukarelaBalance(balance)
+	if reserved >= maximum {
+		return 0
+	}
+	return maximum - reserved
+}
+
 func (s *Server) savingSummary(memberID string) (SavingSummary, error) {
 	summary, err := savingSummary(s.db, memberID)
 	if err != nil {
@@ -386,7 +401,7 @@ func (s *Server) savingSummary(memberID string) (SavingSummary, error) {
 	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM withdrawal_reservations WHERE member_id=$1 AND status='active'`, memberID).Scan(&reserved); err != nil {
 		return SavingSummary{}, err
 	}
-	summary.AvailableWithdrawalBalance = summary.SukarelaBalance - reserved
+	summary.AvailableWithdrawalBalance = availableWithdrawalAmountForSukarelaBalance(summary.SukarelaBalance, reserved)
 	return summary, nil
 }
 

@@ -5,7 +5,6 @@
 {{template "summary-card" (dict "Label" (t .Lang "remaining_loan") "Value" (nominal .Dashboard.RemainingLoanBalance) "Icon" "banknote")}}
 {{template "summary-card" (dict "Label" (t .Lang "next_due_date") "Value" .Dashboard.EarliestDueDate "Icon" "calendar-days")}}
 {{template "summary-card" (dict "Label" (t .Lang "final_due_date") "Value" .Dashboard.LatestFinalDueDate "Icon" "calendar-check-2")}}
-{{if .Dashboard.HasOverdueLoan}}{{template "summary-card" (dict "Label" (t .Lang "payment_status") "Value" (t .Lang "overdue") "Icon" "triangle-alert")}}{{end}}
 {{if .Dashboard.ActiveLoan}}
 {{template "summary-card" (dict "Label" (t .Lang "active_loan") "Value" (nominal .Dashboard.ActiveLoan.ApprovedAmount) "Icon" "landmark")}}
 {{else}}
@@ -175,7 +174,7 @@
     <section class="summary-grid">
 {{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" (nominal .Summary.WajibBalance) "Icon" "wallet")}}
 {{template "summary-card" (dict "Label" (t .Lang "simpanan_manasuka") "Value" (nominal .Summary.SukarelaBalance) "Icon" "coins")}}
-{{template "summary-card" (dict "Label" (t .Lang "simpanan_shu") "Value" (nominal .Summary.SHUBalance) "Icon" "wallet-cards")}}
+{{template "summary-card" (dict "Label" (t .Lang "simpanan_shu_tertahan") "Value" (nominal .Summary.SHUBalance) "Icon" "wallet-cards")}}
 {{template "summary-card" (dict "Label" (t .Lang "saving_balance") "Value" (nominal .Summary.CurrentBalance) "Icon" "piggy-bank")}}
 {{template "summary-card" (dict "Label" (t .Lang "total_deposits") "Value" (nominal .Summary.TotalDeposit) "Icon" "arrow-down-to-line")}}
 {{template "summary-card" (dict "Label" (t .Lang "total_withdrawals") "Value" (nominal .Summary.TotalWithdrawal) "Icon" "arrow-up-from-line")}}
@@ -291,7 +290,7 @@
         <h2>{{t .Lang "submit_withdrawal_request"}}</h2>
         <form method="post" action="/api/member/withdrawal-requests" hx-post="/api/member/withdrawal-requests" hx-target="#withdrawal-request-error" hx-swap="innerHTML">
           <label>{{t .Lang "amount"}}
-            <input name="amount" type="text" inputmode="numeric" placeholder="Rp 0" data-rupiah-input data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="{{.Summary.AvailableWithdrawalBalance}}" data-rupiah-max-invalid="{{t .Lang "error_withdrawal_amount_over_available"}}" aria-describedby="withdrawal-amount-hint" aria-errormessage="withdrawal-amount-error" required>
+            <input name="amount" type="text" inputmode="numeric" placeholder="{{t .Lang "rupiah_placeholder"}}" data-rupiah-input data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="{{.Summary.AvailableWithdrawalBalance}}" data-rupiah-max-invalid="{{t .Lang "error_withdrawal_amount_over_available"}}" aria-describedby="withdrawal-amount-hint" aria-errormessage="withdrawal-amount-error" autocomplete="off" spellcheck="false" required>
             <small id="withdrawal-amount-hint">{{t .Lang "rupiah_input_hint"}}</small>
             <small id="withdrawal-amount-error" class="form-error-message" aria-live="polite" hidden></small>
           </label>
@@ -335,28 +334,6 @@
 
 {{define "member-loan-requests"}}
 {{template "member-shell-start" .}}
-    {{if .OutstandingLoans}}
-    <section class="panel loan-warning" role="alert">
-      <h2>{{t .Lang "outstanding_loans"}} — Rp {{nominal .TotalOutstanding}}</h2>
-      <p>{{t .Lang "loan_request_outstanding_notice"}}</p>
-      <div class="loan-card-grid">
-      {{range .OutstandingLoans}}
-        <article class="loan-summary-card {{if .IsOverdue}}loan-overdue{{end}}">
-          <header><strong>{{t $.Lang (printf "status_%s" .Status)}}</strong>{{if .IsOverdue}}<span>{{t $.Lang "overdue"}}</span>{{end}}</header>
-          <dl>
-            <div><dt>{{t $.Lang "loan_type"}}</dt><dd>{{template "loan-type-label" (dict "Lang" $.Lang "LoanType" .LoanType "LegacyTerms" .LegacyTerms)}}</dd></div>
-            <div><dt>{{t $.Lang "remaining_balance"}}</dt><dd>Rp {{nominal .RemainingBalance}}</dd></div>
-            <div><dt>{{t $.Lang "approved_principal"}}</dt><dd>Rp {{nominal .ApprovedAmount}}</dd></div>
-            <div><dt>{{t $.Lang "start_date"}}</dt><dd>{{.StartDate}}</dd></div>
-			<div><dt>{{t $.Lang "monthly_admin_fee"}}</dt><dd>Rp {{nominal .MonthlyAdminFee}}</dd></div>
-            <div><dt>{{t $.Lang "next_due_date"}}</dt><dd>{{.NextDueDate}}</dd></div>
-            <div><dt>{{t $.Lang "final_due_date"}}</dt><dd>{{.FinalDueDate}}</dd></div>
-          </dl>
-        </article>
-      {{end}}
-      </div>
-    </section>
-    {{end}}
     <section class="two-column">
       <article class="panel">
         <h2>{{t .Lang "submit_loan_request"}}</h2>

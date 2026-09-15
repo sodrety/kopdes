@@ -544,7 +544,7 @@ func TestConcurrentWithdrawalsCannotOverdrawSavings(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			req := httptest.NewRequest(http.MethodPost, "/api/member/withdrawal-requests", bytes.NewBufferString(`{"amount":80000}`))
+			req := httptest.NewRequest(http.MethodPost, "/api/member/withdrawal-requests", bytes.NewBufferString(`{"amount":40000}`))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer "+memberToken)
 			rec := httptest.NewRecorder()
@@ -577,8 +577,8 @@ func TestConcurrentWithdrawalsCannotOverdrawSavings(t *testing.T) {
 		t.Fatalf("expected financial balance unchanged before final approval, got %d", balance)
 	}
 	var reserved int
-	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM withdrawal_reservations WHERE member_id=$1 AND status='active'`, member.ID).Scan(&reserved); err != nil || reserved != 80000 {
-		t.Fatalf("expected one 80000 reservation, got %d err=%v", reserved, err)
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM withdrawal_reservations WHERE member_id=$1 AND status='active'`, member.ID).Scan(&reserved); err != nil || reserved != 40000 {
+		t.Fatalf("expected one 40000 reservation, got %d err=%v", reserved, err)
 	}
 }
 
@@ -1654,7 +1654,7 @@ func TestMemberProfileCardsUseSavingsSummary(t *testing.T) {
 		t.Fatalf("expected member profile page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	pageBody := rec.Body.String()
-	for _, text := range []string{"Simpanan Wajib</span><strong>100.000", "Simpanan Manasuka</span><strong>250.000", "Simpanan SHU</span><strong>50.000", "Saving balance</span><strong>400.000", "Total deposits</span><strong>400.000", "Total withdrawals</span><strong>0"} {
+	for _, text := range []string{"Simpanan Wajib</span><strong>100.000", "Simpanan Manasuka</span><strong>250.000", "Simpanan SHU Tertahan</span><strong>50.000", "Saving balance</span><strong>400.000", "Total deposits</span><strong>400.000", "Total withdrawals</span><strong>0"} {
 		if !strings.Contains(pageBody, text) {
 			t.Fatalf("expected member profile card %q, got %s", text, pageBody)
 		}
@@ -1929,7 +1929,7 @@ func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) 
 	if overRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected over-withdrawal status 400, got %d: %s", overRec.Code, overRec.Body.String())
 	}
-	assertError(t, overRec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Withdrawal cannot exceed Simpanan Sukarela balance")
+	assertError(t, overRec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Withdrawal amount cannot exceed 75% of your Simpanan Manasuka balance")
 
 	summaryAfterRejectReq := httptest.NewRequest(http.MethodGet, "/api/member/savings/summary", nil)
 	summaryAfterRejectReq.Header.Set("Authorization", "Bearer "+memberToken)
@@ -2709,7 +2709,7 @@ func TestPenarikanValidationAndRejectionKeepsBalances(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected over-sukarela request status 400, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Withdrawal cannot exceed Simpanan Sukarela balance")
+		assertError(t, rec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Withdrawal amount cannot exceed 75% of your Simpanan Manasuka balance")
 	})
 
 	t.Run("direct withdrawal cannot use wajib", func(t *testing.T) {
@@ -2733,6 +2733,19 @@ func TestPenarikanValidationAndRejectionKeepsBalances(t *testing.T) {
 	})
 
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 200000, "SUK-REJ", "Sukarela for reject")
+	t.Run("request cannot exceed 75% of sukarela balance", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/member/withdrawal-requests", bytes.NewBufferString(`{"amount":150001,"note":"Over 75 percent"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+memberToken)
+		rec := httptest.NewRecorder()
+
+		fixture.server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected over-75-percent request status 400, got %d: %s", rec.Code, rec.Body.String())
+		}
+		assertError(t, rec.Body.Bytes(), "BUSINESS_RULE_VIOLATION", "Withdrawal amount cannot exceed 75% of your Simpanan Manasuka balance")
+	})
 	createReq := httptest.NewRequest(http.MethodPost, "/api/member/withdrawal-requests", bytes.NewBufferString(`{"amount":150000,"note":"Rejected request"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("Authorization", "Bearer "+memberToken)
@@ -4126,6 +4139,11 @@ func TestMemberDashboardIsIsolatedAndIncludesLatestActivity(t *testing.T) {
 			t.Fatalf("expected member dashboard page to include %q, got %s", text, pageBody)
 		}
 	}
+	for _, text := range []string{"Payment status", "Status pembayaran"} {
+		if strings.Contains(pageBody, text) {
+			t.Fatalf("expected member dashboard card %q to be removed, got %s", text, pageBody)
+		}
+	}
 	if strings.Contains(pageBody, "SECOND-DEP") {
 		t.Fatalf("expected member dashboard page not to expose second member data, got %s", pageBody)
 	}
@@ -4208,9 +4226,12 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	memberPageReq.AddCookie(fixture.browserLogin(t, "schedule@coop.test", "member-password"))
 	memberPageRec := httptest.NewRecorder()
 	fixture.server.ServeHTTP(memberPageRec, memberPageReq)
-	for _, text := range []string{"Pinjaman belum lunas", "Sisa saldo", "Tenggat angsuran berikutnya", "Tenggat pelunasan akhir"} {
-		if memberPageRec.Code != http.StatusOK || !strings.Contains(memberPageRec.Body.String(), text) {
-			t.Fatalf("expected Indonesian outstanding UI %q, got %d %s", text, memberPageRec.Code, memberPageRec.Body.String())
+	if memberPageRec.Code != http.StatusOK {
+		t.Fatalf("expected member loan request page status 200, got %d %s", memberPageRec.Code, memberPageRec.Body.String())
+	}
+	for _, text := range []string{"loan-warning", "Pinjaman belum lunas", "Sisa saldo", "Tenggat angsuran berikutnya", "Tenggat pelunasan akhir"} {
+		if strings.Contains(memberPageRec.Body.String(), text) {
+			t.Fatalf("expected member loan request alert UI %q to be removed, got %s", text, memberPageRec.Body.String())
 		}
 	}
 

@@ -83,7 +83,7 @@ func (s *Server) submitWithdrawalRequest(c *gin.Context) {
 		return
 	}
 	if errors.Is(err, errInsufficientSukarelaBalance) {
-		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Withdrawal cannot exceed Simpanan Sukarela balance")
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_amount_over_available"))
 		return
 	}
 	if isMonetaryAggregateCapacityError(err) {
@@ -151,7 +151,7 @@ func (s *Server) approveWithdrawalRequest(c *gin.Context) {
 		return
 	}
 	if errors.Is(err, errInsufficientSukarelaBalance) {
-		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Withdrawal cannot exceed Simpanan Sukarela balance")
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_amount_over_available"))
 		return
 	}
 	if errors.Is(err, errWithdrawalRequestNotFound) {
@@ -234,7 +234,7 @@ func (s *Server) insertWithdrawalRequest(member Member, req withdrawalRequestInp
 	if err := tx.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM withdrawal_reservations WHERE member_id=$1 AND status='active'`, member.ID).Scan(&reserved); err != nil {
 		return WithdrawalRequest{}, err
 	}
-	if req.Amount > summary.SukarelaBalance-reserved {
+	if req.Amount > availableWithdrawalAmountForSukarelaBalance(summary.SukarelaBalance, reserved) {
 		return WithdrawalRequest{}, errInsufficientSukarelaBalance
 	}
 
@@ -408,7 +408,7 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	if err != nil {
 		return WithdrawalRequest{}, err
 	}
-	if request.Amount > summary.SukarelaBalance {
+	if request.Amount > maxWithdrawalAmountForSukarelaBalance(summary.SukarelaBalance) {
 		return WithdrawalRequest{}, errInsufficientSukarelaBalance
 	}
 	var reservationAmount int64
