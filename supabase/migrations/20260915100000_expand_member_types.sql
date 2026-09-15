@@ -2,12 +2,12 @@
 BEGIN;
 SET LOCAL statement_timeout = '30s';
 
+ALTER TABLE public.members
+    DROP CONSTRAINT IF EXISTS members_member_type_check;
+
 UPDATE public.members
 SET member_type = 'customer'
 WHERE member_type = 'self_employed';
-
-ALTER TABLE public.members
-    DROP CONSTRAINT IF EXISTS members_member_type_check;
 
 ALTER TABLE public.members
     ADD CONSTRAINT members_member_type_check

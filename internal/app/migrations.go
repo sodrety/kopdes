@@ -478,8 +478,8 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 func expandMemberTypes(tx *sql.Tx, isSQLite bool) error {
 	if !isSQLite {
 		for _, statement := range []string{
-			`UPDATE members SET member_type='customer' WHERE member_type='self_employed'`,
 			`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_member_type_check`,
+			`UPDATE members SET member_type='customer' WHERE member_type='self_employed'`,
 			`ALTER TABLE members ADD CONSTRAINT members_member_type_check CHECK (member_type IN ('employee', 'contract_worker', 'daily_worker', 'customer'))`,
 		} {
 			if _, err := tx.Exec(statement); err != nil {
