@@ -23,10 +23,10 @@ func TestSeedWorkbookMemberTypeSyncMigration(t *testing.T) {
 		memberNo   string
 		memberType string
 	}{
-		{memberNo: "KKSUK-000001", memberType: "daily_worker"},
-		{memberNo: "KKSUK-000050", memberType: "employee"},
-		{memberNo: "KKSUK-000098", memberType: "employee"},
-		{memberNo: "KKSUK-000174", memberType: "employee"},
+		{memberNo: "kksuk-000001", memberType: "daily_worker"},
+		{memberNo: "kksuk-000050", memberType: "employee"},
+		{memberNo: "kksuk-000098", memberType: "employee"},
+		{memberNo: "kksuk-000174", memberType: "employee"},
 		{memberNo: "NOT-IN-WORKBOOK", memberType: "employee"},
 	} {
 		_, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status, member_type) VALUES (?, ?, ?, '2026-01-01', 'active', ?)`,
@@ -36,15 +36,15 @@ func TestSeedWorkbookMemberTypeSyncMigration(t *testing.T) {
 		}
 	}
 
-	if err := app.MigrateTo(db, 24); err != nil {
+	if err := app.MigrateTo(db, 25); err != nil {
 		t.Fatalf("migrate member types: %v", err)
 	}
 
 	expected := map[string]string{
-		"KKSUK-000001":    "employee",
-		"KKSUK-000050":    "contract_worker",
-		"KKSUK-000098":    "daily_worker",
-		"KKSUK-000174":    "customer",
+		"kksuk-000001":    "employee",
+		"kksuk-000050":    "contract_worker",
+		"kksuk-000098":    "daily_worker",
+		"kksuk-000174":    "customer",
 		"NOT-IN-WORKBOOK": "employee",
 	}
 	for memberNo, want := range expected {

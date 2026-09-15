@@ -285,6 +285,11 @@ var migrations = []migration{
 		Name:       "sync_member_types_from_seed_workbook",
 		Statements: memberTypeSyncMigrationStatements,
 	},
+	{
+		Version:    25,
+		Name:       "sync_member_types_case_insensitive",
+		Statements: memberTypeCaseInsensitiveSyncMigrationStatements,
+	},
 }
 
 func Migrate(db *sql.DB) error {
