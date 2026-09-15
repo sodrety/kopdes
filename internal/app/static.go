@@ -1030,6 +1030,9 @@ button:disabled {
 .member-topbar .brand-subtitle {
   color: #858796;
 }
+.member-topbar .logout-form {
+  margin-left: auto;
+}
 .member-nav {
   display: flex;
   gap: 10px;
@@ -1090,6 +1093,106 @@ button:disabled {
 .member-shell .panel > h2 {
   color: var(--primary);
   background: #fff;
+}
+.member-profile-shell .page-header p {
+  display: none;
+}
+.profile-identity-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  min-height: 144px;
+  padding: 24px 28px;
+  border: 1px solid #e3e6f0;
+  border-left: 5px solid var(--primary);
+  border-radius: 6px;
+  background: linear-gradient(135deg, #fff 0%, #f8fbff 100%);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.10), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+.profile-identity-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.profile-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 64px;
+  width: 64px;
+  height: 64px;
+  border-radius: 9999px;
+  background: var(--primary-pale);
+  color: var(--primary);
+}
+.profile-avatar svg {
+  width: 30px;
+  height: 30px;
+}
+.profile-identity-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.profile-identity-label,
+.profile-identity-meta span {
+  color: var(--body);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.profile-identity-copy h2 {
+  margin: 0;
+  color: #5a5c69;
+  font-size: 24px;
+  line-height: 30px;
+  overflow-wrap: anywhere;
+}
+.profile-identity-copy strong {
+  color: var(--primary);
+  font-size: 14px;
+  line-height: 20px;
+}
+.profile-identity-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 28px;
+  min-width: 300px;
+  padding-left: 28px;
+  border-left: 1px solid #dbe3f0;
+}
+.profile-identity-meta div {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+}
+.profile-identity-meta strong {
+  color: #5a5c69;
+  font-size: 16px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+.member-profile-shell .profile-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.profile-secondary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  gap: 16px;
+  align-items: start;
+}
+.profile-secondary-grid > .panel {
+  min-width: 0;
+}
+.profile-details-panel .detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  margin: 20px;
+}
+.profile-bank-panel {
+  align-self: start;
 }
 .member-shell th,
 .member-shell tbody tr:hover {
@@ -2525,9 +2628,26 @@ td:nth-child(n+2):not(.review-cell) {
     font-size: 14px;
     line-height: 20px;
   }
-  .member-profile-shell .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+	  .member-profile-shell .summary-grid {
+	    grid-template-columns: repeat(2, minmax(0, 1fr));
+	  }
+	  .profile-identity-card {
+	    align-items: flex-start;
+	    flex-direction: column;
+	    gap: 18px;
+	    padding: 20px;
+	  }
+	  .profile-identity-meta {
+	    width: 100%;
+	    min-width: 0;
+	    padding-top: 16px;
+	    padding-left: 0;
+	    border-top: 1px solid #dbe3f0;
+	    border-left: 0;
+	  }
+	  .profile-secondary-grid {
+	    grid-template-columns: 1fr;
+	  }
 	  .member-profile-shell .summary-card,
 	  .member-profile-shell .panel,
 	  .member-loan-requests-shell .panel {
@@ -2537,7 +2657,7 @@ td:nth-child(n+2):not(.review-cell) {
     gap: 8px;
   }
   .member-profile-shell .summary-card:first-child {
-    grid-column: 1 / -1;
+    grid-column: auto;
   }
 	  .summary-card strong {
 	    font-size: 24px;
@@ -2575,9 +2695,15 @@ td:nth-child(n+2):not(.review-cell) {
   .member-profile-shell .summary-grid {
     grid-template-columns: 1fr;
   }
-  .member-profile-shell .summary-card:first-child {
-    grid-column: auto;
-  }
+	  .profile-identity-main {
+	    align-items: flex-start;
+	  }
+	  .profile-identity-meta {
+	    grid-template-columns: 1fr;
+	  }
+	  .profile-details-panel .detail-grid {
+	    grid-template-columns: 1fr;
+	  }
   .member-nav,
   .language-form,
   .member-topbar .logout-form {

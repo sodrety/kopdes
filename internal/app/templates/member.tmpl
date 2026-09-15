@@ -171,7 +171,27 @@
 
 {{define "member-profile"}}
 {{template "member-shell-start" .}}
-    <section class="summary-grid">
+    <section class="profile-identity-card">
+      <div class="profile-identity-main">
+        <span class="profile-avatar" aria-hidden="true"><i data-lucide="user-round"></i></span>
+        <div class="profile-identity-copy">
+          <span class="profile-identity-label">{{t .Lang "member_no"}}</span>
+          <h2>{{.Member.FullName}}</h2>
+          <strong>{{.Member.MemberNo}}</strong>
+        </div>
+      </div>
+      <div class="profile-identity-meta">
+        <div>
+          <span>{{t .Lang "member_type"}}</span>
+          <strong>{{.Member.MemberTypeLabel}}</strong>
+        </div>
+        <div>
+          <span>{{t .Lang "status"}}</span>
+          <strong>{{t .Lang .Member.Status}}</strong>
+        </div>
+      </div>
+    </section>
+    <section class="summary-grid profile-summary-grid">
 {{template "summary-card" (dict "Label" (t .Lang "simpanan_wajib") "Value" (nominal .Summary.WajibBalance) "Icon" "wallet")}}
 {{template "summary-card" (dict "Label" (t .Lang "simpanan_manasuka") "Value" (nominal .Summary.SukarelaBalance) "Icon" "coins")}}
 {{template "summary-card" (dict "Label" (t .Lang "simpanan_shu_tertahan") "Value" (nominal .Summary.SHUBalance) "Icon" "wallet-cards")}}
@@ -196,24 +216,25 @@
       {{end}}
     </section>
     {{end}}
-    <section class="panel detail-grid">
-      <div><span>{{t .Lang "member_no"}}</span><strong>{{.Member.MemberNo}}</strong></div>
-      <div><span>{{t .Lang "full_name"}}</span><strong>{{.Member.FullName}}</strong></div>
-      <div><span>{{t .Lang "phone"}}</span><strong>{{.Member.Phone}}</strong></div>
-      <div><span>{{t .Lang "address"}}</span><strong>{{.Member.Address}}</strong></div>
-      <div><span>{{t .Lang "join_date"}}</span><strong>{{.Member.JoinDate}}</strong></div>
-      <div><span>{{t .Lang "member_type"}}</span><strong>{{.Member.MemberTypeLabel}}</strong></div>
-      <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .Member.Status}}</strong></div>
-    </section>
-    <section class="panel form-panel">
-      <h2>{{t .Lang "bank_details"}}</h2>
-      <p class="field-help">{{t .Lang "bank_details_description"}}</p>
-      <form method="post" action="/api/member/profile/bank-details" hx-post="/api/member/profile/bank-details" hx-target="#member-bank-details-error" hx-swap="innerHTML">
-        <label>{{t .Lang "bank_name"}} <input name="bank_name" value="{{.Member.BankName}}" required autocomplete="organization"></label>
-        <label>{{t .Lang "bank_account"}} <input name="bank_account" value="{{.Member.BankAccount}}" inputmode="numeric" required autocomplete="off"></label>
-        <button type="submit">{{t .Lang "save_bank_details"}}</button>
-      </form>
+    <section class="profile-secondary-grid">
+      <section class="panel profile-details-panel">
+        <h2>{{t .Lang "member_detail"}}</h2>
+        <div class="detail-grid">
+          <div><span>{{t .Lang "phone"}}</span><strong>{{if .Member.Phone}}{{.Member.Phone}}{{else}}{{t .Lang "none"}}{{end}}</strong></div>
+          <div><span>{{t .Lang "address"}}</span><strong>{{if .Member.Address}}{{.Member.Address}}{{else}}{{t .Lang "none"}}{{end}}</strong></div>
+          <div><span>{{t .Lang "join_date"}}</span><strong>{{.Member.JoinDate}}</strong></div>
+        </div>
+      </section>
+      <section class="panel form-panel profile-bank-panel">
+        <h2>{{t .Lang "bank_details"}}</h2>
+        <p class="field-help">{{t .Lang "bank_details_description"}}</p>
+        <form method="post" action="/api/member/profile/bank-details" hx-post="/api/member/profile/bank-details" hx-target="#member-bank-details-error" hx-swap="innerHTML">
+          <label>{{t .Lang "bank_name"}} <input name="bank_name" value="{{.Member.BankName}}" required autocomplete="organization"></label>
+          <label>{{t .Lang "bank_account"}} <input name="bank_account" value="{{.Member.BankAccount}}" inputmode="numeric" required autocomplete="off"></label>
+          <button type="submit">{{t .Lang "save_bank_details"}}</button>
+        </form>
 {{template "form-error" (dict "ID" "member-bank-details-error")}}
+      </section>
     </section>
     <section class="panel">
       <h2>{{t .Lang "saving_history"}}</h2>
