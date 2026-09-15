@@ -212,26 +212,26 @@
       <nav class="sidebar-nav">
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_overview"}}</span>
-          <a class="sidebar-link {{if eq .Active "dashboard"}}active{{end}}" href="/admin/dashboard" title="{{t .Lang "dashboard"}}"><i class="sidebar-icon" data-lucide="layout-dashboard"></i><span class="sidebar-label">{{t .Lang "dashboard"}}</span></a>
+          {{if index .Permissions "dashboard.view"}}<a class="sidebar-link {{if eq .Active "dashboard"}}active{{end}}" href="/admin/dashboard" title="{{t .Lang "dashboard"}}"><i class="sidebar-icon" data-lucide="layout-dashboard"></i><span class="sidebar-label">{{t .Lang "dashboard"}}</span></a>{{end}}
         </div>
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_master_data"}}</span>
-          <a class="sidebar-link {{if eq .Active "members"}}active{{end}}" href="/admin/members" title="{{t .Lang "members"}}"><i class="sidebar-icon" data-lucide="users"></i><span class="sidebar-label">{{t .Lang "members"}}</span></a>
+          {{if index .Permissions "members.view"}}<a class="sidebar-link {{if eq .Active "members"}}active{{end}}" href="/admin/members" title="{{t .Lang "members"}}"><i class="sidebar-icon" data-lucide="users"></i><span class="sidebar-label">{{t .Lang "members"}}</span></a>{{end}}
         </div>
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_operations"}}</span>
-          <a class="sidebar-link {{if eq .Active "savings"}}active{{end}}" href="/admin/savings" title="{{t .Lang "nav_simpanan"}}"><i class="sidebar-icon" data-lucide="piggy-bank"></i><span class="sidebar-label">{{t .Lang "nav_simpanan"}}</span></a>
-          <a class="sidebar-link {{if eq .Active "withdrawal-requests"}}active{{end}}" href="/admin/withdrawal-requests" title="{{t .Lang "withdrawal_requests"}}"><i class="sidebar-icon" data-lucide="wallet-cards"></i><span class="sidebar-label">{{t .Lang "withdrawal_requests"}}</span></a>
-          <a class="sidebar-link {{if eq .Active "loan-requests"}}active{{end}}" href="/admin/loan-requests" title="{{t .Lang "nav_pinjaman_requests"}}"><i class="sidebar-icon" data-lucide="file-clock"></i><span class="sidebar-label">{{t .Lang "nav_pinjaman_requests"}}</span></a>
-          <a class="sidebar-link {{if eq .Active "loans"}}active{{end}}" href="/admin/loans" title="{{t .Lang "nav_pinjaman"}}"><i class="sidebar-icon" data-lucide="landmark"></i><span class="sidebar-label">{{t .Lang "nav_pinjaman"}}</span></a>
-          <a class="sidebar-link {{if eq .Active "repayments"}}active{{end}}" href="/admin/repayments" title="{{t .Lang "nav_angsuran"}}"><i class="sidebar-icon" data-lucide="receipt"></i><span class="sidebar-label">{{t .Lang "nav_angsuran"}}</span></a>
-          {{if index .Permissions "reports.view"}}<a class="sidebar-link {{if eq .Active "transactions"}}active{{end}}" href="/admin/transactions" title="{{t .Lang "nav_transactions"}}"><i class="sidebar-icon" data-lucide="arrow-left-right"></i><span class="sidebar-label">{{t .Lang "nav_transactions"}}</span></a>{{end}}
+          {{if index .Permissions "savings.view"}}<a class="sidebar-link {{if eq .Active "savings"}}active{{end}}" href="/admin/savings" title="{{t .Lang "nav_simpanan"}}"><i class="sidebar-icon" data-lucide="piggy-bank"></i><span class="sidebar-label">{{t .Lang "nav_simpanan"}}</span></a>{{end}}
+          {{if index .Permissions "requests.view"}}<a class="sidebar-link {{if eq .Active "withdrawal-requests"}}active{{end}}" href="/admin/withdrawal-requests" title="{{t .Lang "withdrawal_requests"}}"><i class="sidebar-icon" data-lucide="wallet-cards"></i><span class="sidebar-label">{{t .Lang "withdrawal_requests"}}</span></a>{{end}}
+          {{if index .Permissions "requests.view"}}<a class="sidebar-link {{if eq .Active "loan-requests"}}active{{end}}" href="/admin/loan-requests" title="{{t .Lang "nav_pinjaman_requests"}}"><i class="sidebar-icon" data-lucide="file-clock"></i><span class="sidebar-label">{{t .Lang "nav_pinjaman_requests"}}</span></a>{{end}}
+          {{if index .Permissions "loans.view"}}<a class="sidebar-link {{if eq .Active "loans"}}active{{end}}" href="/admin/loans" title="{{t .Lang "nav_pinjaman"}}"><i class="sidebar-icon" data-lucide="landmark"></i><span class="sidebar-label">{{t .Lang "nav_pinjaman"}}</span></a>{{end}}
+          {{if index .Permissions "repayments.view"}}<a class="sidebar-link {{if eq .Active "repayments"}}active{{end}}" href="/admin/repayments" title="{{t .Lang "nav_angsuran"}}"><i class="sidebar-icon" data-lucide="receipt"></i><span class="sidebar-label">{{t .Lang "nav_angsuran"}}</span></a>{{end}}
+          {{if index .Permissions "transactions.view"}}<a class="sidebar-link {{if eq .Active "transactions"}}active{{end}}" href="/admin/transactions" title="{{t .Lang "nav_transactions"}}"><i class="sidebar-icon" data-lucide="arrow-left-right"></i><span class="sidebar-label">{{t .Lang "nav_transactions"}}</span></a>{{end}}
           {{if index .Permissions "savings.record"}}<a class="sidebar-link {{if eq .Active "tagihan"}}active{{end}}" href="/admin/tagihan" title="{{t .Lang "tagihan"}}"><i class="sidebar-icon" data-lucide="file-spreadsheet"></i><span class="sidebar-label">{{t .Lang "tagihan"}}</span></a>{{end}}
         </div>
-        <div class="sidebar-nav-group">
+        {{if index .Permissions "reports.view"}}<div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_reports"}}</span>
           <a class="sidebar-link {{if eq .Active "reports"}}active{{end}}" href="/admin/reports/balance" title="{{t .Lang "balance_report"}}"><i class="sidebar-icon" data-lucide="scale"></i><span class="sidebar-label">{{t .Lang "balance_report"}}</span></a>
-        </div>
+        </div>{{end}}
       </nav>
 {{end}}
 
@@ -255,7 +255,7 @@
       <header class="admin-topbar">
         <button class="sidebar-toggle" type="button" aria-label="{{t .Lang "toggle_sidebar"}}" onclick="document.body.classList.toggle('sidebar-collapsed')">☰</button>
         <a class="button-link button-link-secondary" href="/member/dashboard" title="{{t .Lang "switch_member_area"}}">{{t .Lang "switch_member_area"}}</a>
-        <a class="button-link button-link-secondary" href="/admin/notifications" title="{{t .Lang "notifications"}}">{{t .Lang "notifications"}}{{if gt .UnreadNotifications 0}} ({{.UnreadNotifications}}){{end}}</a>
+        {{if index .Permissions "notifications.view"}}<a class="button-link button-link-secondary" href="/admin/notifications" title="{{t .Lang "notifications"}}">{{t .Lang "notifications"}}{{if gt .UnreadNotifications 0}} ({{.UnreadNotifications}}){{end}}</a>{{end}}
 {{template "language-form" .}}
         <form class="logout-form" method="post" action="/logout">
           <button class="button-secondary" type="submit">{{t .Lang "logout"}}</button>

@@ -332,13 +332,44 @@ func (s *Server) adminTransactionsPage(c *gin.Context) {
 	filters := cashTransactionFiltersFromQuery(c)
 	transactions, err := s.cashTransactionsForAdmin(filters)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
-	renderPage(c, "admin-transactions", pageData(c, "Transaksi Kas - KKSUK PD Dharma Jaya", "transactions", "cash_transactions", "review_cash_transactions", gin.H{
-		"Transactions": transactions.Rows,
-		"Summary":      transactions.Summary,
-		"Filters":      filters,
+	categories, err := s.cashTransactionCategoriesForAdmin(false)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	allCategories, err := s.cashTransactionCategoriesForAdmin(true)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	currentDate := time.Now().In(jakartaLocation).Format("2006-01-02")
+	nextReference, err := s.nextManualCashReferencePreview(currentDate)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	renderPage(c, "admin-transactions", pageData(c, translate(languageFromRequest(c), "cash_transactions_page_title"), "transactions", "cash_transactions", "review_cash_transactions", gin.H{
+		"Transactions":  transactions.Rows,
+		"Summary":       transactions.Summary,
+		"Filters":       filters,
+		"Categories":    categories,
+		"AllCategories": allCategories,
+		"CurrentDate":   currentDate,
+		"NextReference": nextReference,
+	}))
+}
+
+func (s *Server) adminTransactionCategoriesPage(c *gin.Context) {
+	categories, err := s.cashTransactionCategoriesForAdmin(true)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	renderPage(c, "admin-transaction-categories", pageData(c, translate(languageFromRequest(c), "cash_transaction_categories_page_title"), "transactions", "cash_transaction_categories", "manage_cash_transaction_categories", gin.H{
+		"Categories": categories,
 	}))
 }
 

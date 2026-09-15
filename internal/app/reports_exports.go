@@ -87,17 +87,24 @@ type BalanceReportRow struct {
 }
 
 type ProfitLossReport struct {
-	TotalIncome        int64
-	TotalCost          int64
-	NetProfit          int64
-	IncomePercent      int
-	CostPercent        int
-	MarginPercent      int
-	IncomeTransactions int64
-	CostTransactions   int64
-	MonthlyAverage     int64
-	PeriodStart        string
-	PeriodEnd          string
+	TotalIncome             int64
+	TotalCost               int64
+	NetProfit               int64
+	IncomePercent           int
+	CostPercent             int
+	MarginPercent           int
+	IncomeTransactions      int64
+	CostTransactions        int64
+	MonthlyAverage          int64
+	PeriodStart             string
+	PeriodEnd               string
+	ManualCashInByCategory  []ManualCashCategoryTotal
+	ManualCashOutByCategory []ManualCashCategoryTotal
+}
+
+type ManualCashCategoryTotal struct {
+	Name   string
+	Amount int64
 }
 
 type ProfitLossPeriod struct {
@@ -331,7 +338,15 @@ func (s *Server) adminOperationalReports() (AdminOperationalReports, error) {
 	}
 	savingsTotal := sumChartValues(savings)
 	remainingLoan := chartValueByLabel(loanExposure, "remaining_balance")
-	balance, err := checkedReportSub(savingsTotal, remainingLoan)
+	manualNet, err := s.manualCashNet()
+	if err != nil {
+		return AdminOperationalReports{}, err
+	}
+	cashBalance, err := checkedReportAdd(savingsTotal, manualNet)
+	if err != nil {
+		return AdminOperationalReports{}, err
+	}
+	balance, err := checkedReportSub(cashBalance, remainingLoan)
 	if err != nil {
 		return AdminOperationalReports{}, err
 	}
@@ -364,7 +379,15 @@ func (s *Server) balanceReport() (BalanceReport, error) {
 	}
 	totalSavings := sumChartValues(savings)
 	totalOutstandingLoan := chartValueByLabel(loanExposure, "remaining_balance")
-	cashAsset, err := checkedReportSub(totalSavings, pendingWithdrawals)
+	manualNet, err := s.manualCashNet()
+	if err != nil {
+		return BalanceReport{}, err
+	}
+	cashAsset, err := checkedReportAdd(totalSavings, manualNet)
+	if err != nil {
+		return BalanceReport{}, err
+	}
+	cashAsset, err = checkedReportSub(cashAsset, pendingWithdrawals)
 	if err != nil {
 		return BalanceReport{}, err
 	}
@@ -470,6 +493,8 @@ func (s *Server) profitLossReport(period ProfitLossPeriod) (ProfitLossReport, er
 			SELECT record_date AS activity_date FROM saving_records
 			UNION ALL
 			SELECT record_date AS activity_date FROM loan_repayments
+			UNION ALL
+			SELECT transaction_date AS activity_date FROM manual_cash_transactions
 		) activity`).Scan(&earliestActivity); err != nil {
 			return ProfitLossReport{}, err
 		}
@@ -491,11 +516,26 @@ func (s *Server) profitLossReport(period ProfitLossPeriod) (ProfitLossReport, er
 	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM saving_records WHERE type = 'withdrawal' AND record_date >= $1 AND record_date <= $2`, dateFrom, dateTo).Scan(&savingWithdrawals, &withdrawalCount); err != nil {
 		return ProfitLossReport{}, err
 	}
+	manualIncome, manualExpense, manualIncomeCount, manualExpenseCount, err := s.manualCashTotals(dateFrom, dateTo)
+	if err != nil {
+		return ProfitLossReport{}, err
+	}
+	manualCashInByCategory, manualCashOutByCategory, err := s.manualCashCategoryBreakdown(dateFrom, dateTo)
+	if err != nil {
+		return ProfitLossReport{}, err
+	}
 	totalIncome, err := checkedReportAdd(savingDeposits, loanRepayments)
 	if err != nil {
 		return ProfitLossReport{}, err
 	}
-	totalCost := savingWithdrawals
+	totalIncome, err = checkedReportAdd(totalIncome, manualIncome)
+	if err != nil {
+		return ProfitLossReport{}, err
+	}
+	totalCost, err := checkedReportAdd(savingWithdrawals, manualExpense)
+	if err != nil {
+		return ProfitLossReport{}, err
+	}
 	totalActivity, err := checkedReportAdd(totalIncome, totalCost)
 	if err != nil {
 		return ProfitLossReport{}, err
@@ -524,18 +564,46 @@ func (s *Server) profitLossReport(period ProfitLossPeriod) (ProfitLossReport, er
 	}
 	monthCount := monthsInclusive(periodStart, periodEnd)
 	return ProfitLossReport{
-		TotalIncome:        totalIncome,
-		TotalCost:          totalCost,
-		NetProfit:          netProfit,
-		IncomePercent:      incomePercent,
-		CostPercent:        costPercent,
-		MarginPercent:      marginPercent,
-		IncomeTransactions: depositCount + repaymentCount,
-		CostTransactions:   withdrawalCount,
-		MonthlyAverage:     netProfit / int64(monthCount),
-		PeriodStart:        periodStart.Format("02/01/2006"),
-		PeriodEnd:          periodEnd.Format("02/01/2006"),
+		TotalIncome:             totalIncome,
+		TotalCost:               totalCost,
+		NetProfit:               netProfit,
+		IncomePercent:           incomePercent,
+		CostPercent:             costPercent,
+		MarginPercent:           marginPercent,
+		IncomeTransactions:      depositCount + repaymentCount + manualIncomeCount,
+		CostTransactions:        withdrawalCount + manualExpenseCount,
+		MonthlyAverage:          netProfit / int64(monthCount),
+		PeriodStart:             periodStart.Format("02/01/2006"),
+		PeriodEnd:               periodEnd.Format("02/01/2006"),
+		ManualCashInByCategory:  manualCashInByCategory,
+		ManualCashOutByCategory: manualCashOutByCategory,
 	}, nil
+}
+
+func (s *Server) manualCashCategoryBreakdown(dateFrom, dateTo string) (cashIn, cashOut []ManualCashCategoryTotal, err error) {
+	rows, err := s.db.Query(`SELECT c.name, mt.direction, COALESCE(SUM(mt.amount),0)
+		FROM manual_cash_transactions mt
+		JOIN cash_transaction_categories c ON c.id=mt.category_id
+		WHERE mt.transaction_date >= $1 AND mt.transaction_date <= $2
+		GROUP BY c.name, mt.direction
+		ORDER BY mt.direction, c.name`, dateFrom, dateTo)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var category ManualCashCategoryTotal
+		var direction string
+		if err := rows.Scan(&category.Name, &direction, &category.Amount); err != nil {
+			return nil, nil, err
+		}
+		if direction == "cash_in" {
+			cashIn = append(cashIn, category)
+		} else {
+			cashOut = append(cashOut, category)
+		}
+	}
+	return cashIn, cashOut, rows.Err()
 }
 
 func monthsInclusive(start, end time.Time) int {
@@ -1019,6 +1087,36 @@ func (s *Server) exportRepaymentsCSV(c *gin.Context) {
 	writeCSV(c, "angsuran-export.csv", []string{"member_no", "member", translate(lang, "member_type"), "loan_id", translate(lang, "repayment_type"), "amount", "date", "reference_no", "note"}, func(w *csv.Writer) error {
 		for _, repayment := range repayments {
 			if err := w.Write([]string{repayment.MemberNo, repayment.FullName, repayment.MemberTypeLabel, repayment.LoanID, translate(lang, "repayment_type_"+repayment.Type), strconv.FormatInt(repayment.Amount, 10), repayment.RecordDate, repayment.ReferenceNo, repayment.Note}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Server) exportTransactionsCSV(c *gin.Context) {
+	filters := cashTransactionFiltersFromQuery(c)
+	transactions, err := s.cashTransactionsForAdmin(filters)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	writeCSV(c, "transaksi-kas-export.csv", []string{"date", "direction", "source", "category", "description", "cash_in", "cash_out", "amount", "member_no", "member", "reference_no", "recorded_by"}, func(w *csv.Writer) error {
+		for _, transaction := range transactions.Rows {
+			if err := w.Write([]string{
+				transaction.TransactionDate,
+				transaction.Direction,
+				transaction.Type,
+				transaction.Category,
+				transaction.Description,
+				strconv.FormatInt(transaction.Income, 10),
+				strconv.FormatInt(transaction.Expense, 10),
+				strconv.FormatInt(transaction.Amount, 10),
+				transaction.MemberNo,
+				transaction.FullName,
+				transaction.ReferenceNo,
+				transaction.RecordedBy,
+			}); err != nil {
 				return err
 			}
 		}

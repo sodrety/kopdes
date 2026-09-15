@@ -207,8 +207,8 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 24 {
-		t.Fatalf("expected twenty-four tracked migrations, got %d", migrationCount)
+	if migrationCount != 25 {
+		t.Fatalf("expected twenty-five tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
@@ -3979,7 +3979,7 @@ func TestAdminRepaymentsMenuLinksToActiveRepaymentsPage(t *testing.T) {
 	}
 }
 
-func TestAdminTransactionsPageShowsReadOnlyAggregateCashLedger(t *testing.T) {
+func TestAdminTransactionsPageShowsAggregateCashLedgerAndManualEntryForm(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-CASH-1","full_name":"Cash Ledger Member","join_date":"2026-06-16","status":"active","email":"cash-ledger@coop.test","password":"member-password"}`)
@@ -4007,9 +4007,9 @@ func TestAdminTransactionsPageShowsReadOnlyAggregateCashLedger(t *testing.T) {
 			t.Fatalf("expected transactions page to include %q, got %s", text, body)
 		}
 	}
-	for _, text := range []string{"Tambah", "Edit", "Hapus", `href="/admin/transactions/new"`} {
-		if strings.Contains(body, text) {
-			t.Fatalf("expected transactions page to be read-only and omit %q, got %s", text, body)
+	for _, text := range []string{"Catat transaksi kas manual", `name="direction"`, `name="category_id"`, `name="transaction_date"`, `name="reference_no"`, "Kelola kategori kas"} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected transactions page to include %q, got %s", text, body)
 		}
 	}
 
@@ -4031,6 +4031,155 @@ func TestAdminTransactionsPageShowsReadOnlyAggregateCashLedger(t *testing.T) {
 	}
 	if strings.Contains(filterBody, "Pencairan pinjaman untuk Cash Ledger Member") || strings.Contains(filterBody, "CASH-SAVE") {
 		t.Fatalf("expected filtered transactions page to exclude non-repayment rows, got %s", filterBody)
+	}
+}
+
+func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+
+	record := func(t *testing.T, token, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/transactions", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		fixture.server.ServeHTTP(rec, req)
+		return rec
+	}
+
+	incomeRec := record(t, managerToken, `{"direction":"cash_in","category_id":"cash-in-pendapatan-jasa","description":"Pendapatan jasa administrasi","amount":125000,"transaction_date":"2026-06-17","note":"Setoran koreksi kas"}`)
+	if incomeRec.Code != http.StatusCreated {
+		t.Fatalf("expected manual cash-in status 201, got %d: %s", incomeRec.Code, incomeRec.Body.String())
+	}
+	var income struct {
+		ReferenceNo string `json:"reference_no"`
+		Category    string `json:"category"`
+	}
+	if err := json.Unmarshal(incomeRec.Body.Bytes(), &income); err != nil {
+		t.Fatalf("decode manual cash-in: %v", err)
+	}
+	if income.ReferenceNo != "KAS-20260617-0001" || income.Category != "Pendapatan Jasa" {
+		t.Fatalf("expected generated reference and category, got %+v", income)
+	}
+
+	outcomeRec := record(t, managerToken, `{"direction":"cash_out","category_id":"cash-out-atk","description":"Pembelian alat tulis","amount":200000,"transaction_date":"2026-06-18","reference_no":"KAS-KOREKSI-1","note":"Koreksi kas"}`)
+	if outcomeRec.Code != http.StatusCreated {
+		t.Fatalf("expected manual cash-out status 201, got %d: %s", outcomeRec.Code, outcomeRec.Body.String())
+	}
+	duplicateRec := record(t, managerToken, `{"direction":"cash_in","category_id":"cash-in-pendapatan-jasa","description":"Referensi duplikat","amount":1000,"transaction_date":"2026-06-19","reference_no":"KAS-KOREKSI-1"}`)
+	if duplicateRec.Code != http.StatusConflict {
+		t.Fatalf("expected duplicate reference status 409, got %d: %s", duplicateRec.Code, duplicateRec.Body.String())
+	}
+	futureRec := record(t, managerToken, `{"direction":"cash_in","category_id":"cash-in-pendapatan-jasa","description":"Masa depan","amount":1000,"transaction_date":"2099-01-01"}`)
+	if futureRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected future date status 400, got %d: %s", futureRec.Code, futureRec.Body.String())
+	}
+
+	categoryRec := httptest.NewRecorder()
+	categoryReq := httptest.NewRequest(http.MethodPost, "/api/admin/transaction-categories", strings.NewReader(`{"direction":"cash_out","name":"Kegiatan Lapangan"}`))
+	categoryReq.Header.Set("Authorization", "Bearer "+managerToken)
+	categoryReq.Header.Set("Content-Type", "application/json")
+	fixture.server.ServeHTTP(categoryRec, categoryReq)
+	if categoryRec.Code != http.StatusCreated {
+		t.Fatalf("expected category create status 201, got %d: %s", categoryRec.Code, categoryRec.Body.String())
+	}
+	var category struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(categoryRec.Body.Bytes(), &category); err != nil || category.ID == "" {
+		t.Fatalf("decode category create response: %v %s", err, categoryRec.Body.String())
+	}
+
+	categoryUpdate := httptest.NewRecorder()
+	categoryUpdateReq := httptest.NewRequest(http.MethodPost, "/api/admin/transaction-categories/"+category.ID+"/update", strings.NewReader(`{"name":"Kegiatan Lapangan","active":false}`))
+	categoryUpdateReq.Header.Set("Authorization", "Bearer "+managerToken)
+	categoryUpdateReq.Header.Set("Content-Type", "application/json")
+	fixture.server.ServeHTTP(categoryUpdate, categoryUpdateReq)
+	if categoryUpdate.Code != http.StatusOK {
+		t.Fatalf("expected category deactivate status 200, got %d: %s", categoryUpdate.Code, categoryUpdate.Body.String())
+	}
+	deactivatedRecord := record(t, managerToken, `{"direction":"cash_out","category_id":"`+category.ID+`","description":"Kategori nonaktif","amount":1000,"transaction_date":"2026-06-20"}`)
+	if deactivatedRecord.Code != http.StatusBadRequest {
+		t.Fatalf("expected deactivated category status 400, got %d: %s", deactivatedRecord.Code, deactivatedRecord.Body.String())
+	}
+	lockedUpdate := httptest.NewRecorder()
+	lockedUpdateReq := httptest.NewRequest(http.MethodPost, "/api/admin/transaction-categories/cash-in-pendapatan-jasa/update", strings.NewReader(`{"name":"Nama Baru","active":true}`))
+	lockedUpdateReq.Header.Set("Authorization", "Bearer "+managerToken)
+	lockedUpdateReq.Header.Set("Content-Type", "application/json")
+	fixture.server.ServeHTTP(lockedUpdate, lockedUpdateReq)
+	if lockedUpdate.Code != http.StatusBadRequest {
+		t.Fatalf("expected used category rename status 400, got %d: %s", lockedUpdate.Code, lockedUpdate.Body.String())
+	}
+	reactivateRec := httptest.NewRecorder()
+	reactivateReq := httptest.NewRequest(http.MethodPost, "/api/admin/transaction-categories/"+category.ID+"/update", strings.NewReader(`{"name":"Kegiatan Lapangan","active":true}`))
+	reactivateReq.Header.Set("Authorization", "Bearer "+managerToken)
+	reactivateReq.Header.Set("Content-Type", "application/json")
+	fixture.server.ServeHTTP(reactivateRec, reactivateReq)
+	if reactivateRec.Code != http.StatusOK {
+		t.Fatalf("expected category reactivate status 200, got %d: %s", reactivateRec.Code, reactivateRec.Body.String())
+	}
+	categoryPageReq := httptest.NewRequest(http.MethodGet, "/admin/transactions/categories", nil)
+	categoryPageReq.Header.Set("Authorization", "Bearer "+managerToken)
+	categoryPageRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(categoryPageRec, categoryPageReq)
+	if categoryPageRec.Code != http.StatusOK || !strings.Contains(categoryPageRec.Body.String(), "Kegiatan Lapangan") {
+		t.Fatalf("expected cash category management page, got %d: %s", categoryPageRec.Code, categoryPageRec.Body.String())
+	}
+	profitReq := httptest.NewRequest(http.MethodGet, "/admin/reports/profit-loss?date_from=2026-06-17&date_to=2026-06-18", nil)
+	profitReq.Header.Set("Authorization", "Bearer "+managerToken)
+	profitRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(profitRec, profitReq)
+	if profitRec.Code != http.StatusOK || !strings.Contains(profitRec.Body.String(), "Pendapatan Jasa") || !strings.Contains(profitRec.Body.String(), "ATK") {
+		t.Fatalf("expected manual cash category breakdown in profit/loss report, got %d: %s", profitRec.Code, profitRec.Body.String())
+	}
+
+	bendaharaEmail := "bendahara-test@coop.test"
+	seedUser(t, fixture.db, "bendahara-test-user-id", bendaharaEmail, "password", "bendahara")
+	var seededRole string
+	if err := fixture.db.QueryRow(`SELECT role FROM officer_appointments WHERE id='bendahara-test-user-id'`).Scan(&seededRole); err != nil {
+		t.Fatalf("read seeded Bendahara role: %v", err)
+	}
+	if seededRole != "bendahara" {
+		t.Fatalf("expected seeded Bendahara role, got %q", seededRole)
+	}
+	bendaharaToken := fixture.login(t, bendaharaEmail, "password")
+	pageReq := httptest.NewRequest(http.MethodGet, "/admin/transactions", nil)
+	pageReq.Header.Set("Authorization", "Bearer "+bendaharaToken)
+	pageRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(pageRec, pageReq)
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("expected Bendahara transactions page status 200, got %d: %s", pageRec.Code, pageRec.Body.String())
+	}
+	if !strings.Contains(pageRec.Body.String(), "Record manual cash transaction") || strings.Contains(pageRec.Body.String(), `href="/admin/savings"`) || strings.Contains(pageRec.Body.String(), `href="/admin/members"`) || strings.Contains(pageRec.Body.String(), `href="/admin/reports/balance"`) {
+		t.Fatalf("expected Bendahara to see only the cash workflow, got %s", pageRec.Body.String())
+	}
+
+	for _, path := range []string{"/api/admin/savings", "/admin/members"} {
+		forbiddenReq := httptest.NewRequest(http.MethodGet, path, nil)
+		forbiddenReq.Header.Set("Authorization", "Bearer "+bendaharaToken)
+		forbiddenRec := httptest.NewRecorder()
+		fixture.server.ServeHTTP(forbiddenRec, forbiddenReq)
+		if forbiddenRec.Code != http.StatusForbidden {
+			t.Fatalf("expected Bendahara forbidden status for %s, got %d: %s", path, forbiddenRec.Code, forbiddenRec.Body.String())
+		}
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/api/admin/exports/transactions.csv?type=manual", nil)
+	exportReq.Header.Set("Authorization", "Bearer "+bendaharaToken)
+	exportRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(exportRec, exportReq)
+	if exportRec.Code != http.StatusOK || !strings.Contains(exportRec.Body.String(), "Pendapatan jasa administrasi") || !strings.Contains(exportRec.Body.String(), "KAS-KOREKSI-1") {
+		t.Fatalf("expected manual transactions CSV export, got %d: %s", exportRec.Code, exportRec.Body.String())
+	}
+
+	deactivateReq := httptest.NewRequest(http.MethodPost, "/api/admin/officers/bendahara-test-user-id/update", strings.NewReader(`{"role":"bendahara","active":false}`))
+	deactivateReq.Header.Set("Authorization", "Bearer "+fixture.login(t, "ketua-utama@coop.test", "password"))
+	deactivateReq.Header.Set("Content-Type", "application/json")
+	deactivateRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(deactivateRec, deactivateReq)
+	if deactivateRec.Code != http.StatusOK {
+		t.Fatalf("expected general officer assignment removal status 200, got %d: %s", deactivateRec.Code, deactivateRec.Body.String())
 	}
 }
 

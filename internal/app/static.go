@@ -758,6 +758,28 @@ button:disabled {
   gap: 10px;
   margin-bottom: 14px;
 }
+.section-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.section-heading-row h2 {
+  margin: 0;
+}
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.form-grid {
+  display: grid;
+  gap: 12px;
+}
+.form-grid-two {
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
 .filter-form button {
   align-self: end;
 }
@@ -2562,6 +2584,13 @@ td:nth-child(n+2):not(.review-cell) {
   .two-column {
     grid-template-columns: 1fr;
   }
+	.form-grid-two,
+	.section-heading-row {
+	  grid-template-columns: 1fr;
+	}
+	.section-heading-row {
+	  display: grid;
+	}
 	  .page-shell .panel,
 	  .page-shell .summary-card {
 	    border-radius: var(--radius-lg);

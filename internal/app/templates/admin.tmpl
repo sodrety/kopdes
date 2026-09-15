@@ -484,6 +484,21 @@
         </div>
       </section>
 
+      <section class="content-grid content-grid-two">
+        <article class="panel">
+          <h2>{{t .Lang "manual_cash_in_breakdown"}}</h2>
+          {{if .Report.ManualCashInByCategory}}
+          {{range .Report.ManualCashInByCategory}}<div class="profit-total-line"><span>{{.Name}}</span><strong>Rp {{nominal .Amount}}</strong></div>{{end}}
+          {{else}}<p class="profit-empty">{{t .Lang "no_manual_cash_breakdown"}}</p>{{end}}
+        </article>
+        <article class="panel">
+          <h2>{{t .Lang "manual_cash_out_breakdown"}}</h2>
+          {{if .Report.ManualCashOutByCategory}}
+          {{range .Report.ManualCashOutByCategory}}<div class="profit-total-line"><span>{{.Name}}</span><strong>Rp {{nominal .Amount}}</strong></div>{{end}}
+          {{else}}<p class="profit-empty">{{t .Lang "no_manual_cash_breakdown"}}</p>{{end}}
+        </article>
+      </section>
+
       <section class="profit-insights-card">
         <header class="profit-insights-header"><h2><i data-lucide="lightbulb"></i> {{t .Lang "insights_analysis"}}</h2></header>
         <div class="profit-insights-grid">
@@ -694,25 +709,78 @@
 {{template "summary-card" (dict "Label" (t .Lang "total_cash_out") "Value" (nominal .Summary.TotalExpense) "Icon" "arrow-up-from-line")}}
 {{template "summary-card" (dict "Label" (t .Lang "ending_balance") "Value" (nominal .Summary.EndingBalance) "Icon" "scale")}}
       </section>
+      {{if lt .Summary.EndingBalance 0}}<p class="form-error-message">{{t .Lang "negative_cash_balance_warning"}}</p>{{end}}
+      {{if index .Permissions "transactions.record"}}
+      <section class="panel form-panel">
+        <div class="section-heading-row">
+          <div><h2>{{t .Lang "record_manual_cash_transaction"}}</h2><p class="field-help">{{t .Lang "manual_cash_transaction_description"}}</p></div>
+          {{if index .Permissions "transaction_categories.manage"}}<a class="button-link button-link-secondary" href="/admin/transactions/categories">{{t .Lang "manage_cash_transaction_categories"}}</a>{{end}}
+        </div>
+        <form method="post" action="/api/admin/transactions" hx-post="/api/admin/transactions" hx-target="#manual-cash-transaction-error" hx-swap="innerHTML" data-manual-cash-form onsubmit="return window.confirmManualCashTransaction(this)" data-confirm-template="{{t .Lang "confirm_manual_cash_transaction"}}">
+          <div class="form-grid form-grid-two">
+            <label>{{t .Lang "direction"}}
+              <select name="direction" data-cash-direction required>
+                <option value="">{{t .Lang "select_direction"}}</option>
+                <option value="cash_in">{{t .Lang "cash_in"}}</option>
+                <option value="cash_out">{{t .Lang "cash_out"}}</option>
+              </select>
+            </label>
+            <label>{{t .Lang "transaction_category"}}
+              <select name="category_id" data-cash-category required>
+                <option value="">{{t .Lang "select_transaction_category"}}</option>
+                {{range .Categories}}<option value="{{.ID}}" data-direction="{{.Direction}}">{{.Name}} ({{t $.Lang .Direction}})</option>{{end}}
+              </select>
+            </label>
+            <label>{{t .Lang "date"}}
+              <input name="transaction_date" type="date" value="{{.CurrentDate}}" max="{{.CurrentDate}}" required>
+            </label>
+            <label>{{t .Lang "amount"}}
+              <input name="amount" type="text" inputmode="numeric" placeholder="{{t .Lang "rupiah_placeholder"}}" data-rupiah-input data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" aria-describedby="manual-cash-amount-hint" aria-errormessage="manual-cash-amount-error" autocomplete="off" required>
+              <small id="manual-cash-amount-hint">{{t .Lang "rupiah_input_hint"}}</small>
+              <small id="manual-cash-amount-error" class="form-error-message" aria-live="polite" hidden></small>
+            </label>
+            <label>{{t .Lang "description"}}
+              <input name="description" maxlength="200" required>
+            </label>
+            <label>{{t .Lang "reference_number"}}
+              <input name="reference_no" maxlength="100" placeholder="{{.NextReference}}">
+              <small class="field-help">{{t .Lang "reference_auto_generated"}}</small>
+            </label>
+            <label>{{t .Lang "note"}} <span class="field-help">({{t .Lang "optional"}})</span>
+              <input name="note" maxlength="500">
+            </label>
+          </div>
+          <button type="submit">{{t .Lang "record_manual_cash_transaction"}}</button>
+        </form>
+        {{template "form-error" (dict "ID" "manual-cash-transaction-error")}}
+      </section>
+      {{end}}
       <section class="panel">
-        <h2>{{t .Lang "transaction_list"}}</h2>
+        <div class="section-heading-row"><h2>{{t .Lang "transaction_list"}}</h2><div class="button-row"><a class="button-link button-link-secondary" href="/api/admin/exports/transactions.csv">{{t .Lang "export_csv"}}</a>{{if index .Permissions "transaction_categories.manage"}}<a class="button-link button-link-secondary" href="/admin/transactions/categories">{{t .Lang "manage_cash_transaction_categories"}}</a>{{end}}</div></div>
         <form class="filter-form" method="get" action="/admin/transactions">
           <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.Filters.DateFrom}}"></label>
           <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.Filters.DateTo}}"></label>
-          <label>{{t .Lang "category"}}
+          <label>{{t .Lang "direction"}}
             <select name="category">
               <option value="">{{t .Lang "all_categories"}}</option>
               <option value="cash_in" {{if eq .Filters.Category "cash_in"}}selected{{end}}>{{t .Lang "cash_in"}}</option>
               <option value="cash_out" {{if eq .Filters.Category "cash_out"}}selected{{end}}>{{t .Lang "cash_out"}}</option>
             </select>
           </label>
-          <label>{{t .Lang "transaction_type"}}
+          <label>{{t .Lang "transaction_source"}}
             <select name="type">
               <option value="">{{t .Lang "all_types"}}</option>
               <option value="savings" {{if eq .Filters.Type "savings"}}selected{{end}}>{{t .Lang "transaction_type_savings"}}</option>
               <option value="withdrawal" {{if eq .Filters.Type "withdrawal"}}selected{{end}}>{{t .Lang "transaction_type_withdrawal"}}</option>
               <option value="loan" {{if eq .Filters.Type "loan"}}selected{{end}}>{{t .Lang "transaction_type_loan"}}</option>
               <option value="repayment" {{if eq .Filters.Type "repayment"}}selected{{end}}>{{t .Lang "transaction_type_repayment"}}</option>
+              <option value="manual" {{if eq .Filters.Type "manual"}}selected{{end}}>{{t .Lang "transaction_type_manual"}}</option>
+            </select>
+          </label>
+          <label>{{t .Lang "transaction_category_filter"}}
+            <select name="transaction_category">
+              <option value="">{{t .Lang "all_categories"}}</option>
+              {{range .AllCategories}}<option value="{{.ID}}" {{if eq $.Filters.TransactionCategory .ID}}selected{{end}}>{{.Name}}{{if not .Active}} ({{t $.Lang "inactive"}}){{end}}</option>{{end}}
             </select>
           </label>
           <button type="submit">{{t .Lang "apply_filters"}}</button>
@@ -724,12 +792,15 @@
             <tr>
               <th>{{t $.Lang "date"}}</th>
               <th>{{t $.Lang "description"}}</th>
-              <th>{{t $.Lang "transaction_type"}}</th>
+              <th>{{t $.Lang "direction"}}</th>
+              <th>{{t $.Lang "transaction_source"}}</th>
+              <th>{{t $.Lang "transaction_category"}}</th>
               <th>{{t $.Lang "cash_in"}}</th>
               <th>{{t $.Lang "cash_out"}}</th>
               <th>{{t $.Lang "amount"}}</th>
               <th>{{t $.Lang "member"}}</th>
               <th>{{t $.Lang "reference"}}</th>
+              <th>{{t $.Lang "recorded_by"}}</th>
             </tr>
           </thead>
           <tbody>
@@ -737,12 +808,15 @@
             <tr>
               <td>{{.TransactionDate}}</td>
               <td>{{.Description}}</td>
+              <td>{{t $.Lang .Direction}}</td>
               <td>{{t $.Lang (printf "transaction_type_%s" .Type)}}</td>
+              <td>{{if .Category}}{{.Category}}{{else}}-{{end}}</td>
               <td>{{if gt .Income 0}}Rp {{nominal .Income}}{{else}}-{{end}}</td>
               <td>{{if gt .Expense 0}}Rp {{nominal .Expense}}{{else}}-{{end}}</td>
               <td>Rp {{nominal .Amount}}</td>
-              <td>{{template "member-table-cell" .}}</td>
+              <td>{{if .FullName}}{{template "member-table-cell" .}}{{else}}-{{end}}</td>
               <td>{{.ReferenceNo}}</td>
+              <td>{{if .RecordedBy}}{{.RecordedBy}}{{else}}-{{end}}</td>
             </tr>
             {{end}}
           </tbody>
@@ -750,6 +824,84 @@
         {{else}}
 {{template "empty-state" (t .Lang "no_cash_transactions")}}
         {{end}}
+      </section>
+      <script>
+        window.confirmManualCashTransaction = function (form) {
+          var direction = form.elements.direction;
+          var category = form.elements.category_id;
+          var values = [
+            direction.options[direction.selectedIndex].text,
+            category.options[category.selectedIndex].text,
+            form.elements.transaction_date.value,
+            form.elements.amount.value,
+            form.elements.description.value
+          ];
+          var message = form.dataset.confirmTemplate;
+          values.forEach(function (value) { message = message.replace("%s", value); });
+          return window.confirm(message);
+        };
+        document.addEventListener("DOMContentLoaded", function () {
+          var direction = document.querySelector("[data-cash-direction]");
+          var category = document.querySelector("[data-cash-category]");
+          if (!direction || !category) return;
+          function filterCategories() {
+            var selectedDirection = direction.value;
+            Array.prototype.forEach.call(category.options, function (option) {
+              if (!option.dataset.direction) return;
+              option.hidden = selectedDirection !== "" && option.dataset.direction !== selectedDirection;
+            });
+            if (category.selectedOptions.length && category.selectedOptions[0].hidden) category.value = "";
+          }
+          direction.addEventListener("change", filterCategories);
+          filterCategories();
+        });
+      </script>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-transaction-categories"}}
+{{template "admin-shell-start" .}}
+      <section class="content-grid content-grid-two">
+        <article class="panel form-panel">
+          <h2>{{t .Lang "add_cash_transaction_category"}}</h2>
+          <p class="field-help">{{t .Lang "categories_description"}}</p>
+          <form method="post" action="/api/admin/transaction-categories" hx-post="/api/admin/transaction-categories" hx-target="#cash-category-error" hx-swap="innerHTML">
+            <label>{{t .Lang "direction"}}
+              <select name="direction" required>
+                <option value="">{{t .Lang "select_direction"}}</option>
+                <option value="cash_in">{{t .Lang "cash_in"}}</option>
+                <option value="cash_out">{{t .Lang "cash_out"}}</option>
+              </select>
+            </label>
+            <label>{{t .Lang "category_name"}} <input name="name" maxlength="100" required></label>
+            <button type="submit">{{t .Lang "add_cash_transaction_category"}}</button>
+          </form>
+          {{template "form-error" (dict "ID" "cash-category-error")}}
+        </article>
+        <article class="panel">
+          <div class="section-heading-row"><h2>{{t .Lang "cash_transaction_category"}}</h2><a class="button-link button-link-secondary" href="/admin/transactions">{{t .Lang "cash_transactions"}}</a></div>
+          {{if .Categories}}
+{{template "table-open" .}}
+            <thead><tr><th>{{t $.Lang "direction"}}</th><th>{{t $.Lang "category_name"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
+            <tbody>
+              {{range .Categories}}
+              <tr>
+                <td>{{t $.Lang .Direction}}</td>
+                <td>
+                    <input name="name" form="cash-category-form-{{.ID}}" value="{{.Name}}" maxlength="100" required>
+                </td>
+                <td>
+                    <select name="active" form="cash-category-form-{{.ID}}"><option value="true" {{if .Active}}selected{{end}}>{{t $.Lang "active"}}</option><option value="false" {{if not .Active}}selected{{end}}>{{t $.Lang "inactive"}}</option></select>
+                </td>
+                <td><form id="cash-category-form-{{.ID}}" method="post" action="/api/admin/transaction-categories/{{.ID}}/update" hx-post="/api/admin/transaction-categories/{{.ID}}/update" hx-target="#cash-category-error-{{.ID}}" hx-swap="innerHTML"><button class="button-secondary" type="submit">{{t $.Lang "save"}}</button></form><p id="cash-category-error-{{.ID}}" class="form-error"></p></td>
+              </tr>
+              {{end}}
+            </tbody>
+{{template "table-close" .}}
+          {{else}}
+{{template "empty-state" (t .Lang "no_cash_transaction_categories")}}
+          {{end}}
+        </article>
       </section>
 {{template "admin-shell-end" .}}
 {{end}}
@@ -812,6 +964,7 @@
             <label>{{t .Lang "officer_role"}}
               <select name="role" required>
                 <option value="manager" {{if eq .Member.OfficerRole "manager"}}selected{{end}}>{{t $.Lang "role_manager"}}</option>
+                <option value="bendahara" {{if eq .Member.OfficerRole "bendahara"}}selected{{end}}>{{t $.Lang "role_bendahara"}}</option>
                 <option value="ketua_i" {{if eq .Member.OfficerRole "ketua_i"}}selected{{end}}>{{t $.Lang "role_ketua_i"}}</option>
                 <option value="ketua_ii" {{if eq .Member.OfficerRole "ketua_ii"}}selected{{end}}>{{t $.Lang "role_ketua_ii"}}</option>
                 <option value="ketua_utama" {{if eq .Member.OfficerRole "ketua_utama"}}selected{{end}}>{{t $.Lang "role_ketua_utama"}}</option>
@@ -825,12 +978,20 @@
             </label>
             <button type="submit">{{t .Lang "save"}}</button>
           </form>
+          {{if .Member.OfficerActive}}
+          <form method="post" action="/api/admin/officers/{{.Member.OfficerID}}/update" hx-post="/api/admin/officers/{{.Member.OfficerID}}/update" hx-target="#member-officer-error" hx-swap="innerHTML" onsubmit="return window.confirm(this.dataset.confirm)" data-confirm="{{t .Lang "confirm_remove_assignment"}}">
+            <input type="hidden" name="role" value="{{.Member.OfficerRole}}">
+            <input type="hidden" name="active" value="false">
+            <button class="button-secondary" type="submit">{{t .Lang "remove_assignment"}}</button>
+          </form>
+          {{end}}
           {{else if .Member.HasLogin}}
           <form method="post" action="/api/admin/officers" hx-post="/api/admin/officers" hx-target="#member-officer-error" hx-swap="innerHTML">
             <input type="hidden" name="member_id" value="{{.Member.ID}}">
             <label>{{t .Lang "officer_role"}}
               <select name="role" required>
                 <option value="manager">{{t $.Lang "role_manager"}}</option>
+                <option value="bendahara">{{t $.Lang "role_bendahara"}}</option>
                 <option value="ketua_i">{{t $.Lang "role_ketua_i"}}</option>
                 <option value="ketua_ii">{{t $.Lang "role_ketua_ii"}}</option>
                 <option value="ketua_utama">{{t $.Lang "role_ketua_utama"}}</option>
@@ -845,6 +1006,7 @@
             <label>{{t .Lang "officer_role"}}
               <select name="role" required>
                 <option value="manager">{{t $.Lang "role_manager"}}</option>
+                <option value="bendahara">{{t $.Lang "role_bendahara"}}</option>
                 <option value="ketua_i">{{t $.Lang "role_ketua_i"}}</option>
                 <option value="ketua_ii">{{t $.Lang "role_ketua_ii"}}</option>
                 <option value="ketua_utama">{{t $.Lang "role_ketua_utama"}}</option>

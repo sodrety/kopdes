@@ -281,6 +281,10 @@ var migrations = []migration{
 		Name:    "expand_member_types",
 	},
 	{
+		Version: 23,
+		Name:    "create_manual_cash_transactions",
+	},
+	{
 		Version:    24,
 		Name:       "sync_member_types_from_seed_workbook",
 		Statements: memberTypeSyncMigrationStatements,
@@ -349,7 +353,7 @@ func migrationApplied(db *sql.DB, version int) (bool, error) {
 
 func applyMigration(db *sql.DB, migration migration) error {
 	isSQLite := strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
-	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19 || migration.Version == 22) {
+	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19 || migration.Version == 22 || migration.Version == 23) {
 		conn, err := db.Conn(context.Background())
 		if err != nil {
 			return err
@@ -475,6 +479,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 			return err
 		}
 	}
+	if migration.Version == 23 {
+		if err := addManualCashTransactions(tx, isSQLite); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`,
 		migration.Version,
@@ -560,6 +569,169 @@ func expandMemberTypes(tx *sql.Tx, isSQLite bool) error {
 	for _, statement := range triggerStatements {
 		if _, err := tx.Exec(statement); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func addManualCashTransactions(tx *sql.Tx, isSQLite bool) error {
+	var officerAppointmentsExists bool
+	if isSQLite {
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='officer_appointments')`).Scan(&officerAppointmentsExists); err != nil {
+			return fmt.Errorf("check Officer appointments: %w", err)
+		}
+	} else {
+		if err := tx.QueryRow(`SELECT to_regclass('officer_appointments') IS NOT NULL`).Scan(&officerAppointmentsExists); err != nil {
+			return fmt.Errorf("check Officer appointments: %w", err)
+		}
+	}
+
+	if !officerAppointmentsExists {
+		return addManualCashTransactionTables(tx, isSQLite)
+	}
+
+	if isSQLite {
+		statements := []string{
+			`DROP TRIGGER IF EXISTS protect_last_ketua_utama_member_deactivation`,
+			`DROP TRIGGER IF EXISTS suspend_officer_on_member_deactivation`,
+			`DROP TRIGGER IF EXISTS protect_last_ketua_utama_appointment`,
+			`CREATE TABLE officer_appointments_v23 (
+				id TEXT PRIMARY KEY,
+				member_id TEXT NOT NULL UNIQUE,
+				role TEXT NOT NULL CHECK (role IN ('manager','bendahara','ketua_i','ketua_ii','ketua_utama')),
+				active BOOLEAN NOT NULL DEFAULT TRUE,
+				created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (member_id) REFERENCES members(id)
+			)`,
+			`INSERT INTO officer_appointments_v23 (id,member_id,role,active,created_at,updated_at)
+			 SELECT id,member_id,role,active,created_at,updated_at FROM officer_appointments`,
+			`DROP TABLE officer_appointments`,
+			`ALTER TABLE officer_appointments_v23 RENAME TO officer_appointments`,
+			`CREATE INDEX idx_officer_appointments_role_active ON officer_appointments(role,active)`,
+			`CREATE TRIGGER protect_last_ketua_utama_member_deactivation
+				 BEFORE UPDATE OF status ON members
+				 WHEN OLD.status='active' AND NEW.status<>'active'
+				  AND EXISTS (SELECT 1 FROM officer_appointments WHERE member_id=OLD.id AND role='ketua_utama' AND active=TRUE)
+				  AND (SELECT COUNT(*) FROM officer_appointments oa JOIN members m ON m.id=oa.member_id WHERE oa.role='ketua_utama' AND oa.active=TRUE AND m.status='active') <= 1
+				 BEGIN SELECT RAISE(ABORT, 'at least one active Ketua Utama is required'); END`,
+			`CREATE TRIGGER suspend_officer_on_member_deactivation
+				 AFTER UPDATE OF status ON members
+				 WHEN OLD.status='active' AND NEW.status<>'active'
+				 BEGIN UPDATE officer_appointments SET active=FALSE,updated_at=CURRENT_TIMESTAMP WHERE member_id=NEW.id AND active=TRUE; END`,
+			`CREATE TRIGGER protect_last_ketua_utama_appointment
+				 BEFORE UPDATE OF role,active ON officer_appointments
+				 WHEN OLD.role='ketua_utama' AND OLD.active=TRUE AND (NEW.role<>'ketua_utama' OR NEW.active=FALSE)
+				  AND EXISTS (SELECT 1 FROM members WHERE id=OLD.member_id AND status='active')
+				  AND (SELECT COUNT(*) FROM officer_appointments oa JOIN members m ON m.id=oa.member_id WHERE oa.role='ketua_utama' AND oa.active=TRUE AND m.status='active') <= 1
+				 BEGIN SELECT RAISE(ABORT, 'at least one active Ketua Utama is required'); END`,
+		}
+		for _, statement := range statements {
+			if _, err := tx.Exec(statement); err != nil {
+				return fmt.Errorf("expand Officer roles: %w", err)
+			}
+		}
+	} else {
+		for _, statement := range []string{
+			`ALTER TABLE officer_appointments DROP CONSTRAINT IF EXISTS officer_appointments_role_check`,
+			`ALTER TABLE officer_appointments ADD CONSTRAINT officer_appointments_role_check CHECK (role IN ('manager','bendahara','ketua_i','ketua_ii','ketua_utama'))`,
+		} {
+			if _, err := tx.Exec(statement); err != nil {
+				return fmt.Errorf("expand Officer roles: %w", err)
+			}
+		}
+	}
+
+	return addManualCashTransactionTables(tx, isSQLite)
+}
+
+func addManualCashTransactionTables(tx *sql.Tx, isSQLite bool) error {
+	statements := []string{
+		`CREATE TABLE cash_transaction_categories (
+			id TEXT PRIMARY KEY,
+			direction TEXT NOT NULL CHECK (direction IN ('cash_in','cash_out')),
+			name TEXT NOT NULL,
+			active BOOLEAN NOT NULL DEFAULT TRUE,
+			created_by TEXT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (created_by) REFERENCES users(id)
+		)`,
+		`CREATE UNIQUE INDEX idx_cash_transaction_categories_direction_name ON cash_transaction_categories(direction, lower(name))`,
+		`CREATE TABLE manual_cash_transaction_sequences (
+			transaction_date TEXT PRIMARY KEY,
+			next_sequence INTEGER NOT NULL CHECK (next_sequence > 0)
+		)`,
+		`CREATE TABLE manual_cash_transactions (
+			id TEXT PRIMARY KEY,
+			transaction_date TEXT NOT NULL,
+			direction TEXT NOT NULL CHECK (direction IN ('cash_in','cash_out')),
+			category_id TEXT NOT NULL,
+			description TEXT NOT NULL,
+			amount BIGINT NOT NULL CHECK (amount > 0),
+			reference_no TEXT NOT NULL UNIQUE,
+			note TEXT NOT NULL DEFAULT '',
+			recorded_by TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (category_id) REFERENCES cash_transaction_categories(id),
+			FOREIGN KEY (recorded_by) REFERENCES users(id)
+		)`,
+		`CREATE INDEX idx_manual_cash_transactions_date ON manual_cash_transactions(transaction_date, created_at)`,
+		`CREATE INDEX idx_manual_cash_transactions_direction_category ON manual_cash_transactions(direction, category_id)`,
+		`CREATE TABLE cash_transaction_category_audits (
+			id TEXT PRIMARY KEY,
+			category_id TEXT NOT NULL,
+			actor_id TEXT NOT NULL,
+			action TEXT NOT NULL CHECK (action IN ('created','renamed','deactivated','reactivated')),
+			old_name TEXT NOT NULL DEFAULT '',
+			new_name TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (category_id) REFERENCES cash_transaction_categories(id),
+			FOREIGN KEY (actor_id) REFERENCES users(id)
+		)`,
+		`CREATE INDEX idx_cash_transaction_category_audits_category ON cash_transaction_category_audits(category_id, created_at)`,
+		`INSERT INTO cash_transaction_categories (id,direction,name) VALUES
+			('cash-in-pendapatan-jasa','cash_in','Pendapatan Jasa'),
+			('cash-in-pengembalian-dana','cash_in','Pengembalian Dana'),
+			('cash-in-penerimaan-lainnya','cash_in','Penerimaan Lainnya'),
+			('cash-out-atk','cash_out','ATK'),
+			('cash-out-transportasi','cash_out','Transportasi'),
+			('cash-out-konsumsi','cash_out','Konsumsi'),
+			('cash-out-utilitas','cash_out','Utilitas'),
+			('cash-out-biaya-bank','cash_out','Biaya Bank'),
+			('cash-out-pemeliharaan','cash_out','Pemeliharaan'),
+			('cash-out-pengeluaran-lainnya','cash_out','Pengeluaran Lainnya')`,
+		`CREATE TRIGGER protect_manual_cash_transactions_immutable
+			 BEFORE UPDATE ON manual_cash_transactions
+			 BEGIN SELECT RAISE(ABORT, 'manual cash transactions are immutable'); END`,
+		`CREATE TRIGGER protect_manual_cash_transactions_delete
+			 BEFORE DELETE ON manual_cash_transactions
+			 BEGIN SELECT RAISE(ABORT, 'manual cash transactions are immutable'); END`,
+		`CREATE TRIGGER protect_cash_transaction_category_name
+			 BEFORE UPDATE OF name ON cash_transaction_categories
+			 WHEN EXISTS (SELECT 1 FROM manual_cash_transactions WHERE category_id=OLD.id)
+			 BEGIN SELECT RAISE(ABORT, 'used cash transaction category names are immutable'); END`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return fmt.Errorf("create manual cash transaction schema: %w", err)
+		}
+	}
+	if !isSQLite {
+		for _, statement := range []string{
+			`CREATE FUNCTION protect_manual_cash_transactions_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'manual cash transactions are immutable'; END $$`,
+			`CREATE TRIGGER protect_manual_cash_transactions_immutable BEFORE UPDATE OR DELETE ON manual_cash_transactions FOR EACH ROW EXECUTE FUNCTION protect_manual_cash_transactions_immutable()`,
+			`CREATE FUNCTION protect_cash_transaction_category_name() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF EXISTS (SELECT 1 FROM manual_cash_transactions WHERE category_id=OLD.id) AND NEW.name IS DISTINCT FROM OLD.name THEN RAISE EXCEPTION 'used cash transaction category names are immutable'; END IF; RETURN NEW; END $$`,
+			`CREATE TRIGGER protect_cash_transaction_category_name BEFORE UPDATE OF name ON cash_transaction_categories FOR EACH ROW EXECUTE FUNCTION protect_cash_transaction_category_name()`,
+		} {
+			if _, err := tx.Exec(statement); err != nil {
+				return fmt.Errorf("protect manual cash transaction schema: %w", err)
+			}
+		}
+		for _, table := range []string{"cash_transaction_categories", "manual_cash_transaction_sequences", "manual_cash_transactions", "cash_transaction_category_audits"} {
+			if _, err := tx.Exec(`ALTER TABLE ` + table + ` ENABLE ROW LEVEL SECURITY`); err != nil {
+				return fmt.Errorf("secure manual cash transaction table %s: %w", table, err)
+			}
 		}
 	}
 	return nil

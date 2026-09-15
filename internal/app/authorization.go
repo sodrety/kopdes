@@ -9,20 +9,23 @@ import (
 type Permission string
 
 const (
-	PermissionDashboardView        Permission = "dashboard.view"
-	PermissionReportsView          Permission = "reports.view"
-	PermissionMembersView          Permission = "members.view"
-	PermissionMembersManage        Permission = "members.manage"
-	PermissionMemberAccountsManage Permission = "member_accounts.manage"
-	PermissionSavingsView          Permission = "savings.view"
-	PermissionSavingsRecord        Permission = "savings.record"
-	PermissionRequestsView         Permission = "requests.view"
-	PermissionRequestsDecide       Permission = "requests.decide"
-	PermissionLoansView            Permission = "loans.view"
-	PermissionRepaymentsView       Permission = "repayments.view"
-	PermissionRepaymentsRecord     Permission = "repayments.record"
-	PermissionOfficersManage       Permission = "officers.manage"
-	PermissionNotificationsView    Permission = "notifications.view"
+	PermissionDashboardView               Permission = "dashboard.view"
+	PermissionReportsView                 Permission = "reports.view"
+	PermissionMembersView                 Permission = "members.view"
+	PermissionMembersManage               Permission = "members.manage"
+	PermissionMemberAccountsManage        Permission = "member_accounts.manage"
+	PermissionSavingsView                 Permission = "savings.view"
+	PermissionSavingsRecord               Permission = "savings.record"
+	PermissionRequestsView                Permission = "requests.view"
+	PermissionRequestsDecide              Permission = "requests.decide"
+	PermissionLoansView                   Permission = "loans.view"
+	PermissionRepaymentsView              Permission = "repayments.view"
+	PermissionRepaymentsRecord            Permission = "repayments.record"
+	PermissionTransactionsView            Permission = "transactions.view"
+	PermissionTransactionsRecord          Permission = "transactions.record"
+	PermissionTransactionCategoriesManage Permission = "transaction_categories.manage"
+	PermissionOfficersManage              Permission = "officers.manage"
+	PermissionNotificationsView           Permission = "notifications.view"
 )
 
 var officerPermissions = map[string]map[Permission]bool{
@@ -33,6 +36,12 @@ var officerPermissions = map[string]map[Permission]bool{
 		PermissionRequestsView: true, PermissionRequestsDecide: true,
 		PermissionLoansView: true, PermissionRepaymentsView: true,
 		PermissionRepaymentsRecord: true, PermissionNotificationsView: true,
+		PermissionTransactionsView: true, PermissionTransactionsRecord: true,
+		PermissionTransactionCategoriesManage: true,
+	},
+	"bendahara": {
+		PermissionTransactionsView: true, PermissionTransactionsRecord: true,
+		PermissionTransactionCategoriesManage: true,
 	},
 	"ketua_i":  officerOversightPermissions(),
 	"ketua_ii": officerOversightPermissions(),
@@ -50,6 +59,7 @@ func officerOversightPermissions() map[Permission]bool {
 		PermissionMembersView: true, PermissionSavingsView: true,
 		PermissionRequestsView: true, PermissionRequestsDecide: true,
 		PermissionLoansView: true, PermissionRepaymentsView: true,
+		PermissionTransactionsView:  true,
 		PermissionNotificationsView: true,
 	}
 }

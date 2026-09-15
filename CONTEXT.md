@@ -1,6 +1,6 @@
 # Saving and Loan Cooperative
 
-This context describes a cooperative system that records member savings, loan requests, loan approvals, and repayments after those activities are verified outside the application.
+This context describes a cooperative system that records member savings, loan requests, loan approvals, repayments, and verified standalone cash movements after those activities are verified outside the application.
 
 ## Language
 
@@ -25,8 +25,11 @@ The personal area where a **Member** views and manages their own cooperative act
 _Avoid_: Admin Area, treating it as a different login identity
 
 **Officer Role**:
-An officer's position in the cooperative authority hierarchy: **Manager**, **Ketua I**, **Ketua II**, or **Ketua Utama**.
+An officer's assigned capacity: one of the approval-hierarchy roles (**Manager**, **Ketua I**, **Ketua II**, or **Ketua Utama**) or the operational **Bendahara** role.
 _Avoid_: Admin, staff role, access level
+
+**Bendahara**:
+An operational **Officer Role** outside the approval hierarchy. A **Bendahara** can view the complete **Transaksi Kas**, record verified standalone manual cash in/out entries, and manage cash categories, but cannot approve requests or administer other officer appointments.
 
 **Officer**:
 A **Member** appointed to exactly one **Officer Role**.
@@ -98,6 +101,13 @@ _Avoid_: Inactive User that may be reactivated, alternate Member login
 A traceable record of a verified saving deposit or withdrawal for a **Member** in exactly one **Simpanan** category.
 _Also called in UI_: Simpanan record
 _Avoid_: Payment, transaction, ledger entry
+
+**Manual Cash Transaction**:
+A verified standalone cash-in or cash-out record entered by an authorized **Bendahara** or **Manager**, with a date, positive amount, Indonesian category, description, optional note, and editable unique reference. It is not linked to a **Member**, **Saving Record**, **Loan**, or **Repayment Record**.
+_Avoid_: Treating it as a member payment, an approval-chain result, or a system-processed transfer
+
+**Cash Transaction Category**:
+A direction-specific Indonesian category for a **Manual Cash Transaction**. Categories can be added, deactivated, and reactivated by **Bendahara** or **Manager**. A category name becomes immutable after its first use.
 
 **Saving Balance**:
 The derived current savings amount for a **Member** after deposits and withdrawals are applied.
@@ -260,9 +270,15 @@ _Avoid_: Renaming stable internal enum values only to match display text
 - Every Officer Appointment creation, role change, suspension, and reactivation appends an immutable audit event.
 - An **Officer Role** may be held by many Officers.
 - **Officer Roles** are ordered from lowest to highest authority: **Manager**, **Ketua I**, **Ketua II**, and **Ketua Utama**.
+- **Bendahara** is an **Officer Role** outside that approval hierarchy and does not receive approval authority from the hierarchy.
 - An Officer accesses the **Admin Area** through the **Operational Permissions** assigned to their **Officer Role**.
 - A higher **Officer Role** does not automatically inherit the **Operational Permissions** of a lower Officer Role.
 - An **Operational Permission** governs the same activity consistently regardless of how the Officer attempts it.
+- **Manager** and **Bendahara** can view the complete **Transaksi Kas** and record **Manual Cash Transactions**; **Manager** and **Bendahara** can manage **Cash Transaction Categories**.
+- A **Manual Cash Transaction** is immutable after creation. Corrections are recorded as a new opposite-direction transaction with a clear note; routine edit and delete actions are not available.
+- A **Manual Cash Transaction** may be backdated but cannot use a future date. Its default reference uses `KAS-YYYYMMDD-####` based on the transaction date, and **Bendahara** or **Manager** may replace it with another non-empty unique reference.
+- Negative cash balances are allowed and shown as a warning rather than blocking a verified record.
+- Cash transaction category names are unique per direction using normalized case-insensitive comparison. Deactivation preserves history, and reactivation restores the same category.
 - A **Loan Request** and **Penarikan** each follow an **Approval Chain** beginning with **Manager**.
 - Every **Officer Role** must approve in order, and no approval stage may be skipped.
 - Each **Approval Stage** is completed once by any Officer holding its assigned **Officer Role**, with the Officer's identity and decision time retained.
