@@ -338,15 +338,17 @@ func (s *Server) memberProfile(c *gin.Context) {
 var errInvalidMember = errors.New("invalid member")
 
 const (
-	memberTypeDailyWorker  = "daily_worker"
-	memberTypeEmployee     = "employee"
-	memberTypeSelfEmployed = "self_employed"
+	memberTypeEmployee       = "employee"
+	memberTypeContractWorker = "contract_worker"
+	memberTypeDailyWorker    = "daily_worker"
+	memberTypeCustomer       = "customer"
 )
 
 var memberTypeLabels = map[string]string{
-	memberTypeDailyWorker:  "PHL",
-	memberTypeEmployee:     "Karyawan",
-	memberTypeSelfEmployed: "Mandiri",
+	memberTypeEmployee:       "Pegawai",
+	memberTypeContractWorker: "PKWT",
+	memberTypeDailyWorker:    "PHL",
+	memberTypeCustomer:       "Nasabah",
 }
 
 func validMemberType(memberType string) bool {

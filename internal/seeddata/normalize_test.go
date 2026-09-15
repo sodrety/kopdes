@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+func TestTemplateMemberTypeFollowsWorkbookCategories(t *testing.T) {
+	tests := map[string]string{
+		"Pegawai": "employee",
+		"PKWT":    "contract_worker",
+		"PHL":     "daily_worker",
+		"Nasabah": "customer",
+	}
+	for source, want := range tests {
+		if got := templateMemberType(source); got != want {
+			t.Fatalf("templateMemberType(%q) = %q, want %q", source, got, want)
+		}
+	}
+}
+
 func TestNormalizeIsDeterministicForSeedWorkbooks(t *testing.T) {
 	primary := "../../docs/seed-data/01. Data Base Simpanan dan Pinjaman Koperasi Dharma Jaya tahun buku 2026 Rev2.xlsx"
 	secondary := "../../docs/seed-data/Rekap Pinjaman Sekunder KKSUK 2026.xlsx"

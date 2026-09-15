@@ -67,7 +67,7 @@ func TestMapMemberSourceRules(t *testing.T) {
 		{sourceStatus: "Baru", status: "active", memberType: "employee"},
 		{sourceStatus: "Purna Bakti 2025", status: "inactive", memberType: "employee"},
 		{sourceStatus: "PHL Distribusi", status: "active", memberType: "daily_worker"},
-		{sourceStatus: "Nasabah", status: "active", memberType: "self_employed"},
+		{sourceStatus: "Nasabah", status: "active", memberType: "customer"},
 	}
 	for _, test := range tests {
 		status, memberType := mapMemberSource(test.sourceStatus)

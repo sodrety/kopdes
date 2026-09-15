@@ -556,9 +556,10 @@
           <label>{{t .Lang "bank_account"}} <input name="bank_account" inputmode="numeric" required autocomplete="off"></label>
           <label>{{t .Lang "member_type"}}
             <select name="member_type">
-              <option value="daily_worker">{{t .Lang "member_type_daily_worker"}}</option>
               <option value="employee" selected>{{t .Lang "member_type_employee"}}</option>
-              <option value="self_employed">{{t .Lang "member_type_self_employed"}}</option>
+              <option value="contract_worker">{{t .Lang "member_type_contract_worker"}}</option>
+              <option value="daily_worker">{{t .Lang "member_type_daily_worker"}}</option>
+              <option value="customer">{{t .Lang "member_type_customer"}}</option>
             </select>
           </label>
           <label>{{t .Lang "status"}}
@@ -877,9 +878,10 @@
         <form method="post" action="/api/admin/members/{{.Member.ID}}/type" hx-post="/api/admin/members/{{.Member.ID}}/type" hx-target="#member-type-form-error" hx-swap="innerHTML">
           <label>{{t .Lang "member_type"}}
             <select name="member_type">
-              <option value="daily_worker" {{if eq .Member.MemberType "daily_worker"}}selected{{end}}>{{t .Lang "member_type_daily_worker"}}</option>
               <option value="employee" {{if eq .Member.MemberType "employee"}}selected{{end}}>{{t .Lang "member_type_employee"}}</option>
-              <option value="self_employed" {{if eq .Member.MemberType "self_employed"}}selected{{end}}>{{t .Lang "member_type_self_employed"}}</option>
+              <option value="contract_worker" {{if eq .Member.MemberType "contract_worker"}}selected{{end}}>{{t .Lang "member_type_contract_worker"}}</option>
+              <option value="daily_worker" {{if eq .Member.MemberType "daily_worker"}}selected{{end}}>{{t .Lang "member_type_daily_worker"}}</option>
+              <option value="customer" {{if eq .Member.MemberType "customer"}}selected{{end}}>{{t .Lang "member_type_customer"}}</option>
             </select>
           </label>
           <button type="submit">{{t .Lang "save"}}</button>

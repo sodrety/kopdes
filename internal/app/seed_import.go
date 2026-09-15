@@ -474,7 +474,7 @@ func validateSeedManifest(manifest seeddata.Manifest) (preparedSeed, []SeedImpor
 		}
 		status, memberType := mapMemberSource(member.SourceStatus)
 		switch member.MemberType {
-		case "daily_worker", "employee", "self_employed":
+		case "employee", "contract_worker", "daily_worker", "customer":
 			memberType = member.MemberType
 		}
 		if member.JoinDate == "" {
@@ -1275,7 +1275,7 @@ func mapMemberSource(sourceStatus string) (string, string) {
 	if strings.Contains(status, "phl") {
 		memberType = "daily_worker"
 	} else if status == "nasabah" {
-		memberType = "self_employed"
+		memberType = "customer"
 	}
 	return memberStatus, memberType
 }

@@ -276,6 +276,10 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_loan_repayment_events_loan_date ON loan_repayment_events(loan_id, record_date, created_at)`,
 		},
 	},
+	{
+		Version: 22,
+		Name:    "expand_member_types",
+	},
 }
 
 func Migrate(db *sql.DB) error {
@@ -335,7 +339,7 @@ func migrationApplied(db *sql.DB, version int) (bool, error) {
 
 func applyMigration(db *sql.DB, migration migration) error {
 	isSQLite := strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
-	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19) {
+	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19 || migration.Version == 22) {
 		conn, err := db.Conn(context.Background())
 		if err != nil {
 			return err
@@ -456,6 +460,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 			return err
 		}
 	}
+	if migration.Version == 22 {
+		if err := expandMemberTypes(tx, isSQLite); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`,
 		migration.Version,
@@ -464,6 +473,86 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 		return err
 	}
 	return tx.Commit()
+}
+
+func expandMemberTypes(tx *sql.Tx, isSQLite bool) error {
+	if !isSQLite {
+		for _, statement := range []string{
+			`UPDATE members SET member_type='customer' WHERE member_type='self_employed'`,
+			`ALTER TABLE members DROP CONSTRAINT IF EXISTS members_member_type_check`,
+			`ALTER TABLE members ADD CONSTRAINT members_member_type_check CHECK (member_type IN ('employee', 'contract_worker', 'daily_worker', 'customer'))`,
+		} {
+			if _, err := tx.Exec(statement); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	statements := []string{
+		`DROP TRIGGER IF EXISTS protect_last_ketua_utama_member_deactivation`,
+		`DROP TRIGGER IF EXISTS suspend_officer_on_member_deactivation`,
+		`DROP TRIGGER IF EXISTS protect_last_ketua_utama_appointment`,
+		`CREATE TABLE members_v22 (
+			id TEXT PRIMARY KEY,
+			member_no TEXT NOT NULL UNIQUE,
+			full_name TEXT NOT NULL,
+			phone TEXT NOT NULL DEFAULT '',
+			address TEXT NOT NULL DEFAULT '',
+			join_date TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'suspended')),
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			member_type TEXT NOT NULL DEFAULT 'employee' CHECK (member_type IN ('employee', 'contract_worker', 'daily_worker', 'customer')),
+			bank_name TEXT NOT NULL DEFAULT '',
+			bank_account TEXT NOT NULL DEFAULT ''
+		)`,
+		`INSERT INTO members_v22 (id,member_no,full_name,phone,address,join_date,status,created_at,updated_at,member_type,bank_name,bank_account)
+			SELECT id,member_no,full_name,phone,address,join_date,status,created_at,updated_at,
+				CASE WHEN member_type='self_employed' THEN 'customer' ELSE member_type END,
+				bank_name,bank_account
+			FROM members`,
+		`DROP TABLE members`,
+		`ALTER TABLE members_v22 RENAME TO members`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+
+	var officerAppointmentsExists bool
+	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='officer_appointments')`).Scan(&officerAppointmentsExists); err != nil {
+		return err
+	}
+	if !officerAppointmentsExists {
+		return nil
+	}
+
+	triggerStatements := []string{
+		`CREATE TRIGGER protect_last_ketua_utama_member_deactivation
+			 BEFORE UPDATE OF status ON members
+			 WHEN OLD.status='active' AND NEW.status<>'active'
+			  AND EXISTS (SELECT 1 FROM officer_appointments WHERE member_id=OLD.id AND role='ketua_utama' AND active=TRUE)
+			  AND (SELECT COUNT(*) FROM officer_appointments oa JOIN members m ON m.id=oa.member_id WHERE oa.role='ketua_utama' AND oa.active=TRUE AND m.status='active') <= 1
+			 BEGIN SELECT RAISE(ABORT, 'at least one active Ketua Utama is required'); END`,
+		`CREATE TRIGGER suspend_officer_on_member_deactivation
+			 AFTER UPDATE OF status ON members
+			 WHEN OLD.status='active' AND NEW.status<>'active'
+			 BEGIN UPDATE officer_appointments SET active=FALSE,updated_at=CURRENT_TIMESTAMP WHERE member_id=NEW.id AND active=TRUE; END`,
+		`CREATE TRIGGER protect_last_ketua_utama_appointment
+			 BEFORE UPDATE OF role,active ON officer_appointments
+			 WHEN OLD.role='ketua_utama' AND OLD.active=TRUE AND (NEW.role<>'ketua_utama' OR NEW.active=FALSE)
+			  AND EXISTS (SELECT 1 FROM members WHERE id=OLD.member_id AND status='active')
+			  AND (SELECT COUNT(*) FROM officer_appointments oa JOIN members m ON m.id=oa.member_id WHERE oa.role='ketua_utama' AND oa.active=TRUE AND m.status='active') <= 1
+			 BEGIN SELECT RAISE(ABORT, 'at least one active Ketua Utama is required'); END`,
+	}
+	for _, statement := range triggerStatements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func addExtendedSavingCategories(tx *sql.Tx, isSQLite bool) error {

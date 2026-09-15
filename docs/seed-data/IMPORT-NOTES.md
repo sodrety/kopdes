@@ -28,8 +28,8 @@ injector consumes that manifest and does not parse Excel during import.
   `ari Wibowo - 00579` → `Ari Wibowo - 00579`. Other unresolved names block
   validation.
 - `Aktif`/`Baru` → active; `Purna Bakti ...` → inactive.
-- `PHL*` → `daily_worker`; `Nasabah` → `self_employed`; all other member types
-  → `employee`.
+- `PHL*` → `daily_worker`; `Nasabah` → `customer`; `Pegawai` → `employee`; and
+  `PKWT` → `contract_worker`. Other legacy member types fall back to `employee`.
 - Inactive members remain in the import so historical savings and loan records
   retain their member links; only active members receive login accounts.
 - Generated accounts use the `member` role and the email form

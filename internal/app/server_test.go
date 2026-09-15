@@ -207,16 +207,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 21 {
-		t.Fatalf("expected twenty-one tracked migrations, got %d", migrationCount)
+	if migrationCount != 22 {
+		t.Fatalf("expected twenty-two tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 21`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 22`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "create_historical_loan_repayment_events" {
-		t.Fatalf("expected latest bank details and loan limit migration, got %q", latestName)
+	if latestName != "expand_member_types" {
+		t.Fatalf("expected latest member type migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -1478,6 +1478,11 @@ func TestAdminMemberPagesRenderListCreateAndDetailFlows(t *testing.T) {
 			t.Fatalf("expected member create page to include %q, got %s", text, createBody)
 		}
 	}
+	for _, text := range []string{`value="employee"`, `value="contract_worker"`, `value="daily_worker"`, `value="customer"`, "Pegawai", "PKWT", "PHL", "Nasabah"} {
+		if !strings.Contains(createBody, text) {
+			t.Fatalf("expected member create page to include Member Type option %q, got %s", text, createBody)
+		}
+	}
 
 	detailReq := httptest.NewRequest(http.MethodGet, "/admin/members/"+created.ID, nil)
 	detailReq.AddCookie(adminCookie)
@@ -2125,7 +2130,7 @@ func TestAdminCanExportFilteredSimpananCSV(t *testing.T) {
 		t.Fatalf("expected stable simpanan export filename, got %q", disposition)
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"member_no,member,Member type,category,type,amount,date,reference_no,note,recorded_by", "M-EXP-1,Export One,Karyawan,wajib,deposit,100000,2026-06-16,EXP-WJB,Export wajib"} {
+	for _, text := range []string{"member_no,member,Member type,category,type,amount,date,reference_no,note,recorded_by", "M-EXP-1,Export One,Pegawai,wajib,deposit,100000,2026-06-16,EXP-WJB,Export wajib"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected simpanan export to include %q, got %s", text, body)
 		}
@@ -2155,7 +2160,7 @@ func TestAdminCanExportPinjamanAndAngsuranCSV(t *testing.T) {
 		t.Fatalf("expected pinjaman export status 200, got %d: %s", loanRec.Code, loanRec.Body.String())
 	}
 	loanBody := loanRec.Body.String()
-	for _, text := range []string{"member_no,member,Member type,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_at,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date", "M-LOAN-EXP,Loan Export,Karyawan,900000,9,109000,881000,active,", "regular_tiered_monthly_v1,9000,81000,981000"} {
+	for _, text := range []string{"member_no,member,Member type,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_at,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date", "M-LOAN-EXP,Loan Export,Pegawai,900000,9,109000,881000,active,", "regular_tiered_monthly_v1,9000,81000,981000"} {
 		if !strings.Contains(loanBody, text) {
 			t.Fatalf("expected pinjaman export to include %q, got %s", text, loanBody)
 		}
@@ -2171,7 +2176,7 @@ func TestAdminCanExportPinjamanAndAngsuranCSV(t *testing.T) {
 		t.Fatalf("expected angsuran export status 200, got %d: %s", repaymentRec.Code, repaymentRec.Body.String())
 	}
 	repaymentBody := repaymentRec.Body.String()
-	for _, text := range []string{"member_no,member,Member type,loan_id,Record type,amount,date,reference_no,note", "M-LOAN-EXP,Loan Export,Karyawan," + loan.ID + ",Repayment,100000,2026-06-16,RPY-TEST,Test repayment"} {
+	for _, text := range []string{"member_no,member,Member type,loan_id,Record type,amount,date,reference_no,note", "M-LOAN-EXP,Loan Export,Pegawai," + loan.ID + ",Repayment,100000,2026-06-16,RPY-TEST,Test repayment"} {
 		if !strings.Contains(repaymentBody, text) {
 			t.Fatalf("expected angsuran export to include %q, got %s", text, repaymentBody)
 		}
@@ -2295,7 +2300,7 @@ func TestAdminCanExportFilteredPenarikanCSV(t *testing.T) {
 		t.Fatalf("expected stable penarikan export filename, got %q", disposition)
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"member_no,member,Member type,amount,status,requested_at,reviewed_at,note,review_note,saving_record_id", "M-WD-EXP,Withdrawal Export,Karyawan,100000,pending"} {
+	for _, text := range []string{"member_no,member,Member type,amount,status,requested_at,reviewed_at,note,review_note,saving_record_id", "M-WD-EXP,Withdrawal Export,Pegawai,100000,pending"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected penarikan export to include %q, got %s", text, body)
 		}

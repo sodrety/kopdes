@@ -13,7 +13,7 @@ A person registered with the cooperative who may hold savings and request loans.
 _Avoid_: Customer, client, borrower as a general replacement
 
 **Member Type**:
-A Member's current classification using the canonical Bahasa label **PHL**, **Karyawan**, or **Mandiri**, defaulting to **Karyawan** when omitted.
+A Member's current classification using the canonical Bahasa label **Pegawai**, **PKWT**, **PHL**, or **Nasabah**, defaulting to **Pegawai** when omitted.
 _Avoid_: Officer Role, membership status, translated equivalents of the canonical labels
 
 **Admin Area**:
@@ -133,7 +133,7 @@ The amount of a pending **Penarikan** excluded from the Member's **Available Wit
 _Avoid_: Saving Record, completed withdrawal
 
 **Tagihan**:
-A monthly company-facing collection statement for **Karyawan** **Members** that lists expected **Saving Records** and **Repayment Records** to be verified after the company returns the result.
+A monthly company-facing collection statement for **Pegawai** **Members** that lists expected **Saving Records** and **Repayment Records** to be verified after the company returns the result.
 _Avoid_: In-app payment, payroll processing, proof that money was received
 
 **Tagihan Statement Month**:
@@ -294,7 +294,7 @@ _Avoid_: Renaming stable internal enum values only to match display text
 - A **Withdrawal Reservation** reduces **Available Withdrawal Balance** without changing **Saving Balance**.
 - **Rejection** releases the **Withdrawal Reservation**, while **Final Approval** replaces it with a withdrawal **Saving Record**.
 - **Cancellation** releases the **Withdrawal Reservation**.
-- A **Tagihan** is prepared for **Karyawan** **Members** only.
+- A **Tagihan** is prepared for **Pegawai** **Members** only.
 - **Tagihan** eligibility uses the **Member**'s current **Member Type** at generation time.
 - A **Tagihan** may include expected **Saving Records** and expected **Repayment Records**.
 - A **Tagihan** row includes the **Member Identifier** used to match imported rows to **Members**.

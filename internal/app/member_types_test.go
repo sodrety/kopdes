@@ -65,6 +65,43 @@ func TestMemberTypeMigrationBackfillsExistingMembers(t *testing.T) {
 	}
 }
 
+func TestMemberTypeExpansionMigratesLegacyValuesAndAcceptsWorkbookTypes(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+
+	if err := app.MigrateTo(db, 21); err != nil {
+		t.Fatalf("migrate through legacy Member Type schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status,member_type) VALUES ('legacy-type','LEGACY-TYPE','Legacy Type','2026-01-01','active','self_employed')`); err != nil {
+		t.Fatalf("insert legacy Member Type: %v", err)
+	}
+
+	if err := app.Migrate(db); err != nil {
+		t.Fatalf("expand Member Type schema: %v", err)
+	}
+
+	var migratedType string
+	if err := db.QueryRow(`SELECT member_type FROM members WHERE id='legacy-type'`).Scan(&migratedType); err != nil {
+		t.Fatalf("read migrated Member Type: %v", err)
+	}
+	if migratedType != "customer" {
+		t.Fatalf("expected self_employed to migrate to customer, got %q", migratedType)
+	}
+
+	for index, memberType := range []string{"employee", "contract_worker", "daily_worker", "customer"} {
+		if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status,member_type) VALUES ($1,$2,$3,'2026-01-01','active',$4)`, fmt.Sprintf("member-type-%d", index), fmt.Sprintf("TYPE-%d", index), memberType, memberType); err != nil {
+			t.Fatalf("insert workbook Member Type %q: %v", memberType, err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE members SET member_type='self_employed' WHERE id='legacy-type'`); err == nil {
+		t.Fatal("expected legacy self_employed Member Type to be rejected after migration")
+	}
+}
+
 func TestMemberTypeDefaultsUpdatesAndUsesCurrentBahasaLabelInReports(t *testing.T) {
 	fixture := newTestFixture(t)
 	managerToken := fixture.login(t, "admin@coop.test", "password")
@@ -84,7 +121,7 @@ func TestMemberTypeDefaultsUpdatesAndUsesCurrentBahasaLabelInReports(t *testing.
 	if err := json.Unmarshal(defaultDetailRec.Body.Bytes(), &defaultDetail); err != nil {
 		t.Fatalf("decode default Member Type: %v", err)
 	}
-	if defaultDetail.MemberType != "employee" || defaultDetail.MemberTypeLabel != "Karyawan" {
+	if defaultDetail.MemberType != "employee" || defaultDetail.MemberTypeLabel != "Pegawai" {
 		t.Fatalf("unexpected default Member Type mapping: %+v", defaultDetail)
 	}
 	suspendedUpdateReq := httptest.NewRequest(http.MethodPost, "/api/admin/members/"+defaultMember.ID+"/type", strings.NewReader(`{"member_type":"daily_worker"}`))
@@ -106,7 +143,7 @@ func TestMemberTypeDefaultsUpdatesAndUsesCurrentBahasaLabelInReports(t *testing.
 		t.Fatalf("record saving for Member Type report: %d %s", savingRec.Code, savingRec.Body.String())
 	}
 
-	updateReq := httptest.NewRequest(http.MethodPost, "/api/admin/members/"+member.ID+"/type", strings.NewReader(`{"member_type":"self_employed"}`))
+	updateReq := httptest.NewRequest(http.MethodPost, "/api/admin/members/"+member.ID+"/type", strings.NewReader(`{"member_type":"customer"}`))
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateReq.Header.Set("Authorization", "Bearer "+managerToken)
 	updateRec := httptest.NewRecorder()
@@ -121,7 +158,7 @@ func TestMemberTypeDefaultsUpdatesAndUsesCurrentBahasaLabelInReports(t *testing.
 	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("decode updated Member Type: %v", err)
 	}
-	if updated.MemberType != "self_employed" || updated.MemberTypeLabel != "Mandiri" {
+	if updated.MemberType != "customer" || updated.MemberTypeLabel != "Nasabah" {
 		t.Fatalf("unexpected updated Member Type mapping: %+v", updated)
 	}
 
@@ -133,7 +170,7 @@ func TestMemberTypeDefaultsUpdatesAndUsesCurrentBahasaLabelInReports(t *testing.
 	if profileRec.Code != http.StatusOK {
 		t.Fatalf("get member profile with Member Type: %d %s", profileRec.Code, profileRec.Body.String())
 	}
-	if body := profileRec.Body.String(); !strings.Contains(body, `"member_type":"self_employed"`) || !strings.Contains(body, `"member_type_label":"Mandiri"`) {
+	if body := profileRec.Body.String(); !strings.Contains(body, `"member_type":"customer"`) || !strings.Contains(body, `"member_type_label":"Nasabah"`) {
 		t.Fatalf("expected member profile to expose the consistent mapping, got %s", body)
 	}
 
@@ -154,7 +191,7 @@ func TestMemberTypeDefaultsUpdatesAndUsesCurrentBahasaLabelInReports(t *testing.
 	if err := json.Unmarshal(reportsRec.Body.Bytes(), &reports); err != nil {
 		t.Fatalf("decode operational reports: %v", err)
 	}
-	if len(reports.SavingsByMember) != 1 || reports.SavingsByMember[0].MemberNo != "TYPE-PHL" || reports.SavingsByMember[0].MemberType != "self_employed" || reports.SavingsByMember[0].MemberTypeLabel != "Mandiri" {
+	if len(reports.SavingsByMember) != 1 || reports.SavingsByMember[0].MemberNo != "TYPE-PHL" || reports.SavingsByMember[0].MemberType != "customer" || reports.SavingsByMember[0].MemberTypeLabel != "Nasabah" {
 		t.Fatalf("expected report to use current Member Type, got %+v", reports.SavingsByMember)
 	}
 
@@ -165,7 +202,7 @@ func TestMemberTypeDefaultsUpdatesAndUsesCurrentBahasaLabelInReports(t *testing.
 	if csvRec.Code != http.StatusOK {
 		t.Fatalf("export savings CSV: %d %s", csvRec.Code, csvRec.Body.String())
 	}
-	if body := csvRec.Body.String(); !strings.Contains(body, "Member type") || !strings.Contains(body, "Mandiri") || strings.Contains(body, "self_employed") {
+	if body := csvRec.Body.String(); !strings.Contains(body, "Member type") || !strings.Contains(body, "Nasabah") || strings.Contains(body, "self_employed") {
 		t.Fatalf("expected CSV to expose the Bahasa Member Type label only, got %s", body)
 	}
 }

@@ -401,12 +401,14 @@ func getStreamingRows(file *excelize.File, sheet string) ([][]string, error) {
 
 func templateMemberType(value string) string {
 	switch normalizeHeader(value) {
+	case "pegawai":
+		return "employee"
+	case "pkwt":
+		return "contract_worker"
 	case "phl":
 		return "daily_worker"
 	case "nasabah":
-		return "self_employed"
-	case "pegawai", "pkwt":
-		return "employee"
+		return "customer"
 	default:
 		return ""
 	}
