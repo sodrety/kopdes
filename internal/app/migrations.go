@@ -280,6 +280,11 @@ var migrations = []migration{
 		Version: 22,
 		Name:    "expand_member_types",
 	},
+	{
+		Version:    24,
+		Name:       "sync_member_types_from_seed_workbook",
+		Statements: memberTypeSyncMigrationStatements,
+	},
 }
 
 func Migrate(db *sql.DB) error {
