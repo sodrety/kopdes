@@ -4144,6 +4144,14 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 		t.Fatalf("expected seeded Bendahara role, got %q", seededRole)
 	}
 	bendaharaToken := fixture.login(t, bendaharaEmail, "password")
+	memberPageReq := httptest.NewRequest(http.MethodGet, "/member/dashboard", nil)
+	memberPageReq.AddCookie(fixture.browserLogin(t, bendaharaEmail, "password"))
+	memberPageRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(memberPageRec, memberPageReq)
+	if memberPageRec.Code != http.StatusOK || !strings.Contains(memberPageRec.Body.String(), `href="/admin/transactions"`) || strings.Contains(memberPageRec.Body.String(), `href="/admin/dashboard"`) {
+		t.Fatalf("expected Bendahara admin switch to target permitted transactions page, got %d: %s", memberPageRec.Code, memberPageRec.Body.String())
+	}
+
 	pageReq := httptest.NewRequest(http.MethodGet, "/admin/transactions", nil)
 	pageReq.Header.Set("Authorization", "Bearer "+bendaharaToken)
 	pageRec := httptest.NewRecorder()

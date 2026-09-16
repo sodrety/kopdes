@@ -210,14 +210,14 @@
 
 {{define "admin-nav"}}
       <nav class="sidebar-nav">
-        <div class="sidebar-nav-group">
+        {{if index .Permissions "dashboard.view"}}<div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_overview"}}</span>
-          {{if index .Permissions "dashboard.view"}}<a class="sidebar-link {{if eq .Active "dashboard"}}active{{end}}" href="/admin/dashboard" title="{{t .Lang "dashboard"}}"><i class="sidebar-icon" data-lucide="layout-dashboard"></i><span class="sidebar-label">{{t .Lang "dashboard"}}</span></a>{{end}}
-        </div>
-        <div class="sidebar-nav-group">
+          <a class="sidebar-link {{if eq .Active "dashboard"}}active{{end}}" href="/admin/dashboard" title="{{t .Lang "dashboard"}}"><i class="sidebar-icon" data-lucide="layout-dashboard"></i><span class="sidebar-label">{{t .Lang "dashboard"}}</span></a>
+        </div>{{end}}
+        {{if index .Permissions "members.view"}}<div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_master_data"}}</span>
-          {{if index .Permissions "members.view"}}<a class="sidebar-link {{if eq .Active "members"}}active{{end}}" href="/admin/members" title="{{t .Lang "members"}}"><i class="sidebar-icon" data-lucide="users"></i><span class="sidebar-label">{{t .Lang "members"}}</span></a>{{end}}
-        </div>
+          <a class="sidebar-link {{if eq .Active "members"}}active{{end}}" href="/admin/members" title="{{t .Lang "members"}}"><i class="sidebar-icon" data-lucide="users"></i><span class="sidebar-label">{{t .Lang "members"}}</span></a>
+        </div>{{end}}
         <div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_operations"}}</span>
           {{if index .Permissions "savings.view"}}<a class="sidebar-link {{if eq .Active "savings"}}active{{end}}" href="/admin/savings" title="{{t .Lang "nav_simpanan"}}"><i class="sidebar-icon" data-lucide="piggy-bank"></i><span class="sidebar-label">{{t .Lang "nav_simpanan"}}</span></a>{{end}}
@@ -285,7 +285,7 @@
         <a href="/member/withdrawal-requests">{{t .Lang "withdrawal_requests"}}</a>
         <a href="/member/loan-requests">{{t .Lang "loan_requests"}}</a>
         <a href="/member/notifications">{{t .Lang "notifications"}}{{if gt .UnreadNotifications 0}} ({{.UnreadNotifications}}){{end}}</a>
-        {{if ne .Role "member"}}<a href="/admin/dashboard">{{t .Lang "switch_admin_area"}}</a>{{end}}
+        {{if index .Permissions "dashboard.view"}}<a href="/admin/dashboard">{{t .Lang "switch_admin_area"}}</a>{{else if index .Permissions "transactions.view"}}<a href="/admin/transactions">{{t .Lang "switch_admin_area"}}</a>{{end}}
       </nav>
 {{end}}
 
