@@ -186,7 +186,10 @@
     var group = amountField.dataset.rupiahGroup || form.dataset.rupiahGroup || ",";
     var totalObligation = amount + fee.total;
     var parts = [];
-    if (fee.monthly !== null) {
+    if (form.dataset.monthlyInstallmentLabel) {
+      var monthlyInstallment = totalObligation / BigInt(duration);
+      parts.push(form.dataset.monthlyInstallmentLabel + ": " + formatRupiahDigits(monthlyInstallment, group));
+    } else if (fee.monthly !== null) {
       parts.push((form.dataset.monthlyAdminFeeLabel || "Monthly admin fee") + ": " + formatRupiahDigits(fee.monthly, group));
     }
     parts.push((form.dataset.totalAdminFeeLabel || "Total admin fee") + ": " + formatRupiahDigits(fee.total, group));

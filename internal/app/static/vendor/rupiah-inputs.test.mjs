@@ -141,7 +141,7 @@ test("Pinjaman requested_amount formats while typing and submits normalized digi
   assert.equal(parameters.requested_amount, "1250000");
 });
 
-function loanPreviewHarness({ type = "regular", group = ",", amount = "", duration = "" } = {}) {
+function loanPreviewHarness({ type = "regular", group = ",", amount = "", duration = "", monthlyInstallmentLabel = "" } = {}) {
   const documentListeners = new Map();
   const formListeners = new Map();
   const typeField = { value: type };
@@ -151,6 +151,7 @@ function loanPreviewHarness({ type = "regular", group = ",", amount = "", durati
   const form = {
     dataset: {
       monthlyAdminFeeLabel: "Monthly admin fee",
+      monthlyInstallmentLabel,
       totalAdminFeeLabel: "Total admin fee",
       totalObligationLabel: "Total obligation",
       rupiahGroup: group
@@ -208,6 +209,27 @@ test("Pinjaman preview fixes Paylater tenor to one month and rounds fractional R
   assert.equal(browser.durationField.value, "1");
   assert.equal(browser.output.hidden, false);
   assert.equal(browser.output.textContent, "Total admin fee: Rp 62 · Total obligation: Rp 1,292");
+});
+
+test("Anggota loan preview shows monthly installment instead of monthly admin fee", () => {
+  const browser = loanPreviewHarness({
+    type: "regular",
+    amount: "Rp 30,000,000",
+    duration: "24",
+    monthlyInstallmentLabel: "Monthly installment"
+  });
+  assert.equal(browser.output.textContent, "Monthly installment: Rp 1,575,000 · Total admin fee: Rp 7,800,000 · Total obligation: Rp 37,800,000");
+});
+
+test("Anggota loan preview includes monthly installment for one-time-fee loans", () => {
+  const browser = loanPreviewHarness({
+    type: "secondary_goods",
+    group: ".",
+    amount: "Rp 1.000.001",
+    duration: "12",
+    monthlyInstallmentLabel: "Cicilan per bulan"
+  });
+  assert.equal(browser.output.textContent, "Cicilan per bulan: Rp 100.000 · Total admin fee: Rp 200.000 · Total obligation: Rp 1.200.001");
 });
 
 for (const locale of [
