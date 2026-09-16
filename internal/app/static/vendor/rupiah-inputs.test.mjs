@@ -68,6 +68,16 @@ for (const locale of [
       }
     });
 
+    test(`${workflow} keeps formatting while entering digits continuously in ${locale.name}`, () => {
+      const browser = browserHarness({ group: locale.group });
+      for (const digit of "1112312311") {
+        browser.field.value += digit;
+        browser.field.dispatch("input");
+      }
+      assert.equal(browser.field.value, locale.name === "English" ? "Rp 1,112,312,311" : "Rp 1.112.312.311");
+      assert.equal(browser.field.validationMessage, "");
+    });
+
     test(`${workflow} submits normalized digits without changing the visible ${locale.name} value`, () => {
       const browser = browserHarness({ group: locale.group });
       browser.field.value = "1234567";

@@ -5,12 +5,18 @@
   // values can exceed JavaScript's exact integer range.
   var maximumRupiahAmount = "9223372036854775807";
 
-  function rupiahDigits(value) {
+  function rupiahDigits(value, allowIncompleteGroup) {
     var normalized = (value || "").trim().replace(/^rp\s*/i, "");
     if (/^\d+$/.test(normalized)) {
       return normalized;
     }
     if (/^\d{1,3}([.,]\d{3})+$/.test(normalized) && !(normalized.includes(".") && normalized.includes(","))) {
+      return normalized.replace(/[.,]/g, "");
+    }
+    // While typing after an automatic format, the last group can temporarily
+    // contain more than three digits (for example, "Rp 1,1123"). Treat that
+    // transient value as digits so the next format can regroup it.
+    if (allowIncompleteGroup && /^\d{1,3}(?:[.,]\d{3})*[.,]\d{4,}$/.test(normalized) && !(normalized.includes(".") && normalized.includes(","))) {
       return normalized.replace(/[.,]/g, "");
     }
     return null;
@@ -97,7 +103,7 @@
     }
     var cursor = typeof field.selectionStart === "number" ? field.selectionStart : null;
     var digitsAtCursor = cursor === null ? null : digitsBeforeCursor(field.value, cursor);
-    var digits = rupiahDigits(field.value);
+    var digits = rupiahDigits(field.value, true);
     if (digits === null || !/[1-9]/.test(digits)) {
       setError(field, field.dataset.rupiahInvalid);
       return;
