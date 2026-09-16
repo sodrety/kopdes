@@ -701,16 +701,19 @@ func addManualCashTransactionTables(tx *sql.Tx, isSQLite bool) error {
 			('cash-out-biaya-bank','cash_out','Biaya Bank'),
 			('cash-out-pemeliharaan','cash_out','Pemeliharaan'),
 			('cash-out-pengeluaran-lainnya','cash_out','Pengeluaran Lainnya')`,
-		`CREATE TRIGGER protect_manual_cash_transactions_immutable
-			 BEFORE UPDATE ON manual_cash_transactions
-			 BEGIN SELECT RAISE(ABORT, 'manual cash transactions are immutable'); END`,
-		`CREATE TRIGGER protect_manual_cash_transactions_delete
-			 BEFORE DELETE ON manual_cash_transactions
-			 BEGIN SELECT RAISE(ABORT, 'manual cash transactions are immutable'); END`,
-		`CREATE TRIGGER protect_cash_transaction_category_name
-			 BEFORE UPDATE OF name ON cash_transaction_categories
-			 WHEN EXISTS (SELECT 1 FROM manual_cash_transactions WHERE category_id=OLD.id)
-			 BEGIN SELECT RAISE(ABORT, 'used cash transaction category names are immutable'); END`,
+	}
+	if isSQLite {
+		statements = append(statements,
+			`CREATE TRIGGER protect_manual_cash_transactions_immutable
+				 BEFORE UPDATE ON manual_cash_transactions
+				 BEGIN SELECT RAISE(ABORT, 'manual cash transactions are immutable'); END`,
+			`CREATE TRIGGER protect_manual_cash_transactions_delete
+				 BEFORE DELETE ON manual_cash_transactions
+				 BEGIN SELECT RAISE(ABORT, 'manual cash transactions are immutable'); END`,
+			`CREATE TRIGGER protect_cash_transaction_category_name
+				 BEFORE UPDATE OF name ON cash_transaction_categories
+				 WHEN EXISTS (SELECT 1 FROM manual_cash_transactions WHERE category_id=OLD.id)
+				 BEGIN SELECT RAISE(ABORT, 'used cash transaction category names are immutable'); END`)
 	}
 	for _, statement := range statements {
 		if _, err := tx.Exec(statement); err != nil {
