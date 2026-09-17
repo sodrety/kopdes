@@ -338,6 +338,10 @@ func (s *Server) adminOperationalReports() (AdminOperationalReports, error) {
 	}
 	savingsTotal := sumChartValues(savings)
 	remainingLoan := chartValueByLabel(loanExposure, "remaining_balance")
+	comparisonSeries, err := s.dashboardSavingsLoanComparisonSeries(time.Now().In(jakartaLocation).Year())
+	if err != nil {
+		return AdminOperationalReports{}, err
+	}
 	manualNet, err := s.manualCashNet()
 	if err != nil {
 		return AdminOperationalReports{}, err
@@ -355,7 +359,7 @@ func (s *Server) adminOperationalReports() (AdminOperationalReports, error) {
 		WithdrawalsByStatus:   withdrawals,
 		LoanExposure:          loanExposure,
 		RepaymentProgress:     repaymentProgress,
-		SavingsLoanComparison: dashboardSavingsLoanComparisonChart(savingsTotal, remainingLoan),
+		SavingsLoanComparison: dashboardSavingsLoanComparisonChart(comparisonSeries.Savings, comparisonSeries.Loans),
 		BalanceTrend:          dashboardBalanceTrendChart(balance),
 		SavingsByMember:       savingsByMember,
 		WithdrawalsByMember:   withdrawalsByMember,
@@ -798,14 +802,211 @@ func chartValueByLabel(segments ChartSegments, label string) int64 {
 	return 0
 }
 
-func dashboardSavingsLoanComparisonChart(savingsTotal, loanTotal int64) LineChart {
-	months := []string{"Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"}
-	maxValue := nicePositiveAxisMax(maxInt64(savingsTotal, loanTotal))
-	scaled, scaledMaximum := scaleChartMoney([]int64{savingsTotal, loanTotal}, maxValue)
-	seriesValues := [][]int{
-		repeatedValues(scaled[0], len(months)),
-		repeatedValues(scaled[1], len(months)),
+type dashboardSavingsLoanComparisonSeries struct {
+	Savings []int64
+	Loans   []int64
+}
+
+type dashboardSavingsChartEvent struct {
+	Date  string
+	Delta int64
+}
+
+type dashboardLoanChartRepayment struct {
+	Date   string
+	Amount int64
+}
+
+type dashboardLoanChartRecord struct {
+	ID         string
+	StartDate  string
+	Obligation int64
+	Repayments []dashboardLoanChartRepayment
+}
+
+func (s *Server) dashboardSavingsLoanComparisonSeries(year int) (dashboardSavingsLoanComparisonSeries, error) {
+	monthEnds := make([]string, 12)
+	for index := range monthEnds {
+		monthEnds[index] = time.Date(year, time.Month(index+2), 0, 0, 0, 0, 0, jakartaLocation).Format("2006-01-02")
 	}
+	lastMonthEnd := monthEnds[len(monthEnds)-1]
+
+	savingsRows, err := s.db.Query(`SELECT type, amount, record_date FROM saving_records WHERE record_date <= $1 ORDER BY record_date, id`, lastMonthEnd)
+	if err != nil {
+		return dashboardSavingsLoanComparisonSeries{}, err
+	}
+	var savingsEvents []dashboardSavingsChartEvent
+	for savingsRows.Next() {
+		var recordType, recordDate string
+		var amount int64
+		if err := savingsRows.Scan(&recordType, &amount, &recordDate); err != nil {
+			_ = savingsRows.Close()
+			return dashboardSavingsLoanComparisonSeries{}, err
+		}
+		if _, err := parseLoanDate(recordDate); err != nil {
+			_ = savingsRows.Close()
+			return dashboardSavingsLoanComparisonSeries{}, fmt.Errorf("invalid saving record date %q: %w", recordDate, err)
+		}
+		delta := amount
+		if recordType == "withdrawal" {
+			delta = -amount
+		}
+		savingsEvents = append(savingsEvents, dashboardSavingsChartEvent{Date: recordDate, Delta: delta})
+	}
+	if err := savingsRows.Err(); err != nil {
+		_ = savingsRows.Close()
+		return dashboardSavingsLoanComparisonSeries{}, err
+	}
+	if err := savingsRows.Close(); err != nil {
+		return dashboardSavingsLoanComparisonSeries{}, err
+	}
+
+	savings := make([]int64, len(monthEnds))
+	var savingsBalance int64
+	eventIndex := 0
+	for monthIndex, monthEnd := range monthEnds {
+		for eventIndex < len(savingsEvents) && savingsEvents[eventIndex].Date <= monthEnd {
+			savingsBalance, err = checkedReportAdd(savingsBalance, savingsEvents[eventIndex].Delta)
+			if err != nil {
+				return dashboardSavingsLoanComparisonSeries{}, err
+			}
+			eventIndex++
+		}
+		savings[monthIndex] = savingsBalance
+	}
+
+	loanRows, err := s.db.Query(`SELECT id, start_date, approved_at, approved_amount, total_obligation FROM loans WHERE status <> 'cancelled'`)
+	if err != nil {
+		return dashboardSavingsLoanComparisonSeries{}, err
+	}
+	loans := make([]dashboardLoanChartRecord, 0)
+	loanIndexByID := make(map[string]int)
+	for loanRows.Next() {
+		var loan dashboardLoanChartRecord
+		var approvedAt string
+		var approvedAmount, totalObligation int64
+		if err := loanRows.Scan(&loan.ID, &loan.StartDate, &approvedAt, &approvedAmount, &totalObligation); err != nil {
+			_ = loanRows.Close()
+			return dashboardSavingsLoanComparisonSeries{}, err
+		}
+		loan.StartDate, err = dashboardLoanChartStartDate(loan.StartDate, approvedAt)
+		if err != nil {
+			_ = loanRows.Close()
+			return dashboardSavingsLoanComparisonSeries{}, err
+		}
+		loan.Obligation = totalObligation
+		if loan.Obligation == 0 {
+			loan.Obligation = approvedAmount
+		}
+		loanIndexByID[loan.ID] = len(loans)
+		loans = append(loans, loan)
+	}
+	if err := loanRows.Err(); err != nil {
+		_ = loanRows.Close()
+		return dashboardSavingsLoanComparisonSeries{}, err
+	}
+	if err := loanRows.Close(); err != nil {
+		return dashboardSavingsLoanComparisonSeries{}, err
+	}
+
+	repaymentRows, err := s.db.Query(`SELECT lr.loan_id, lr.amount, lr.record_date
+		FROM loan_repayments lr
+		INNER JOIN loans l ON l.id = lr.loan_id
+		WHERE l.status <> 'cancelled' AND lr.record_date <= $1
+		ORDER BY lr.record_date, lr.id`, lastMonthEnd)
+	if err != nil {
+		return dashboardSavingsLoanComparisonSeries{}, err
+	}
+	for repaymentRows.Next() {
+		var loanID, recordDate string
+		var amount int64
+		if err := repaymentRows.Scan(&loanID, &amount, &recordDate); err != nil {
+			_ = repaymentRows.Close()
+			return dashboardSavingsLoanComparisonSeries{}, err
+		}
+		if _, err := parseLoanDate(recordDate); err != nil {
+			_ = repaymentRows.Close()
+			return dashboardSavingsLoanComparisonSeries{}, fmt.Errorf("invalid loan repayment date %q: %w", recordDate, err)
+		}
+		if index, ok := loanIndexByID[loanID]; ok {
+			loans[index].Repayments = append(loans[index].Repayments, dashboardLoanChartRepayment{Date: recordDate, Amount: amount})
+		}
+	}
+	if err := repaymentRows.Err(); err != nil {
+		_ = repaymentRows.Close()
+		return dashboardSavingsLoanComparisonSeries{}, err
+	}
+	if err := repaymentRows.Close(); err != nil {
+		return dashboardSavingsLoanComparisonSeries{}, err
+	}
+
+	loanBalances := make([]int64, len(monthEnds))
+	for _, loan := range loans {
+		if loan.StartDate > lastMonthEnd {
+			continue
+		}
+		var paid int64
+		repaymentIndex := 0
+		for monthIndex, monthEnd := range monthEnds {
+			for repaymentIndex < len(loan.Repayments) && loan.Repayments[repaymentIndex].Date <= monthEnd {
+				paid, err = checkedReportAdd(paid, loan.Repayments[repaymentIndex].Amount)
+				if err != nil {
+					return dashboardSavingsLoanComparisonSeries{}, err
+				}
+				repaymentIndex++
+			}
+			if loan.StartDate > monthEnd {
+				continue
+			}
+			outstanding, err := checkedReportSub(loan.Obligation, paid)
+			if err != nil {
+				return dashboardSavingsLoanComparisonSeries{}, err
+			}
+			if outstanding < 0 {
+				outstanding = 0
+			}
+			loanBalances[monthIndex], err = checkedReportAdd(loanBalances[monthIndex], outstanding)
+			if err != nil {
+				return dashboardSavingsLoanComparisonSeries{}, err
+			}
+		}
+	}
+
+	return dashboardSavingsLoanComparisonSeries{Savings: savings, Loans: loanBalances}, nil
+}
+
+func dashboardLoanChartStartDate(startDate, approvedAt string) (string, error) {
+	if startDate != "" {
+		if _, err := parseLoanDate(startDate); err != nil {
+			return "", err
+		}
+		return startDate, nil
+	}
+	if len(approvedAt) >= len("2006-01-02") {
+		candidate := approvedAt[:len("2006-01-02")]
+		if _, err := parseLoanDate(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	approved, err := parseDatabaseTime(approvedAt)
+	if err != nil {
+		return "", fmt.Errorf("invalid loan approval date %q: %w", approvedAt, err)
+	}
+	return approved.In(jakartaLocation).Format("2006-01-02"), nil
+}
+
+func dashboardSavingsLoanComparisonChart(savingsValues, loanValues []int64) LineChart {
+	months := []string{"Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"}
+	savingsSeries := make([]int64, len(months))
+	loanSeries := make([]int64, len(months))
+	copy(savingsSeries, savingsValues)
+	copy(loanSeries, loanValues)
+	maxValue := int64(0)
+	for _, value := range append(savingsSeries, loanSeries...) {
+		maxValue = maxInt64(maxValue, value)
+	}
+	maxValue = nicePositiveAxisMax(maxValue)
+	scaled, scaledMaximum := scaleChartMoney(append(savingsSeries, loanSeries...), maxValue)
 	return LineChart{
 		TitleKey:    "savings_loans_comparison",
 		TitleSuffix: fmt.Sprintf("(%d)", time.Now().Year()),
@@ -816,8 +1017,8 @@ func dashboardSavingsLoanComparisonChart(savingsTotal, loanTotal int64) LineChar
 			{Label: compactRupiahAxisLabel(0), X: 58, Y: 234},
 		},
 		Series: []LineChartSeries{
-			lineChartSeries("savings", "chart-line-simpanan", seriesValues[0], 0, scaledMaximum),
-			lineChartSeries("pinjaman", "chart-line-pinjaman", seriesValues[1], 0, scaledMaximum),
+			lineChartSeries("savings", "chart-line-simpanan", scaled[:len(months)], 0, scaledMaximum),
+			lineChartSeries("pinjaman", "chart-line-pinjaman", scaled[len(months):], 0, scaledMaximum),
 		},
 	}
 }

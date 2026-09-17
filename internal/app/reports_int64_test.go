@@ -18,7 +18,13 @@ func TestFinancialChartsKeepBIGINTTotalsAndScaleOnlyCoordinates(t *testing.T) {
 		t.Fatalf("unexpected overflow-safe percentages: %+v", segments)
 	}
 
-	chart := dashboardSavingsLoanComparisonChart(3_000_000_000, 4_077_000_000)
+	savings := make([]int64, 12)
+	loans := make([]int64, 12)
+	for index := range savings {
+		savings[index] = 3_000_000_000
+		loans[index] = 4_077_000_000
+	}
+	chart := dashboardSavingsLoanComparisonChart(savings, loans)
 	if len(chart.Series) != 2 || chart.Series[1].Points == "" {
 		t.Fatalf("large monetary chart did not render bounded coordinates: %+v", chart)
 	}
@@ -29,6 +35,23 @@ func TestFinancialChartsKeepBIGINTTotalsAndScaleOnlyCoordinates(t *testing.T) {
 	scaled, maximum := scaleChartMoney([]int64{math.MaxInt64, -math.MaxInt64}, math.MaxInt64)
 	if maximum <= 0 || scaled[0] <= 0 || scaled[1] >= 0 {
 		t.Fatalf("MaxInt64 chart scaling failed: values=%v maximum=%d", scaled, maximum)
+	}
+}
+
+func TestSavingsLoanComparisonChartPlotsMonthlyValues(t *testing.T) {
+	savings := make([]int64, 12)
+	loans := make([]int64, 12)
+	for index := range savings {
+		savings[index] = int64(index) * 100_000
+		loans[index] = int64(11-index) * 100_000
+	}
+
+	chart := dashboardSavingsLoanComparisonChart(savings, loans)
+	if len(chart.Series) != 2 || len(chart.Series[0].Dots) != 12 || len(chart.Series[1].Dots) != 12 {
+		t.Fatalf("monthly chart series have wrong shape: %+v", chart.Series)
+	}
+	if chart.Series[0].Dots[0].Y == chart.Series[0].Dots[11].Y || chart.Series[1].Dots[0].Y == chart.Series[1].Dots[11].Y {
+		t.Fatalf("monthly chart flattened a changing series: %+v", chart.Series)
 	}
 }
 
