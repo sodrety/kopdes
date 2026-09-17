@@ -1,8 +1,10 @@
 package app_test
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +14,9 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-SLIP-001","full_name":"Slip Member","join_date":"2026-01-01","status":"active","email":"slip-member@coop.test","password":"member-password"}`)
-	fixture.recordSavingInCategoryAtDate(t, adminToken, member.ID, "pokok", 5000, "2026-01-01", "SLIP-POKOK", "Pokok")
-	fixture.recordSavingInCategoryAtDate(t, adminToken, member.ID, "wajib", 100000, "2026-01-15", "SLIP-WAJIB", "Wajib")
-	fixture.recordSavingInCategoryAtDate(t, adminToken, member.ID, "sukarela", 250000, "2026-02-15", "SLIP-SUKARELA", "Sukarela")
+	fixture.recordMemberSlipSavingInCategoryAtDate(t, adminToken, member.ID, "pokok", 5000, "2026-01-01", "SLIP-POKOK", "Pokok")
+	fixture.recordMemberSlipSavingInCategoryAtDate(t, adminToken, member.ID, "wajib", 100000, "2026-01-15", "SLIP-WAJIB", "Wajib")
+	fixture.recordMemberSlipSavingInCategoryAtDate(t, adminToken, member.ID, "sukarela", 250000, "2026-02-15", "SLIP-SUKARELA", "Sukarela")
 	memberToken := fixture.login(t, "slip-member@coop.test", "member-password")
 	fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 500000, 3), 500000, 3)
 	cookie := fixture.browserLogin(t, "slip-member@coop.test", "member-password")
@@ -69,6 +71,27 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 		if !strings.Contains(loanResponse.Body.String(), text) {
 			t.Fatalf("loan slip missing %q", text)
 		}
+	}
+}
+
+func (f testFixture) recordMemberSlipSavingInCategoryAtDate(t *testing.T, adminToken, memberID, category string, amount int, recordDate, referenceNo, note string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{
+		"member_id":"`+memberID+`",
+		"type":"deposit",
+		"category":"`+category+`",
+		"amount":`+strconv.Itoa(amount)+`,
+		"record_date":"`+recordDate+`",
+		"reference_no":"`+referenceNo+`",
+		"note":"`+note+`"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+
+	f.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected slip saving status 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
