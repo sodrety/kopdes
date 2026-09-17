@@ -73,7 +73,7 @@ func TestRegularLoanAdminFeePostgresMigrationBackfillsLegacyTotal(t *testing.T) 
 	deletePostgresLoanRequestFixture(t, db, "request-overflow")
 	insertPostgresOriginLoanRequest(t, db, "request-incoherent", 1000000, 12, "Tamper")
 	insertPostgresLoanRequestApproval(t, db, "request-incoherent", "manager")
-	if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_i',proposed_approved_amount=1000000,proposed_duration_months=12,proposed_start_date='2026-01-01',proposed_admin_fee_policy='regular_tiered_monthly_v1',proposed_monthly_admin_fee=10000,proposed_total_admin_fee=120001,proposed_total_obligation=1120001 WHERE id='request-incoherent'`); err == nil {
+	if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_ii',proposed_approved_amount=1000000,proposed_duration_months=12,proposed_start_date='2026-01-01',proposed_admin_fee_policy='regular_tiered_monthly_v1',proposed_monthly_admin_fee=10000,proposed_total_admin_fee=120001,proposed_total_obligation=1120001 WHERE id='request-incoherent'`); err == nil {
 		t.Fatal("PostgreSQL allowed an arithmetically incoherent proposed fee snapshot")
 	}
 	deletePostgresLoanRequestFixture(t, db, "request-incoherent")
@@ -81,7 +81,7 @@ func TestRegularLoanAdminFeePostgresMigrationBackfillsLegacyTotal(t *testing.T) 
 		requestID := "request-wrong-tier-" + status
 		insertPostgresOriginLoanRequest(t, db, requestID, 30000000, 24, "Wrong policy")
 		insertPostgresLoanRequestApproval(t, db, requestID, "manager")
-		if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_i',proposed_approved_amount=30000000,proposed_duration_months=24,proposed_start_date='2026-01-01',proposed_admin_fee_policy='regular_tiered_monthly_v1',proposed_monthly_admin_fee=300000,proposed_total_admin_fee=7200000,proposed_total_obligation=37200000 WHERE id=$1`, requestID); err == nil {
+		if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_ii',proposed_approved_amount=30000000,proposed_duration_months=24,proposed_start_date='2026-01-01',proposed_admin_fee_policy='regular_tiered_monthly_v1',proposed_monthly_admin_fee=300000,proposed_total_admin_fee=7200000,proposed_total_obligation=37200000 WHERE id=$1`, requestID); err == nil {
 			t.Fatalf("PostgreSQL accepted wrong Regular v1 formula for %s snapshot", status)
 		}
 		deletePostgresLoanRequestFixture(t, db, requestID)
@@ -261,7 +261,7 @@ func assertPostgresV16PolicyAndAggregateConstraints(t *testing.T, db *sql.DB, pr
 	t.Helper()
 	insertPostgresOriginLoanRequest(t, db, prefix+"-wrong-tier", 30000000, 24, "Wrong policy")
 	insertPostgresLoanRequestApproval(t, db, prefix+"-wrong-tier", "manager")
-	if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_i',proposed_approved_amount=30000000,proposed_duration_months=24,proposed_start_date='2026-01-01',proposed_admin_fee_policy='regular_tiered_monthly_v1',proposed_monthly_admin_fee=300000,proposed_total_admin_fee=7200000,proposed_total_obligation=37200000 WHERE id=$1`, prefix+"-wrong-tier"); err == nil {
+	if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_ii',proposed_approved_amount=30000000,proposed_duration_months=24,proposed_start_date='2026-01-01',proposed_admin_fee_policy='regular_tiered_monthly_v1',proposed_monthly_admin_fee=300000,proposed_total_admin_fee=7200000,proposed_total_obligation=37200000 WHERE id=$1`, prefix+"-wrong-tier"); err == nil {
 		t.Fatalf("%s migration accepted wrong Regular v1 formula", prefix)
 	}
 	deletePostgresLoanRequestFixture(t, db, prefix+"-wrong-tier")
@@ -315,7 +315,7 @@ func insertPostgresPendingSnapshottedLoanRequest(t *testing.T, db *sql.DB, reque
 	t.Helper()
 	insertPostgresOriginLoanRequest(t, db, requestID, amount, duration, "Correct policy")
 	insertPostgresLoanRequestApproval(t, db, requestID, "manager")
-	if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_i',proposed_approved_amount=$2,proposed_duration_months=$3,proposed_start_date='2026-01-01',proposed_admin_fee_policy='regular_tiered_monthly_v1',proposed_monthly_admin_fee=$4,proposed_total_admin_fee=$5,proposed_total_obligation=$6 WHERE id=$1`, requestID, amount, duration, monthlyFee, totalFee, obligation); err != nil {
+	if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_ii',proposed_approved_amount=$2,proposed_duration_months=$3,proposed_start_date='2026-01-01',proposed_admin_fee_policy='regular_tiered_monthly_v1',proposed_monthly_admin_fee=$4,proposed_total_admin_fee=$5,proposed_total_obligation=$6 WHERE id=$1`, requestID, amount, duration, monthlyFee, totalFee, obligation); err != nil {
 		t.Fatalf("snapshot Manager proposal for %s: %v", requestID, err)
 	}
 }
@@ -323,11 +323,11 @@ func insertPostgresPendingSnapshottedLoanRequest(t *testing.T, db *sql.DB, reque
 func insertPostgresApprovedLoanRequest(t *testing.T, db *sql.DB, requestID string, amount int64, duration int, monthlyFee, totalFee, obligation int64) {
 	t.Helper()
 	insertPostgresPendingSnapshottedLoanRequest(t, db, requestID, amount, duration, monthlyFee, totalFee, obligation)
-	insertPostgresLoanRequestApproval(t, db, requestID, "ketua_i")
-	if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_ii' WHERE id=$1`, requestID); err != nil {
-		t.Fatalf("advance %s to Ketua II: %v", requestID, err)
-	}
 	insertPostgresLoanRequestApproval(t, db, requestID, "ketua_ii")
+	if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_i' WHERE id=$1`, requestID); err != nil {
+		t.Fatalf("advance %s to Ketua I: %v", requestID, err)
+	}
+	insertPostgresLoanRequestApproval(t, db, requestID, "ketua_i")
 	if _, err := db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_utama' WHERE id=$1`, requestID); err != nil {
 		t.Fatalf("advance %s to Ketua Utama: %v", requestID, err)
 	}
@@ -461,7 +461,7 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 	}
 	approveConcurrently("manager-pg@coop.test", managerPayload)
 	assertRowCount(t, db, `SELECT COUNT(*) FROM loan_request_approvals WHERE request_id='`+requestID+`' AND stage='manager'`, 1)
-	for index, stage := range []struct{ email, payload string }{{"ketua-i-pg@coop.test", `{}`}, {"ketua-ii-pg@coop.test", `{}`}} {
+	for index, stage := range []struct{ email, payload string }{{"ketua-ii-pg@coop.test", `{}`}, {"ketua-i-pg@coop.test", `{}`}} {
 		approved := request(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", login(stage.email), "application/json", stage.payload)
 		if approved.Code != http.StatusOK {
 			t.Fatalf("PostgreSQL approval stage %d: %d %s", index, approved.Code, approved.Body.String())

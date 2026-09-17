@@ -294,6 +294,10 @@ var migrations = []migration{
 		Name:       "sync_member_types_case_insensitive",
 		Statements: memberTypeCaseInsensitiveSyncMigrationStatements,
 	},
+	{
+		Version: 27,
+		Name:    "change_loan_approval_hierarchy",
+	},
 }
 
 func Migrate(db *sql.DB) error {
@@ -481,6 +485,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 	}
 	if migration.Version == 23 {
 		if err := addManualCashTransactions(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 27 {
+		if err := changeLoanApprovalHierarchy(tx, isSQLite); err != nil {
 			return err
 		}
 	}
@@ -1025,7 +1034,7 @@ func sqliteLoanStateIntegrityStatements() []string {
 			 WHEN NEW.status='approved' AND (NEW.current_approval_stage IS NOT NULL OR NEW.proposed_admin_fee_policy IS NULL) THEN RAISE(ABORT,'invalid approved loan request state')
 			 WHEN NEW.status IN ('rejected','cancelled') AND NEW.current_approval_stage IS NOT NULL THEN RAISE(ABORT,'invalid terminal loan request state') END;
 			SELECT CASE WHEN OLD.status='pending' AND NEW.status='pending' AND OLD.current_approval_stage=NEW.current_approval_stage THEN NULL
-			 WHEN OLD.status='pending' AND NEW.status='pending' AND ((OLD.current_approval_stage='manager' AND NEW.current_approval_stage='ketua_i') OR (OLD.current_approval_stage='ketua_i' AND NEW.current_approval_stage='ketua_ii') OR (OLD.current_approval_stage='ketua_ii' AND NEW.current_approval_stage='ketua_utama')) AND EXISTS (SELECT 1 FROM loan_request_approvals a WHERE a.request_id=OLD.id AND a.stage=OLD.current_approval_stage AND a.decision='approved') THEN NULL
+			 WHEN OLD.status='pending' AND NEW.status='pending' AND ((OLD.current_approval_stage='manager' AND NEW.current_approval_stage='ketua_ii') OR (OLD.current_approval_stage='ketua_ii' AND NEW.current_approval_stage='ketua_i') OR (OLD.current_approval_stage='ketua_i' AND NEW.current_approval_stage='ketua_utama')) AND EXISTS (SELECT 1 FROM loan_request_approvals a WHERE a.request_id=OLD.id AND a.stage=OLD.current_approval_stage AND a.decision='approved') THEN NULL
 			 WHEN OLD.status='pending' AND NEW.status='approved' AND OLD.current_approval_stage='ketua_utama' AND EXISTS (SELECT 1 FROM loan_request_approvals a WHERE a.request_id=OLD.id AND a.stage='ketua_utama' AND a.decision='approved') THEN NULL
 			 WHEN OLD.status='pending' AND NEW.status='rejected' AND EXISTS (SELECT 1 FROM loan_request_approvals a WHERE a.request_id=OLD.id AND a.stage=OLD.current_approval_stage AND a.decision='rejected') THEN NULL
 			 WHEN OLD.status='pending' AND NEW.status='cancelled' THEN NULL
@@ -1072,7 +1081,7 @@ func postgresLoanStateIntegrityStatements() []string {
 				SELECT EXISTS (SELECT 1 FROM loan_request_approvals a WHERE a.request_id=OLD.id AND a.stage=OLD.current_approval_stage AND a.decision='approved') INTO approved_current;
 				IF NOT (
 					(OLD.status='pending' AND NEW.status='pending' AND OLD.current_approval_stage IS NOT DISTINCT FROM NEW.current_approval_stage)
-					OR (OLD.status='pending' AND NEW.status='pending' AND ((OLD.current_approval_stage='manager' AND NEW.current_approval_stage='ketua_i') OR (OLD.current_approval_stage='ketua_i' AND NEW.current_approval_stage='ketua_ii') OR (OLD.current_approval_stage='ketua_ii' AND NEW.current_approval_stage='ketua_utama')) AND approved_current)
+					OR (OLD.status='pending' AND NEW.status='pending' AND ((OLD.current_approval_stage='manager' AND NEW.current_approval_stage='ketua_ii') OR (OLD.current_approval_stage='ketua_ii' AND NEW.current_approval_stage='ketua_i') OR (OLD.current_approval_stage='ketua_i' AND NEW.current_approval_stage='ketua_utama')) AND approved_current)
 					OR (OLD.status='pending' AND NEW.status='approved' AND OLD.current_approval_stage='ketua_utama' AND approved_current)
 					OR (OLD.status='pending' AND NEW.status='rejected' AND EXISTS (SELECT 1 FROM loan_request_approvals a WHERE a.request_id=OLD.id AND a.stage=OLD.current_approval_stage AND a.decision='rejected'))
 					OR (OLD.status='pending' AND NEW.status='cancelled')
@@ -1095,6 +1104,83 @@ func postgresLoanStateIntegrityStatements() []string {
 		END $$`,
 		`CREATE TRIGGER validate_loan_request_provenance BEFORE INSERT ON loans FOR EACH ROW EXECUTE FUNCTION validate_loan_request_provenance()`,
 	}
+}
+
+func changeLoanApprovalHierarchy(tx *sql.Tx, isSQLite bool) error {
+	var loanTablesExist bool
+	if isSQLite {
+		if err := tx.QueryRow(`SELECT COUNT(*)=2 FROM sqlite_master WHERE type='table' AND name IN ('loan_requests','loan_request_approvals')`).Scan(&loanTablesExist); err != nil {
+			return err
+		}
+	} else {
+		if err := tx.QueryRow(`SELECT COUNT(*)=2 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('loan_requests','loan_request_approvals')`).Scan(&loanTablesExist); err != nil {
+			return err
+		}
+	}
+	if !loanTablesExist {
+		return nil
+	}
+
+	rows, err := tx.Query(`SELECT id FROM loan_requests WHERE status='pending' AND current_approval_stage='ketua_i' AND NOT EXISTS (SELECT 1 FROM loan_request_approvals a WHERE a.request_id=loan_requests.id AND a.stage='ketua_ii' AND a.decision='approved')`)
+	if err != nil {
+		return err
+	}
+	var remappedRequestIDs []string
+	for rows.Next() {
+		var requestID string
+		if err := rows.Scan(&requestID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		remappedRequestIDs = append(remappedRequestIDs, requestID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	var dropStatements []string
+	var integrityStatements []string
+	if isSQLite {
+		dropStatements = []string{
+			`DROP TRIGGER IF EXISTS loan_requests_state_integrity`,
+		}
+		statements := sqliteLoanStateIntegrityStatements()
+		integrityStatements = []string{statements[3]}
+	} else {
+		dropStatements = []string{
+			`DROP TRIGGER IF EXISTS validate_loan_request_state_integrity ON loan_requests`,
+			`DROP FUNCTION IF EXISTS validate_loan_request_state_integrity()`,
+		}
+		statements := postgresLoanStateIntegrityStatements()
+		integrityStatements = statements[6:8]
+	}
+	for _, statement := range dropStatements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_ii',updated_at=CURRENT_TIMESTAMP WHERE status='pending' AND current_approval_stage='ketua_i' AND NOT EXISTS (SELECT 1 FROM loan_request_approvals a WHERE a.request_id=loan_requests.id AND a.stage='ketua_ii' AND a.decision='approved')`); err != nil {
+		return err
+	}
+
+	for _, statement := range integrityStatements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	for _, requestID := range remappedRequestIDs {
+		if err := resolveRequestNotifications(tx, "loan", requestID); err != nil {
+			return err
+		}
+		if err := createStageNotification(tx, "loan", requestID, approvalStageKetuaII, "/admin/loan-requests"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func enforceRequiredLoanType(tx *sql.Tx, isSQLite bool) error {

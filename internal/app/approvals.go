@@ -44,6 +44,19 @@ func nextApprovalStage(stage string) string {
 	}
 }
 
+func nextLoanApprovalStage(stage string) string {
+	switch stage {
+	case approvalStageManager:
+		return approvalStageKetuaII
+	case approvalStageKetuaII:
+		return approvalStageKetuaI
+	case approvalStageKetuaI:
+		return approvalStageKetuaUtama
+	default:
+		return ""
+	}
+}
+
 func insertApprovalDecision(tx *sql.Tx, table, requestID string, officer User, decision, note, reason string) error {
 	if table != "loan_request_approvals" && table != "withdrawal_request_approvals" {
 		return fmt.Errorf("unsupported approval table %q", table)

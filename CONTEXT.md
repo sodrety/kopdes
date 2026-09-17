@@ -43,18 +43,18 @@ _Avoid_: Creating a standalone Officer, replacing the Member's User
 The first **Officer Role** in the cooperative authority hierarchy.
 
 **Ketua I**:
-The **Officer Role** immediately above **Manager** and below **Ketua II**.
+The **Officer Role** immediately above **Ketua II** and below **Ketua Utama**.
 _Avoid_: Ketua 1
 
 **Ketua II**:
-The **Officer Role** immediately above **Ketua I** and below **Ketua Utama**.
+The **Officer Role** immediately above **Manager** and below **Ketua I**.
 _Avoid_: Ketua 2
 
 **Ketua Utama**:
 The highest **Officer Role** in the cooperative authority hierarchy.
 
 **Approval Chain**:
-The ordered review of a **Loan Request** or **Penarikan** by **Manager**, **Ketua I**, **Ketua II**, and **Ketua Utama**, regardless of the requested amount.
+The ordered review of a **Loan Request** by **Manager**, **Ketua II**, **Ketua I**, and **Ketua Utama**, or of a **Penarikan** by **Manager**, **Ketua I**, **Ketua II**, and **Ketua Utama**, regardless of the requested amount.
 _Avoid_: Single-admin approval, skipped approval stage
 
 **Rejection**:
@@ -269,7 +269,7 @@ _Avoid_: Renaming stable internal enum values only to match display text
 - A notification has exactly one **Notification Audience** and appears only in its corresponding Member or Admin Area.
 - Every Officer Appointment creation, role change, suspension, and reactivation appends an immutable audit event.
 - An **Officer Role** may be held by many Officers.
-- **Officer Roles** are ordered from lowest to highest authority: **Manager**, **Ketua I**, **Ketua II**, and **Ketua Utama**.
+- **Officer Roles** are ordered from lowest to highest authority: **Manager**, **Ketua II**, **Ketua I**, and **Ketua Utama**.
 - **Bendahara** is an **Officer Role** outside that approval hierarchy and does not receive approval authority from the hierarchy.
 - An Officer accesses the **Admin Area** through the **Operational Permissions** assigned to their **Officer Role**.
 - A higher **Officer Role** does not automatically inherit the **Operational Permissions** of a lower Officer Role.

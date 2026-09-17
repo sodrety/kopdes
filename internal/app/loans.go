@@ -391,7 +391,7 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		}
 	}
 
-	nextStage := nextApprovalStage(officer.Role)
+	nextStage := nextLoanApprovalStage(officer.Role)
 	if nextStage != "" {
 		result, err := tx.Exec(`UPDATE loan_requests SET current_approval_stage=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='pending' AND current_approval_stage=$3`, nextStage, requestID, officer.Role)
 		if err != nil {

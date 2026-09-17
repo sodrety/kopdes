@@ -207,16 +207,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 25 {
-		t.Fatalf("expected twenty-five tracked migrations, got %d", migrationCount)
+	if migrationCount != 26 {
+		t.Fatalf("expected twenty-six tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 25`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 27`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "sync_member_types_case_insensitive" {
-		t.Fatalf("expected latest member type correction migration, got %q", latestName)
+	if latestName != "change_loan_approval_hierarchy" {
+		t.Fatalf("expected latest loan approval hierarchy migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -4329,8 +4329,8 @@ func TestLoanScheduleDetailCorrectionAndOutstandingRules(t *testing.T) {
 	}
 	var loan testLoan
 	for _, credentials := range []struct{ email, password string }{
-		{"ketua-i@coop.test", "password"},
 		{"ketua-ii@coop.test", "password"},
+		{"ketua-i@coop.test", "password"},
 		{"ketua-utama@coop.test", "password"},
 	} {
 		token := fixture.login(t, credentials.email, credentials.password)
@@ -4890,8 +4890,8 @@ func (f testFixture) approveLoanRequest(t *testing.T, adminToken, requestID stri
 		body  string
 	}{
 		{adminToken, managerBody},
-		{f.login(t, "ketua-i@coop.test", "password"), `{}`},
 		{f.login(t, "ketua-ii@coop.test", "password"), `{}`},
+		{f.login(t, "ketua-i@coop.test", "password"), `{}`},
 		{f.login(t, "ketua-utama@coop.test", "password"), `{}`},
 	}
 
@@ -4931,8 +4931,8 @@ func (f testFixture) approveLoanRequestWithStartDate(t *testing.T, adminToken, r
 		body  string
 	}{
 		{adminToken, managerBody},
-		{f.login(t, "ketua-i@coop.test", "password"), `{}`},
 		{f.login(t, "ketua-ii@coop.test", "password"), `{}`},
+		{f.login(t, "ketua-i@coop.test", "password"), `{}`},
 		{f.login(t, "ketua-utama@coop.test", "password"), `{}`},
 	}
 

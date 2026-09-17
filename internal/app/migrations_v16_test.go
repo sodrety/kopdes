@@ -121,8 +121,8 @@ func TestRegularLoanAdminFeeSQLiteRejectsWrongTierFormulaEvenWhenTotalsAreCohere
 		id, stage string
 	}{
 		{"correct-tier-manager", "manager"},
-		{"correct-tier-ketua-i", "ketua_i"},
 		{"correct-tier-ketua-ii", "ketua_ii"},
+		{"correct-tier-ketua-i", "ketua_i"},
 		{"correct-tier-ketua-utama", "ketua_utama"},
 	} {
 		if _, err := db.Exec(`INSERT INTO loan_request_approvals (id,request_id,stage,decision,officer_id,officer_name,officer_role,officer_member_id,officer_member_no) VALUES ($1,'correct-tier',$2,'approved','user-officer','Officer Member',$2,'member-officer','M-015-O')`, approval.id, approval.stage); err != nil {
@@ -131,10 +131,10 @@ func TestRegularLoanAdminFeeSQLiteRejectsWrongTierFormulaEvenWhenTotalsAreCohere
 		var err error
 		switch approval.stage {
 		case "manager":
-			_, err = db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_i' WHERE id='correct-tier'`)
-		case "ketua_i":
 			_, err = db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_ii' WHERE id='correct-tier'`)
 		case "ketua_ii":
+			_, err = db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_i' WHERE id='correct-tier'`)
+		case "ketua_i":
 			_, err = db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_utama' WHERE id='correct-tier'`)
 		case "ketua_utama":
 			_, err = db.Exec(`UPDATE loan_requests SET status='approved',current_approval_stage=NULL WHERE id='correct-tier'`)
