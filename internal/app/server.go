@@ -155,6 +155,8 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.GET("/admin/tagihan", server.requireTagihanManage(), server.adminTagihanPage)
 	router.GET("/admin/officers", server.requirePermission(PermissionOfficersManage), func(c *gin.Context) { c.Redirect(http.StatusSeeOther, "/admin/members") })
 	router.GET("/member/dashboard", server.requireRole("member"), server.memberDashboardPage)
+	router.GET("/member/exports/savings.pdf", server.requireRole("member"), server.memberSavingsSlipPDF)
+	router.GET("/member/exports/loans.pdf", server.requireRole("member"), server.memberLoanSlipPDF)
 	router.GET("/member/profile", server.requireRole("member"), server.memberProfilePage)
 	router.GET("/member/withdrawal-requests", server.requireRole("member"), server.memberWithdrawalRequestsPage)
 	router.GET("/member/loan-requests", server.requireRole("member"), server.memberLoanRequestsPage)
