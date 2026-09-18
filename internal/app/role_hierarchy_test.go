@@ -361,6 +361,67 @@ func TestApprovalNotificationsMoveToNextRoleAndFinishWithMember(t *testing.T) {
 	}
 }
 
+func TestAssigningKetuaIIBackfillsLoanApprovalNotification(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	ketuaUtamaToken := fixture.login(t, "ketua-utama@coop.test", "password")
+
+	if _, err := fixture.db.Exec(`UPDATE officer_appointments SET active=FALSE WHERE id='ketua-ii-user-id'`); err != nil {
+		t.Fatalf("remove existing Ketua II appointment: %v", err)
+	}
+	borrower := fixture.createMember(t, managerToken, `{"member_no":"HIER-LATE-KII","full_name":"Late Ketua II Borrower","join_date":"2026-07-01","status":"active"}`)
+	if _, err := fixture.db.Exec(`UPDATE users SET member_id=$1 WHERE id='member-user-id'`, borrower.ID); err != nil {
+		t.Fatalf("link borrower login: %v", err)
+	}
+	requestID := fixture.createLoanRequest(t, fixture.login(t, "member@coop.test", "password"), 500_000, 5)
+	managerBody := `{"approved_amount":500000,"duration_months":5,"start_date":"` + time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02") + `"}`
+	if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, managerBody); response.Code != http.StatusOK {
+		t.Fatalf("manager approval without Ketua II: %d: %s", response.Code, response.Body.String())
+	}
+
+	lateOfficer := fixture.createMember(t, managerToken, `{"member_no":"HIER-LATE-OFFICER","full_name":"Late Ketua II","join_date":"2026-07-01","status":"active","email":"late-ketua-ii@coop.test","password":"late-password"}`)
+	response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/officers", ketuaUtamaToken, `{"member_id":"`+lateOfficer.ID+`","role":"ketua_ii"}`)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("assign Ketua II after manager approval: %d: %s", response.Code, response.Body.String())
+	}
+
+	lateOfficerToken := fixture.login(t, "late-ketua-ii@coop.test", "late-password")
+	response = hierarchyRequest(fixture, http.MethodGet, "/api/admin/loan-requests?status=pending", lateOfficerToken, "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("late Ketua II loan request list: %d: %s", response.Code, response.Body.String())
+	}
+	var loanList struct {
+		LoanRequests []struct {
+			ID                   string `json:"id"`
+			CurrentApprovalStage string `json:"current_approval_stage"`
+			CanDecide            bool   `json:"can_decide"`
+		} `json:"loan_requests"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &loanList); err != nil {
+		t.Fatalf("decode late Ketua II loan requests: %v", err)
+	}
+	if len(loanList.LoanRequests) != 1 || loanList.LoanRequests[0].ID != requestID || loanList.LoanRequests[0].CurrentApprovalStage != "ketua_ii" || !loanList.LoanRequests[0].CanDecide {
+		t.Fatalf("unexpected late Ketua II loan requests: %+v", loanList.LoanRequests)
+	}
+
+	response = hierarchyRequest(fixture, http.MethodGet, "/api/notifications?audience=officer", lateOfficerToken, "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("late Ketua II notification request: %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Notifications []struct {
+			EventType string `json:"event_type"`
+			Link      string `json:"link"`
+		} `json:"notifications"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode late Ketua II notifications: %v", err)
+	}
+	if len(payload.Notifications) != 1 || payload.Notifications[0].EventType != "approval_stage_ready" || payload.Notifications[0].Link != "/admin/loan-requests" {
+		t.Fatalf("unexpected late Ketua II notifications: %+v", payload.Notifications)
+	}
+}
+
 func TestManagerChangedLoanTermsNotifyMember(t *testing.T) {
 	fixture := newTestFixture(t)
 	managerToken := fixture.login(t, "admin@coop.test", "password")
