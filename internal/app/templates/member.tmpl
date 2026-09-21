@@ -18,13 +18,23 @@
           <p class="field-help">{{t .Lang "member_slip_exports_description"}}</p>
         </div>
       </div>
-      <div class="content-grid content-grid-two">
-        <form class="form-panel" method="get" action="/member/exports/savings.pdf">
-          <button type="submit">{{t .Lang "export_savings_slip"}}</button>
-        </form>
-        <form class="form-panel" method="get" action="/member/exports/loans.pdf">
-          <button type="submit">{{t .Lang "export_loan_slip"}}</button>
-        </form>
+      <div class="member-export-grid">
+        <article class="member-export-card">
+          <div class="member-export-card-icon" aria-hidden="true"><i data-lucide="wallet-cards"></i></div>
+          <div class="member-export-card-body">
+            <h3>{{t .Lang "export_savings_slip"}}</h3>
+            <p class="field-help">{{t .Lang "export_savings_slip_hint"}}</p>
+            <a class="button-link member-export-button" href="/member/exports/savings.pdf"><i data-lucide="download"></i>{{t .Lang "export_pdf"}}</a>
+          </div>
+        </article>
+        <article class="member-export-card">
+          <div class="member-export-card-icon" aria-hidden="true"><i data-lucide="landmark"></i></div>
+          <div class="member-export-card-body">
+            <h3>{{t .Lang "export_loan_slip"}}</h3>
+            <p class="field-help">{{t .Lang "export_loan_slip_hint"}}</p>
+            <a class="button-link member-export-button" href="/member/exports/loans.pdf"><i data-lucide="download"></i>{{t .Lang "export_pdf"}}</a>
+          </div>
+        </article>
       </div>
     </section>
     <section class="panel">

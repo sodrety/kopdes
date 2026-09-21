@@ -7,9 +7,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestMemberDashboardExportsLatestSavingsAndLoanSlips(t *testing.T) {
+func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-SLIP-001","full_name":"Slip Member","join_date":"2026-01-01","status":"active","email":"slip-member@coop.test","password":"member-password"}`)
@@ -27,7 +28,7 @@ func TestMemberDashboardExportsLatestSavingsAndLoanSlips(t *testing.T) {
 	if pageResponse.Code != http.StatusOK {
 		t.Fatalf("member dashboard status=%d body=%s", pageResponse.Code, pageResponse.Body.String())
 	}
-	for _, text := range []string{"Member slips", "Export Simpanan slip", "Export Pinjaman slip", `action="/member/exports/savings.pdf"`, `action="/member/exports/loans.pdf"`} {
+	for _, text := range []string{"Member slips", "Export Simpanan slip", "Export Pinjaman slip", `href="/member/exports/savings.pdf"`, `href="/member/exports/loans.pdf"`, "Export PDF"} {
 		if !strings.Contains(pageResponse.Body.String(), text) {
 			t.Fatalf("dashboard missing %q: %s", text, pageResponse.Body.String())
 		}
@@ -36,6 +37,7 @@ func TestMemberDashboardExportsLatestSavingsAndLoanSlips(t *testing.T) {
 		t.Fatalf("dashboard should not include a month filter: %s", pageResponse.Body.String())
 	}
 
+	period := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01")
 	savingsRequest := httptest.NewRequest(http.MethodGet, "/member/exports/savings.pdf?month=2026-02", nil)
 	savingsRequest.AddCookie(cookie)
 	savingsResponse := httptest.NewRecorder()
@@ -46,10 +48,10 @@ func TestMemberDashboardExportsLatestSavingsAndLoanSlips(t *testing.T) {
 	if got := savingsResponse.Header().Get("Content-Type"); !strings.Contains(got, "application/pdf") {
 		t.Fatalf("savings slip content type=%q", got)
 	}
-	if got := savingsResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-001-latest.pdf`) {
+	if got := savingsResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-001-`+period+`.pdf`) {
 		t.Fatalf("savings slip disposition=%q", got)
 	}
-	for _, text := range []string{"SLIP Simpanan", "LATEST VALUE", "SIMPANAN POKOK", "SHU", "355.000"} {
+	for _, text := range []string{"SLIP Simpanan", "SIMPANAN POKOK", "THROUGH MONTH", "JANUARY", "355.000"} {
 		if !strings.Contains(savingsResponse.Body.String(), text) {
 			t.Fatalf("savings slip missing %q", text)
 		}
@@ -65,10 +67,10 @@ func TestMemberDashboardExportsLatestSavingsAndLoanSlips(t *testing.T) {
 	if got := loanResponse.Header().Get("Content-Type"); !strings.Contains(got, "application/pdf") {
 		t.Fatalf("loan slip content type=%q", got)
 	}
-	if got := loanResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-pinjaman-M-SLIP-001-latest.pdf`) {
+	if got := loanResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-pinjaman-M-SLIP-001-`+period+`.pdf`) {
 		t.Fatalf("loan slip disposition=%q", got)
 	}
-	for _, text := range []string{"SLIP Pinjaman", "LATEST VALUE", "PRINCIPAL + ADMIN", "REMAINING DEBT"} {
+	for _, text := range []string{"SLIP Pinjaman", "INSTALLMENTS", "PRINCIPAL + ADMIN", "REMAINING DEBT", "JANUARY"} {
 		if !strings.Contains(loanResponse.Body.String(), text) {
 			t.Fatalf("loan slip missing %q", text)
 		}
@@ -108,7 +110,8 @@ func TestMemberSlipExportsIgnoreMonthParameter(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected month parameter to be ignored, got %d %s", response.Code, response.Body.String())
 	}
-	if got := response.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-002-latest.pdf`) {
-		t.Fatalf("expected latest savings slip filename, got %q", got)
+	period := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01")
+	if got := response.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-002-`+period+`.pdf`) {
+		t.Fatalf("expected current-period savings slip filename, got %q", got)
 	}
 }

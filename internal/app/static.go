@@ -773,6 +773,60 @@ button:disabled {
   flex-wrap: wrap;
   gap: 8px;
 }
+.member-export-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.member-export-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid #e3e6f0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #fff 0%, #f8fbff 100%);
+}
+.member-export-card-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--primary-pale);
+  color: var(--primary);
+}
+.member-export-card-icon svg {
+  width: 22px;
+  height: 22px;
+}
+.member-export-card-body {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+}
+.member-export-card-body h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 22px;
+}
+.member-export-card-body .field-help {
+  min-height: 42px;
+  margin: 0;
+}
+.member-export-button {
+  justify-self: start;
+  gap: 8px;
+  margin-top: 4px;
+}
+.member-export-button svg {
+  width: 16px;
+  height: 16px;
+}
 .form-grid {
   display: grid;
   gap: 12px;
@@ -2497,6 +2551,12 @@ td:nth-child(n+2):not(.review-cell) {
   .two-column {
     grid-template-columns: 1fr;
   }
+	.member-export-grid {
+	  grid-template-columns: 1fr;
+	}
+	.member-export-button {
+	  width: 100%;
+	}
 	.form-grid-two,
 	.section-heading-row {
 	  grid-template-columns: 1fr;
