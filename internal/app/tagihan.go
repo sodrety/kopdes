@@ -14,25 +14,32 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-const (
-	tagihanSimpananPokok    int64 = 100_000
-	tagihanSimpananWajib    int64 = 0
-	tagihanSimpananSukarela int64 = 50_000
-)
+type TagihanConfig struct {
+	SavingSource string `json:"saving_source"`
+	ReadOnly     bool   `json:"read_only"`
+}
+
+func tagihanConfiguration() TagihanConfig {
+	return TagihanConfig{
+		SavingSource: "latest_member_savings",
+		ReadOnly:     true,
+	}
+}
 
 var errInvalidTagihanMonth = errors.New("invalid tagihan statement month")
 
 type TagihanRow struct {
-	MemberID           string `json:"member_id"`
-	MemberNo           string `json:"member_no"`
-	FullName           string `json:"full_name"`
-	SimpananPokok      int64  `json:"simpanan_pokok"`
-	SimpananWajib      int64  `json:"simpanan_wajib"`
-	SimpananSukarela   int64  `json:"simpanan_sukarela"`
-	PinjamanReguler    int64  `json:"pinjaman_reguler"`
-	PinjamanNonReguler int64  `json:"pinjaman_non_reguler"`
-	Total              int64  `json:"total"`
-	Status             string `json:"status"`
+	MemberID               string `json:"member_id"`
+	MemberNo               string `json:"member_no"`
+	FullName               string `json:"full_name"`
+	SimpananWajib          int64  `json:"simpanan_wajib"`
+	SimpananSukarela       int64  `json:"simpanan_sukarela"`
+	PinjamanReguler        int64  `json:"pinjaman_reguler"`
+	PinjamanBarangSekunder int64  `json:"pinjaman_barang_sekunder"`
+	PembelianBarang        int64  `json:"pembelian_barang"`
+	PinjamanNonReguler     int64  `json:"pinjaman_non_reguler"`
+	Total                  int64  `json:"total"`
+	Status                 string `json:"status"`
 }
 
 type tagihanStatementMonth struct {
@@ -104,7 +111,7 @@ func (s *Server) adminTagihan(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"statement_month": statementMonth.Value, "cutoff_date": statementMonth.CutoffDate, "rows": rows})
+	c.JSON(http.StatusOK, gin.H{"statement_month": statementMonth.Value, "cutoff_date": statementMonth.CutoffDate, "saving_config": tagihanConfiguration(), "rows": rows})
 }
 
 func (s *Server) exportTagihanXLSX(c *gin.Context) {
@@ -186,6 +193,7 @@ func (s *Server) adminTagihanPage(c *gin.Context) {
 	renderPage(c, "admin-tagihan", pageData(c, "Tagihan - KKSUK PD Dharma Jaya", "tagihan", "tagihan", "tagihan_description", gin.H{
 		"StatementMonth": statementMonth.Value,
 		"DefaultDate":    statementMonth.DefaultDate,
+		"TagihanConfig":  tagihanConfiguration(),
 		"Rows":           rows,
 	}))
 }
@@ -236,29 +244,29 @@ func (s *Server) tagihanRows(statementMonth tagihanStatementMonth) ([]TagihanRow
 
 	var tagihanRows []TagihanRow
 	for _, row := range members {
-		row.SimpananPokok = tagihanSimpananPokok
-		row.SimpananWajib = tagihanSimpananWajib
-		row.SimpananSukarela = tagihanSimpananSukarela
-		if row.SimpananPokok > 0 && s.tagihanSavingAlreadyRecorded(row.MemberID, "pokok", statementMonth) {
-			row.SimpananPokok = 0
+		savingAmounts, err := s.tagihanSavingAmounts(row.MemberID, statementMonth)
+		if err != nil {
+			return nil, err
 		}
-		if row.SimpananWajib > 0 && s.tagihanSavingAlreadyRecorded(row.MemberID, "wajib", statementMonth) {
-			row.SimpananWajib = 0
-		}
-		if row.SimpananSukarela > 0 && s.tagihanSavingAlreadyRecorded(row.MemberID, "sukarela", statementMonth) {
-			row.SimpananSukarela = 0
-		}
+		row.SimpananWajib = savingAmounts.Wajib
+		row.SimpananSukarela = savingAmounts.Manasuka
 		regularDue, err := s.tagihanLoanDueTotal(row.MemberID, statementMonth, true)
 		if err != nil {
 			return nil, err
 		}
-		nonRegularDue, err := s.tagihanLoanDueTotal(row.MemberID, statementMonth, false)
+		secondaryGoodsDue, err := s.tagihanLoanDueTotalForType(row.MemberID, statementMonth, "secondary_goods")
+		if err != nil {
+			return nil, err
+		}
+		goodsPurchaseDue, err := s.tagihanLoanDueTotalForType(row.MemberID, statementMonth, "goods_purchase_paylater")
 		if err != nil {
 			return nil, err
 		}
 		row.PinjamanReguler = regularDue
-		row.PinjamanNonReguler = nonRegularDue
-		row.Total = row.SimpananPokok + row.SimpananWajib + row.SimpananSukarela + row.PinjamanReguler + row.PinjamanNonReguler
+		row.PinjamanBarangSekunder = secondaryGoodsDue
+		row.PembelianBarang = goodsPurchaseDue
+		row.PinjamanNonReguler = row.PinjamanBarangSekunder + row.PembelianBarang
+		row.Total = row.SimpananWajib + row.SimpananSukarela + row.PinjamanReguler + row.PinjamanNonReguler
 		if row.Total > 0 {
 			tagihanRows = append(tagihanRows, row)
 		}
@@ -272,6 +280,73 @@ func (s *Server) tagihanSavingAlreadyRecorded(memberID, category string, stateme
 	return err == nil && count > 0
 }
 
+func (s *Server) tagihanSavingRecordedForStatementMonth(memberID, category string, statementMonth tagihanStatementMonth) bool {
+	if s.tagihanSavingAlreadyRecorded(memberID, category, statementMonth) {
+		return true
+	}
+
+	parsed, err := time.ParseInLocation("2006-01", statementMonth.Value, jakartaLocation)
+	if err != nil {
+		return false
+	}
+	monthStart := parsed.Format("2006-01-02")
+	var latestRecordDate string
+	err = s.db.QueryRow(`
+		SELECT record_date
+		FROM saving_records
+		WHERE member_id=$1
+		  AND category=$2
+		  AND type='deposit'
+		  AND record_date >= $3
+		  AND record_date <= $4
+		ORDER BY record_date DESC, created_at DESC
+		LIMIT 1`, memberID, category, monthStart, statementMonth.CutoffDate).Scan(&latestRecordDate)
+	return err == nil && latestRecordDate != ""
+}
+
+type tagihanSavingAmounts struct {
+	Wajib    int64
+	Manasuka int64
+}
+
+func (s *Server) tagihanSavingAmounts(memberID string, statementMonth tagihanStatementMonth) (tagihanSavingAmounts, error) {
+	wajib, err := s.tagihanLatestSavingAmount(memberID, "wajib", statementMonth.CutoffDate)
+	if err != nil {
+		return tagihanSavingAmounts{}, err
+	}
+	manasuka, err := s.tagihanLatestSavingAmount(memberID, "sukarela", statementMonth.CutoffDate)
+	if err != nil {
+		return tagihanSavingAmounts{}, err
+	}
+	if wajib > 0 && s.tagihanSavingRecordedForStatementMonth(memberID, "wajib", statementMonth) {
+		wajib = 0
+	}
+	if manasuka > 0 && s.tagihanSavingRecordedForStatementMonth(memberID, "sukarela", statementMonth) {
+		manasuka = 0
+	}
+	return tagihanSavingAmounts{Wajib: wajib, Manasuka: manasuka}, nil
+}
+
+func (s *Server) tagihanLatestSavingAmount(memberID, category, cutoffDate string) (int64, error) {
+	var recordType string
+	var amount int64
+	err := s.db.QueryRow(`
+		SELECT type, amount
+		FROM saving_records
+		WHERE member_id=$1
+		  AND category=$2
+		  AND record_date <= $3
+		ORDER BY record_date DESC, created_at DESC
+		LIMIT 1`, memberID, category, cutoffDate).Scan(&recordType, &amount)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err == nil && recordType != "deposit" {
+		return 0, nil
+	}
+	return amount, err
+}
+
 func (s *Server) tagihanLoanDueTotal(memberID string, statementMonth tagihanStatementMonth, regular bool) (int64, error) {
 	dues, err := s.tagihanLoanDues(memberID, statementMonth, regular)
 	if err != nil {
@@ -282,6 +357,21 @@ func (s *Server) tagihanLoanDueTotal(memberID string, statementMonth tagihanStat
 		total += due.Amount
 	}
 	return total, nil
+}
+
+func (s *Server) tagihanLoanDueTotalForType(memberID string, statementMonth tagihanStatementMonth, loanType string) (int64, error) {
+	var total int64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(li.scheduled_amount-li.paid_amount),0)
+		FROM loans l
+		INNER JOIN loan_installments li ON li.loan_id=l.id
+		WHERE l.member_id=$1
+		  AND l.status IN ('active','adjustment_due')
+		  AND l.remaining_balance>0
+		  AND li.due_date <= $2
+		  AND li.paid_amount < li.scheduled_amount
+		  AND l.loan_type=$3`, memberID, statementMonth.CutoffDate, loanType).Scan(&total)
+	return total, err
 }
 
 func (s *Server) tagihanLoanDues(memberID string, statementMonth tagihanStatementMonth, regular bool) ([]tagihanLoanDue, error) {
@@ -327,13 +417,13 @@ func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRo
 		_ = workbook.Close()
 		return nil, err
 	}
-	headers := []interface{}{"Member ID", "NPP", "Nama", "Simpanan Pokok", "Simpanan Wajib", "Simpanan Sukarela", "Pinjaman Reguler", "Pinjaman Non-Reguler", "Total Tagihan", "Status"}
+	headers := []interface{}{"Member ID", "NPP", "Nama", "Simpanan Wajib", "Simpanan Manasuka", "Pinjaman Reguler", "Pinjaman Barang Sekunder", "Pembelian Barang", "Total Tagihan", "Status"}
 	if err := workbook.SetSheetRow(sheet, "A1", &headers); err != nil {
 		_ = workbook.Close()
 		return nil, err
 	}
 	for index, row := range rows {
-		values := []interface{}{row.MemberID, row.MemberNo, row.FullName, row.SimpananPokok, row.SimpananWajib, row.SimpananSukarela, row.PinjamanReguler, row.PinjamanNonReguler, row.Total, row.Status}
+		values := []interface{}{row.MemberID, row.MemberNo, row.FullName, row.SimpananWajib, row.SimpananSukarela, row.PinjamanReguler, row.PinjamanBarangSekunder, row.PembelianBarang, row.Total, row.Status}
 		cell, err := excelize.CoordinatesToCellName(1, index+2)
 		if err != nil {
 			_ = workbook.Close()
@@ -492,35 +582,39 @@ func (s *Server) recordPaidTagihanRow(memberID string, statementMonth tagihanSta
 	note := tagihanNote(statementMonth, memberID)
 	savingsCreated := 0
 	messages := []string{}
-	for _, saving := range []struct {
-		category string
-		amount   int64
-	}{
-		{"pokok", tagihanSimpananPokok},
-		{"wajib", tagihanSimpananWajib},
-		{"sukarela", tagihanSimpananSukarela},
-	} {
-		if saving.amount <= 0 {
-			continue
+	savingAmounts, err := s.tagihanSavingAmounts(memberID, statementMonth)
+	if err != nil {
+		messages = append(messages, "saving amount lookup failed")
+	} else {
+		for _, saving := range []struct {
+			category string
+			amount   int64
+		}{
+			{"wajib", savingAmounts.Wajib},
+			{"sukarela", savingAmounts.Manasuka},
+		} {
+			if saving.amount <= 0 {
+				continue
+			}
+			if s.tagihanSavingRecordedForStatementMonth(memberID, saving.category, statementMonth) {
+				messages = append(messages, "saving "+saving.category+" already recorded")
+				continue
+			}
+			_, err := s.insertSaving(savingRequest{
+				MemberID:    memberID,
+				Type:        "deposit",
+				Category:    saving.category,
+				Amount:      saving.amount,
+				RecordDate:  recordDate,
+				ReferenceNo: reference,
+				Note:        note,
+			}, recordedBy)
+			if err != nil {
+				messages = append(messages, "saving "+saving.category+" failed")
+				continue
+			}
+			savingsCreated++
 		}
-		if s.tagihanSavingAlreadyRecorded(memberID, saving.category, statementMonth) {
-			messages = append(messages, "saving "+saving.category+" already recorded")
-			continue
-		}
-		_, err := s.insertSaving(savingRequest{
-			MemberID:    memberID,
-			Type:        "deposit",
-			Category:    saving.category,
-			Amount:      saving.amount,
-			RecordDate:  recordDate,
-			ReferenceNo: reference,
-			Note:        note,
-		}, recordedBy)
-		if err != nil {
-			messages = append(messages, "saving "+saving.category+" failed")
-			continue
-		}
-		savingsCreated++
 	}
 
 	repaymentsCreated := 0

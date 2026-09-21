@@ -2195,6 +2195,12 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	statementMonth := statementMonthTime.Format("2006-01")
 	recordDate := time.Date(statementMonthTime.Year(), statementMonthTime.Month()+1, 0, 0, 0, 0, 0, statementMonthTime.Location()).Format("2006-01-02")
 	loan := fixture.approveLoanRequestWithStartDate(t, adminToken, requestID, 1_000_000, 5, startDate)
+	secondaryGoodsRequestID := fixture.createLoanRequestWithType(t, memberToken, "secondary_goods", 100_000, 1)
+	secondaryGoodsLoan := fixture.approveLoanRequestWithStartDate(t, adminToken, secondaryGoodsRequestID, 100_000, 1, startDate)
+	goodsPurchaseRequestID := fixture.createLoanRequestWithType(t, memberToken, "goods_purchase_paylater", 200_000, 1)
+	goodsPurchaseLoan := fixture.approveLoanRequestWithStartDate(t, adminToken, goodsPurchaseRequestID, 200_000, 1, startDate)
+	fixture.recordSavingInCategoryAtDate(t, adminToken, member.ID, "wajib", 100_000, startDate, "TAG-WAJIB", "Latest Simpanan Wajib")
+	fixture.recordSavingInCategoryAtDate(t, adminToken, member.ID, "sukarela", 50_000, startDate, "TAG-MANASUKA", "Latest Simpanan Manasuka")
 
 	exportReq := httptest.NewRequest(http.MethodGet, "/api/admin/tagihan/export.xlsx?month="+statementMonth, nil)
 	exportReq.Header.Set("Authorization", "Bearer "+adminToken)
@@ -2224,7 +2230,11 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	if tagihanExcelRow == 0 {
 		t.Fatalf("expected Tagihan row for member %s, got %#v", member.ID, rows)
 	}
-	if tagihanRow[1] != "K-TAG-001" || tagihanRow[3] != "100000" || tagihanRow[4] != "0" || tagihanRow[5] != "50000" || tagihanRow[6] != "210000" || tagihanRow[8] != "360000" {
+	expectedHeaders := "Member ID|NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Status"
+	if strings.Join(rows[0], "|") != expectedHeaders {
+		t.Fatalf("unexpected Tagihan headers: %#v", rows[0])
+	}
+	if tagihanRow[1] != "K-TAG-001" || tagihanRow[3] != "100000" || tagihanRow[4] != "50000" || tagihanRow[5] != "210000" || tagihanRow[6] != "120000" || tagihanRow[7] != "210000" || tagihanRow[8] != "690000" {
 		t.Fatalf("unexpected Tagihan row: %#v, loan=%+v", tagihanRow, loan)
 	}
 	statusCell, err := excelize.CoordinatesToCellName(10, tagihanExcelRow)
@@ -2246,23 +2256,116 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	if importResult.Summary.Imported != 1 || importResult.Summary.Invalid != 0 {
 		t.Fatalf("unexpected import summary: %+v", importResult.Summary)
 	}
-	var pokok, sukarela, wajib, repayment int64
+	var pokok, sukarela, wajib, regularRepayment, secondaryGoodsRepayment, goodsPurchaseRepayment int64
 	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(CASE WHEN category='pokok' THEN amount ELSE 0 END),0), COALESCE(SUM(CASE WHEN category='sukarela' THEN amount ELSE 0 END),0), COALESCE(SUM(CASE WHEN category='wajib' THEN amount ELSE 0 END),0) FROM saving_records WHERE member_id=$1 AND reference_no=$2`, member.ID, "TAGIHAN-"+statementMonth).Scan(&pokok, &sukarela, &wajib); err != nil {
 		t.Fatalf("read Tagihan savings: %v", err)
 	}
-	if pokok != 100_000 || sukarela != 50_000 || wajib != 0 {
+	if pokok != 0 || sukarela != 50_000 || wajib != 100_000 {
 		t.Fatalf("unexpected Tagihan savings pokok=%d sukarela=%d wajib=%d", pokok, sukarela, wajib)
 	}
-	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM loan_repayments WHERE loan_id=$1 AND reference_no=$2`, loan.ID, "TAGIHAN-"+statementMonth).Scan(&repayment); err != nil {
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM loan_repayments WHERE loan_id=$1 AND reference_no=$2`, loan.ID, "TAGIHAN-"+statementMonth).Scan(&regularRepayment); err != nil {
 		t.Fatalf("read Tagihan repayment: %v", err)
 	}
-	if repayment != 210_000 {
-		t.Fatalf("expected Tagihan repayment 210000, got %d", repayment)
+	if regularRepayment != 210_000 {
+		t.Fatalf("expected regular Tagihan repayment 210000, got %d", regularRepayment)
+	}
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM loan_repayments WHERE loan_id=$1 AND reference_no=$2`, secondaryGoodsLoan.ID, "TAGIHAN-"+statementMonth).Scan(&secondaryGoodsRepayment); err != nil {
+		t.Fatalf("read secondary goods Tagihan repayment: %v", err)
+	}
+	if secondaryGoodsRepayment != 120_000 {
+		t.Fatalf("expected secondary goods Tagihan repayment 120000, got %d", secondaryGoodsRepayment)
+	}
+	if err := fixture.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM loan_repayments WHERE loan_id=$1 AND reference_no=$2`, goodsPurchaseLoan.ID, "TAGIHAN-"+statementMonth).Scan(&goodsPurchaseRepayment); err != nil {
+		t.Fatalf("read goods purchase Tagihan repayment: %v", err)
+	}
+	if goodsPurchaseRepayment != 210_000 {
+		t.Fatalf("expected goods purchase Tagihan repayment 210000, got %d", goodsPurchaseRepayment)
 	}
 
 	secondImport := fixture.importTagihanWorkbook(t, adminToken, statementMonth, recordDate, paidWorkbook.Bytes())
 	if secondImport.Summary.Imported != 0 || secondImport.Summary.Invalid != 0 {
 		t.Fatalf("expected duplicate import to skip, got %+v", secondImport.Summary)
+	}
+}
+
+func TestTagihanUsesLatestMonthlySavingAndShowsReadOnlyConfiguration(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"K-TAG-002","full_name":"Latest Tagihan Member","join_date":"2026-01-01","status":"active","email":"latest-tagihan-member@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "latest-tagihan-member@coop.test", "member-password")
+	start := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60))
+	startDate := start.Format("2006-01-02")
+	statementMonthTime := start.AddDate(0, 1, 0)
+	statementMonth := statementMonthTime.Format("2006-01")
+	requestID := fixture.createLoanRequest(t, memberToken, 1_000_000, 5)
+	fixture.approveLoanRequestWithStartDate(t, adminToken, requestID, 1_000_000, 5, startDate)
+
+	fixture.recordSavingInCategoryAtDate(t, adminToken, member.ID, "sukarela", 50_000, startDate, "LATEST-MANASUKA", "Latest Simpanan Manasuka")
+	fixture.recordSavingInCategoryAtDate(t, adminToken, member.ID, "wajib", 100_000, statementMonth+"-05", "CURRENT-WAJIB", "Current month Simpanan Wajib")
+	otherMember := fixture.createMember(t, adminToken, `{"member_no":"K-TAG-003","full_name":"Different Tagihan Member","join_date":"2026-01-01","status":"active"}`)
+	fixture.recordSavingInCategoryAtDate(t, adminToken, otherMember.ID, "wajib", 150_000, startDate, "OTHER-WAJIB", "Latest Simpanan Wajib")
+	fixture.recordSavingInCategoryAtDate(t, adminToken, otherMember.ID, "sukarela", 200_000, startDate, "OTHER-MANASUKA", "Latest Simpanan Manasuka")
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/tagihan?month="+statementMonth, nil)
+	request.Header.Set("Authorization", "Bearer "+adminToken)
+	recorder := httptest.NewRecorder()
+	fixture.server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected Tagihan API status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		SavingConfig struct {
+			SavingSource string `json:"saving_source"`
+			ReadOnly     bool   `json:"read_only"`
+		} `json:"saving_config"`
+		Rows []struct {
+			MemberID         string `json:"member_id"`
+			SimpananWajib    int64  `json:"simpanan_wajib"`
+			SimpananSukarela int64  `json:"simpanan_sukarela"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode Tagihan API response: %v", err)
+	}
+	if response.SavingConfig.SavingSource != "latest_member_savings" || !response.SavingConfig.ReadOnly {
+		t.Fatalf("unexpected Tagihan saving configuration: %+v", response.SavingConfig)
+	}
+	var found, foundOther bool
+	for _, row := range response.Rows {
+		if row.MemberID == otherMember.ID {
+			foundOther = true
+			if row.SimpananWajib != 150_000 || row.SimpananSukarela != 200_000 {
+				t.Fatalf("expected different member-specific latest savings, got %+v", row)
+			}
+			continue
+		}
+		if row.MemberID != member.ID {
+			continue
+		}
+		found = true
+		if row.SimpananWajib != 0 || row.SimpananSukarela != 50_000 {
+			t.Fatalf("expected latest monthly Wajib to be skipped and member-specific Manasuka to remain, got %+v", row)
+		}
+	}
+	if !found {
+		t.Fatalf("expected Tagihan row for member %s, got %#v", member.ID, response.Rows)
+	}
+	if !foundOther {
+		t.Fatalf("expected Tagihan row for member %s, got %#v", otherMember.ID, response.Rows)
+	}
+
+	pageRequest := httptest.NewRequest(http.MethodGet, "/admin/tagihan?month="+statementMonth, nil)
+	pageRequest.Header.Set("Accept-Language", "id")
+	pageRequest.AddCookie(fixture.browserLogin(t, "admin@coop.test", "password"))
+	pageRecorder := httptest.NewRecorder()
+	fixture.server.ServeHTTP(pageRecorder, pageRequest)
+	if pageRecorder.Code != http.StatusOK {
+		t.Fatalf("expected Tagihan page status 200, got %d: %s", pageRecorder.Code, pageRecorder.Body.String())
+	}
+	for _, text := range []string{"Konfigurasi simpanan Tagihan", "Sumber nominal simpanan", "Catatan simpanan terakhir per anggota", "Potongan Simpanan Wajib dan Simpanan Manasuka mengikuti nominal terakhir setiap anggota dari data simpanan yang diimpor.", "Hanya lihat"} {
+		if !strings.Contains(pageRecorder.Body.String(), text) {
+			t.Fatalf("expected Tagihan page to include %q, got %s", text, pageRecorder.Body.String())
+		}
 	}
 }
 
@@ -4713,6 +4816,35 @@ func (f testFixture) recordSavingInCategory(t *testing.T, adminToken, memberID, 
 		"category":"`+category+`",
 		"amount":`+strconv.Itoa(amount)+`,
 		"record_date":"2026-06-16",
+		"reference_no":"`+referenceNo+`",
+		"note":"`+note+`"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+
+	f.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected deposit status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var response struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode deposit response: %v", err)
+	}
+	return response.ID
+}
+
+func (f testFixture) recordSavingInCategoryAtDate(t *testing.T, adminToken, memberID, category string, amount int, recordDate, referenceNo, note string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/savings", bytes.NewBufferString(`{
+		"member_id":"`+memberID+`",
+		"type":"deposit",
+		"category":"`+category+`",
+		"amount":`+strconv.Itoa(amount)+`,
+		"record_date":"`+recordDate+`",
 		"reference_no":"`+referenceNo+`",
 		"note":"`+note+`"
 	}`))

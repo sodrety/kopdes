@@ -318,12 +318,13 @@ _Avoid_: Renaming stable internal enum values only to match display text
 - A blank returned **Tagihan** row status means the row is not ready to import.
 - **Tagihan** import follows the same **Operational Permissions** required to manually create the resulting **Saving Records** and **Repayment Records**.
 - A generated **Tagihan** includes only **Members** with at least one positive expected amount.
-- A generated **Tagihan** uses explicit row columns for identity, expected **Simpanan** amounts, expected Regular and non-Regular **Repayment Record** amounts, total amount, and row status.
-- A generated **Tagihan** uses fixed expected **Simpanan Pokok** of Rp100.000, **Simpanan Wajib** of Rp0, and **Simpanan Sukarela** of Rp50.000 until the cooperative confirms a different amount.
+- A generated **Tagihan** uses explicit row columns for identity, expected **Simpanan Wajib** and **Simpanan Manasuka** amounts, expected Regular, Barang Sekunder, and Pembelian Barang **Repayment Record** amounts, total amount, and row status.
+- A generated **Tagihan** does not deduct **Simpanan Pokok**. Its read-only saving configuration uses each **Member**'s latest dated **Simpanan Wajib** and **Simpanan Manasuka** record on or before the **Tagihan Statement Month** cutoff; only a latest deposit contributes a positive deduction, while a latest withdrawal contributes zero. There is no global saving amount.
+- When generating or importing a **Tagihan**, a deposit already recorded for the same member, saving category, and statement month suppresses that member-specific saving deduction.
 - A paid **Tagihan** row creates **Saving Records** only for non-zero expected **Simpanan** amounts.
-- A **Tagihan** separates expected **Repayment Records** for **Regular Loan** obligations from expected **Repayment Records** for non-Regular **Loan Types**.
-- A **Tagihan** may aggregate expected **Repayment Records** from more than one unpaid **Loan** while preserving the Regular versus non-Regular **Loan Type** split.
-- A paid **Tagihan** row preserves the Regular versus non-Regular **Loan Type** split when creating **Repayment Records**.
+- A **Tagihan** separates expected **Repayment Records** for **Regular Loan**, **Secondary Goods Loan**, and **Goods Purchase/Paylater Loan** obligations.
+- A **Tagihan** may aggregate expected **Repayment Records** from more than one unpaid **Loan** while preserving the Regular, Barang Sekunder, and Pembelian Barang split.
+- A paid **Tagihan** row preserves the Regular, Barang Sekunder, and Pembelian Barang split when creating **Repayment Records**.
 - A generated **Tagihan** includes unpaid **Installment Schedule** amounts due on or before the **Tagihan Statement Month** cutoff.
 - A **Tagihan** is a generated statement, not a durable obligation snapshot.
 - A returned **Tagihan** marks each **Member** row as paid or unpaid as a whole, not each expected **Saving Record** or **Repayment Record** separately.

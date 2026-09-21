@@ -251,6 +251,14 @@
         </form>
       </section>
       <section class="panel">
+        <h2>{{t .Lang "tagihan_saving_configuration"}}</h2>
+        <div class="form-grid form-grid-two">
+          <div><span>{{t .Lang "tagihan_saving_source"}}</span><strong>{{t .Lang "tagihan_saving_source_latest_member"}}</strong></div>
+        </div>
+        <p>{{t .Lang "tagihan_saving_configuration_description"}}</p>
+        {{if .TagihanConfig.ReadOnly}}<p>{{t .Lang "read_only"}}</p>{{end}}
+      </section>
+      <section class="panel">
         <h2>{{t .Lang "import_tagihan"}}</h2>
         <form class="filter-form" method="post" action="/api/admin/tagihan/import" enctype="multipart/form-data">
           <label>{{t .Lang "statement_month"}}
@@ -274,11 +282,11 @@
               <th>{{t $.Lang "member_id"}}</th>
               <th>{{t $.Lang "member_no"}}</th>
               <th>{{t $.Lang "full_name"}}</th>
-              <th>{{t $.Lang "simpanan_pokok"}}</th>
               <th>{{t $.Lang "simpanan_wajib"}}</th>
-              <th>{{t $.Lang "simpanan_sukarela"}}</th>
+              <th>{{t $.Lang "simpanan_manasuka"}}</th>
               <th>{{t $.Lang "pinjaman_reguler"}}</th>
-              <th>{{t $.Lang "pinjaman_non_reguler"}}</th>
+              <th>{{t $.Lang "loan_type_secondary_goods"}}</th>
+              <th>{{t $.Lang "loan_type_goods_purchase_paylater"}}</th>
               <th>{{t $.Lang "total_tagihan"}}</th>
               <th>{{t $.Lang "status"}}</th>
             </tr>
@@ -289,11 +297,11 @@
               <td>{{.MemberID}}</td>
               <td>{{.MemberNo}}</td>
               <td>{{.FullName}}</td>
-              <td>{{nominal .SimpananPokok}}</td>
               <td>{{nominal .SimpananWajib}}</td>
               <td>{{nominal .SimpananSukarela}}</td>
               <td>{{nominal .PinjamanReguler}}</td>
-              <td>{{nominal .PinjamanNonReguler}}</td>
+              <td>{{nominal .PinjamanBarangSekunder}}</td>
+              <td>{{nominal .PembelianBarang}}</td>
               <td>{{nominal .Total}}</td>
               <td>{{.Status}}</td>
             </tr>
