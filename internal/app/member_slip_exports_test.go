@@ -37,7 +37,7 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 		t.Fatalf("dashboard should not include a month filter: %s", pageResponse.Body.String())
 	}
 
-	period := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01")
+	savingsPeriod := "2026-02"
 	savingsRequest := httptest.NewRequest(http.MethodGet, "/member/exports/savings.pdf?month=2026-02", nil)
 	savingsRequest.AddCookie(cookie)
 	savingsResponse := httptest.NewRecorder()
@@ -48,10 +48,10 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 	if got := savingsResponse.Header().Get("Content-Type"); !strings.Contains(got, "application/pdf") {
 		t.Fatalf("savings slip content type=%q", got)
 	}
-	if got := savingsResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-001-`+period+`.pdf`) {
+	if got := savingsResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-001-`+savingsPeriod+`.pdf`) {
 		t.Fatalf("savings slip disposition=%q", got)
 	}
-	for _, text := range []string{"SLIP Simpanan", "SIMPANAN POKOK", "THROUGH MONTH", "JANUARY", "355.000"} {
+	for _, text := range []string{"SLIP Simpanan", "SIMPANAN POKOK", "THROUGH MONTH", "FEBRUARY", "355.000"} {
 		if !strings.Contains(savingsResponse.Body.String(), text) {
 			t.Fatalf("savings slip missing %q", text)
 		}
@@ -67,7 +67,8 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 	if got := loanResponse.Header().Get("Content-Type"); !strings.Contains(got, "application/pdf") {
 		t.Fatalf("loan slip content type=%q", got)
 	}
-	if got := loanResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-pinjaman-M-SLIP-001-`+period+`.pdf`) {
+	loanPeriod := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01")
+	if got := loanResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-pinjaman-M-SLIP-001-`+loanPeriod+`.pdf`) {
 		t.Fatalf("loan slip disposition=%q", got)
 	}
 	for _, text := range []string{"SLIP Pinjaman", "INSTALLMENTS", "PRINCIPAL + ADMIN", "REMAINING DEBT", "JANUARY"} {
