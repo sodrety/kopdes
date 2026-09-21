@@ -33,16 +33,16 @@
 {{end}}
 
 {{define "bar-chart"}}
-        <div class="bar-chart">
+        <div class="bar-chart report-chart-shell" data-chart="bar" data-chart-format="{{.Format}}">
           {{if .Segments.HasData}}
+          <div class="report-chart-visual report-bar-chart-visual">
+            <canvas class="report-chart-canvas" role="img" aria-label="{{t .Lang .TitleKey}}"></canvas>
+          </div>
+          <div class="chart-data" aria-hidden="true">
             {{range .Segments}}
-            <div class="bar-row">
-              <div class="bar-label"><span>{{t $.Lang .Label}}</span><strong>{{.Value}}</strong></div>
-              <div class="bar-track" aria-label="{{t $.Lang .Label}} {{.Value}}">
-                <span class="bar-fill {{.Class}}" style="width: {{.Percent}}%"></span>
-              </div>
-            </div>
+            <span data-chart-item data-label="{{t $.Lang .Label}}" data-value="{{.Value}}" data-color="{{.Class}}"></span>
             {{end}}
+          </div>
           {{else}}
 {{template "empty-state" (t .Lang "no_report_data")}}
           {{end}}
@@ -55,30 +55,18 @@
             <h2>{{t .Lang .Chart.TitleKey}}{{if .Chart.TitleSuffix}} {{.Chart.TitleSuffix}}{{end}}</h2>
             <span aria-hidden="true">⋮</span>
           </header>
-          <div class="line-chart-body">
-            <svg class="line-chart-svg" viewBox="0 0 760 320" role="img" aria-label="{{t .Lang .Chart.TitleKey}}">
-              {{range .Chart.YTicks}}
-              <line class="line-chart-gridline" x1="76" y1="{{.Y}}" x2="720" y2="{{.Y}}"></line>
-              <text class="line-chart-y-label" x="{{.X}}" y="{{.Y}}">{{.Label}}</text>
-              {{end}}
-              <line class="line-chart-axis" x1="76" y1="44" x2="76" y2="234"></line>
-              <line class="line-chart-axis" x1="76" y1="234" x2="720" y2="234"></line>
-              {{range .Chart.XTicks}}
-              <text class="line-chart-x-label" x="{{.X}}" y="{{.Y}}">{{.Label}}</text>
+          <div class="line-chart-body report-chart-shell" data-chart="line">
+            <div class="report-chart-visual report-line-chart-visual">
+              <canvas class="report-chart-canvas" role="img" aria-label="{{t .Lang .Chart.TitleKey}}"></canvas>
+            </div>
+            <div class="chart-data" aria-hidden="true">
+              {{range .Chart.Labels}}
+              <span data-chart-label>{{.}}</span>
               {{end}}
               {{range .Chart.Series}}
-              {{$seriesClass := .Class}}
-              <polyline class="line-chart-path {{.Class}}" points="{{.Points}}"></polyline>
-              {{range .Dots}}
-              <circle class="line-chart-point {{$seriesClass}}" cx="{{.X}}" cy="{{.Y}}" r="4"></circle>
+              <span data-chart-series data-label="{{t $.Lang .LabelKey}}" data-color="{{.Class}}" data-values="{{range $index, $value := .Values}}{{if $index}},{{end}}{{$value}}{{end}}"></span>
               {{end}}
-              {{end}}
-            </svg>
+            </div>
           </div>
-          <footer class="line-chart-legend">
-            {{range .Chart.Series}}
-            <span><i class="{{.Class}}"></i>{{t $.Lang .LabelKey}}</span>
-            {{end}}
-          </footer>
         </article>
 {{end}}

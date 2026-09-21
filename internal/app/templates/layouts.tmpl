@@ -270,12 +270,18 @@
 {{define "admin-shell-end"}}
     </main>
   </div>
+{{template "chart-script" .}}
 {{template "toast-script" .}}
 {{template "table-script" .}}
 {{template "rupiah-script" .}}
   <script>if (window.lucide) { lucide.createIcons(); }</script>
 </body>
 </html>
+{{end}}
+
+{{define "chart-script"}}
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/vendor/reports-charts.js"></script>
 {{end}}
 
 {{define "member-nav"}}

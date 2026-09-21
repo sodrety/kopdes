@@ -86,19 +86,19 @@
       <section class="chart-grid">
         <article class="panel chart-panel">
           <h2>{{t .Lang "simpanan_by_category"}}</h2>
-{{template "bar-chart" (dict "Lang" .Lang "Segments" .Reports.SavingsByCategory)}}
+{{template "bar-chart" (dict "Lang" .Lang "TitleKey" "simpanan_by_category" "Format" "currency" "Segments" .Reports.SavingsByCategory)}}
         </article>
         <article class="panel chart-panel">
           <h2>{{t .Lang "penarikan_by_status"}}</h2>
-{{template "bar-chart" (dict "Lang" .Lang "Segments" .Reports.WithdrawalsByStatus)}}
+{{template "bar-chart" (dict "Lang" .Lang "TitleKey" "penarikan_by_status" "Format" "count" "Segments" .Reports.WithdrawalsByStatus)}}
         </article>
         <article class="panel chart-panel">
           <h2>{{t .Lang "pinjaman_exposure"}}</h2>
-{{template "bar-chart" (dict "Lang" .Lang "Segments" .Reports.LoanExposure)}}
+{{template "bar-chart" (dict "Lang" .Lang "TitleKey" "pinjaman_exposure" "Format" "currency" "Segments" .Reports.LoanExposure)}}
         </article>
         <article class="panel chart-panel">
           <h2>{{t .Lang "angsuran_progress"}}</h2>
-{{template "bar-chart" (dict "Lang" .Lang "Segments" .Reports.RepaymentProgress)}}
+{{template "bar-chart" (dict "Lang" .Lang "TitleKey" "angsuran_progress" "Format" "currency" "Segments" .Reports.RepaymentProgress)}}
         </article>
       </section>
       <section class="panel">

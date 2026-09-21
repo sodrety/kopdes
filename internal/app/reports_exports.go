@@ -27,6 +27,7 @@ type ChartSegments []ChartSegment
 type LineChart struct {
 	TitleKey    string
 	TitleSuffix string
+	Labels      []string `json:"-"`
 	XTicks      []ChartAxisLabel
 	YTicks      []ChartAxisLabel
 	Series      []LineChartSeries
@@ -41,6 +42,7 @@ type ChartAxisLabel struct {
 type LineChartSeries struct {
 	LabelKey string
 	Class    string
+	Values   []int64 `json:"-"`
 	Points   string
 	Dots     []ChartPoint
 }
@@ -1007,19 +1009,21 @@ func dashboardSavingsLoanComparisonChart(savingsValues, loanValues []int64) Line
 	}
 	maxValue = nicePositiveAxisMax(maxValue)
 	scaled, scaledMaximum := scaleChartMoney(append(savingsSeries, loanSeries...), maxValue)
+	savingsChartSeries := lineChartSeries("savings", "chart-line-simpanan", scaled[:len(months)], 0, scaledMaximum)
+	savingsChartSeries.Values = append([]int64(nil), savingsSeries...)
+	loanChartSeries := lineChartSeries("pinjaman", "chart-line-pinjaman", scaled[len(months):], 0, scaledMaximum)
+	loanChartSeries.Values = append([]int64(nil), loanSeries...)
 	return LineChart{
 		TitleKey:    "savings_loans_comparison",
 		TitleSuffix: fmt.Sprintf("(%d)", time.Now().Year()),
+		Labels:      months,
 		XTicks:      xAxisLabels(months, 76, 720, 252),
 		YTicks: []ChartAxisLabel{
 			{Label: compactRupiahAxisLabel(maxValue), X: 58, Y: 44},
 			{Label: compactRupiahAxisLabel(maxValue / 2), X: 58, Y: 139},
 			{Label: compactRupiahAxisLabel(0), X: 58, Y: 234},
 		},
-		Series: []LineChartSeries{
-			lineChartSeries("savings", "chart-line-simpanan", scaled[:len(months)], 0, scaledMaximum),
-			lineChartSeries("pinjaman", "chart-line-pinjaman", scaled[len(months):], 0, scaledMaximum),
-		},
+		Series: []LineChartSeries{savingsChartSeries, loanChartSeries},
 	}
 }
 
@@ -1035,8 +1039,14 @@ func dashboardBalanceTrendChart(balance int64) LineChart {
 	}
 	maxValue := nicePositiveAxisMax(absInt64(balance))
 	scaled, scaledMaximum := scaleChartMoney([]int64{balance}, maxValue)
+	balanceChartSeries := lineChartSeries("neraca", "chart-line-neraca", repeatedValues(scaled[0], len(months)), -scaledMaximum, scaledMaximum)
+	balanceChartSeries.Values = make([]int64, len(months))
+	for index := range balanceChartSeries.Values {
+		balanceChartSeries.Values[index] = balance
+	}
 	return LineChart{
 		TitleKey: "balance_trend_6_months",
+		Labels:   months,
 		XTicks:   xAxisLabels(months, 76, 720, 252),
 		YTicks: []ChartAxisLabel{
 			{Label: compactRupiahAxisLabel(maxValue), X: 58, Y: 44},
@@ -1045,9 +1055,7 @@ func dashboardBalanceTrendChart(balance int64) LineChart {
 			{Label: compactRupiahAxisLabel(-(maxValue / 2)), X: 58, Y: 186},
 			{Label: compactRupiahAxisLabel(-maxValue), X: 58, Y: 234},
 		},
-		Series: []LineChartSeries{
-			lineChartSeries("neraca", "chart-line-neraca", repeatedValues(scaled[0], len(months)), -scaledMaximum, scaledMaximum),
-		},
+		Series: []LineChartSeries{balanceChartSeries},
 	}
 }
 
