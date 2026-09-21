@@ -207,16 +207,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 29 {
-		t.Fatalf("expected twenty-nine tracked migrations, got %d", migrationCount)
+	if migrationCount != 30 {
+		t.Fatalf("expected thirty tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 29`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 30`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "add_admin_role_and_member_tagihan_config" {
-		t.Fatalf("expected latest admin Tagihan migration, got %q", latestName)
+	if latestName != "add_admin_loan_request_intake_audit" {
+		t.Fatalf("expected latest admin loan intake migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {

@@ -3,6 +3,19 @@ package app
 import "database/sql"
 
 func addAdminLoanRequestIntakeAudit(tx *sql.Tx, isSQLite bool) error {
+	if isSQLite {
+		loanRequestsExist, err := sqliteTableExists(tx, "loan_requests")
+		if err != nil {
+			return err
+		}
+		usersExist, err := sqliteTableExists(tx, "users")
+		if err != nil {
+			return err
+		}
+		if !loanRequestsExist || !usersExist {
+			return nil
+		}
+	}
 	statements := []string{
 		`CREATE TABLE loan_request_batches (
 			id TEXT PRIMARY KEY,

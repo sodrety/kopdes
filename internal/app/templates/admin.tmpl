@@ -78,6 +78,62 @@
 {{template "admin-shell-end" .}}
 {{end}}
 
+{{define "admin-loan-request-batch"}}
+{{template "admin-shell-start" .}}
+      <section class="page-actions">
+        <a class="button-link button-link-secondary" href="/api/admin/loan-request-batches/{{.Batch.ID}}/export.xlsx">{{t .Lang "admin_loan_batch_export"}}</a>
+        <a class="button-link button-link-secondary" href="/admin/loan-requests?batch_id={{.Batch.ID}}">{{t .Lang "loan_requests"}}</a>
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "admin_loan_batch_heading"}}</h2>
+        <p class="field-help">{{t .Lang "admin_loan_batch_description"}}</p>
+        <div class="detail-grid">
+          <div><span>{{t .Lang "admin_loan_batch_id"}}</span><strong>{{.Batch.ID}}</strong></div>
+          <div><span>{{t .Lang "admin_loan_creator"}}</span><strong>{{.Batch.CreatedByName}}</strong></div>
+          <div><span>{{t .Lang "created"}}</span><strong>{{.Batch.CreatedAt}}</strong></div>
+          <div><span>{{t .Lang "admin_loan_batch_status"}}</span><strong>{{t .Lang (printf "admin_loan_batch_status_%s" .Batch.Status)}}</strong></div>
+          <div><span>{{t .Lang "admin_loan_batch_rows"}}</span><strong>{{.Batch.RowCount}}</strong></div>
+          <div><span>{{t .Lang "created"}}</span><strong>{{.Batch.CreatedCount}}</strong></div>
+          <div><span>{{t .Lang "error"}}</span><strong>{{.Batch.ErrorCount}}</strong></div>
+          <div><span>{{t .Lang "warning"}}</span><strong>{{.Batch.WarningCount}}</strong></div>
+          <div><span>{{t .Lang "pending"}}</span><strong>{{.Batch.PendingCount}}</strong></div>
+          <div><span>{{t .Lang "approved"}}</span><strong>{{.Batch.ApprovedCount}}</strong></div>
+          <div><span>{{t .Lang "rejected"}}</span><strong>{{.Batch.RejectedCount}}</strong></div>
+          <div><span>{{t .Lang "status_cancelled"}}</span><strong>{{.Batch.CancelledCount}}</strong></div>
+        </div>
+        {{if .Batch.BatchWarnings}}
+        <div class="notice notice-warning"><strong>{{t .Lang "warning"}}</strong><ul>{{range .Batch.BatchWarnings}}<li>{{t $.Lang .}}</li>{{end}}</ul></div>
+        {{end}}
+        {{if .Batch.CanConfirm}}
+        <form method="post" action="/api/admin/loan-requests/bulk/{{.Batch.ID}}/commit" hx-post="/api/admin/loan-requests/bulk/{{.Batch.ID}}/commit" hx-target="#admin-loan-batch-error" hx-swap="innerHTML">
+          <p class="field-help">{{t .Lang "admin_loan_batch_confirm_help"}}</p>
+          <label class="remember-field"><input name="acknowledge_warnings" type="checkbox" {{if .Batch.WarningCount}}required{{end}}> {{t .Lang "acknowledge_admin_loan_warnings"}}</label>
+          <button type="submit">{{t .Lang "admin_loan_batch_commit"}}</button>
+        </form>
+        {{end}}
+        {{template "form-error" (dict "ID" "admin-loan-batch-error")}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "admin_loan_batch_rows"}}</h2>
+        {{if .Batch.Rows}}
+{{template "table-open" .}}
+          <thead><tr><th>#</th><th>{{t .Lang "member_no"}}</th><th>{{t .Lang "name"}}</th><th>{{t .Lang "loan_type"}}</th><th>{{t .Lang "amount"}}</th><th>{{t .Lang "duration"}}</th><th>{{t .Lang "purpose"}}</th><th>{{t .Lang "status"}}</th><th>{{t .Lang "error"}}</th><th>{{t .Lang "warning"}}</th><th>{{t .Lang "loan_id"}}</th></tr></thead>
+          <tbody>
+            {{range .Batch.Rows}}
+            <tr>
+              <td>{{.ExcelRow}}</td><td>{{.MemberNo}}</td><td>{{.FullName}}</td><td>{{template "loan-type-label" (dict "Lang" $.Lang "LoanType" .LoanType "LegacyTerms" false)}}</td><td>{{if .RequestedAmount}}{{nominal .RequestedAmount}}{{else}}{{t $.Lang "none"}}{{end}}</td><td>{{if .DurationMonths}}{{.DurationMonths}} {{t $.Lang "months"}}{{else}}{{t $.Lang "none"}}{{end}}</td><td>{{.Purpose}}</td><td>{{t $.Lang (printf "admin_loan_row_status_%s" .Status)}}</td>
+              <td>{{range .Errors}}<div>{{t $.Lang .}}</div>{{end}}</td><td>{{range .Warnings}}<div>{{t $.Lang .}}</div>{{end}}</td><td>{{if .RequestID}}<a href="/admin/loan-requests?status=pending&batch_id={{$.Batch.ID}}">{{.RequestID}}</a>{{else}}{{t $.Lang "none"}}{{end}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+        <p>{{t .Lang "admin_issue_invalid_template"}}</p>
+        {{end}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
 {{define "admin-reports"}}
 {{template "admin-shell-start" .}}
       <section class="page-actions">
@@ -1329,6 +1385,70 @@
 
 {{define "admin-loan-requests"}}
 {{template "admin-shell-start" .}}
+      {{if .AdminCanCreate}}
+      <section class="content-grid content-grid-two">
+        <article class="panel form-panel">
+          <h2>{{t .Lang "admin_loan_create_single"}}</h2>
+          <p class="field-help">{{t .Lang "admin_loan_create_single_help"}}</p>
+          <form method="post" action="/api/admin/loan-requests/on-behalf" hx-post="/api/admin/loan-requests/on-behalf" hx-target="#admin-loan-create-error" hx-swap="innerHTML" hx-confirm="{{t .Lang "admin_loan_confirm"}}">
+            <label>{{t .Lang "admin_loan_member"}}
+              <input name="member_no" list="admin-loan-members" autocomplete="off" required>
+              <datalist id="admin-loan-members">
+                {{range .Members}}<option value="{{.MemberNo}}">{{.FullName}}</option>{{end}}
+              </datalist>
+            </label>
+            <label>{{t .Lang "loan_type"}}
+              <select name="loan_type" required>
+                <option value="">{{t .Lang "select_loan_type"}}</option>
+                <option value="regular">{{t .Lang "loan_type_regular"}}</option>
+                <option value="secondary_goods">{{t .Lang "loan_type_secondary_goods"}}</option>
+                <option value="goods_purchase_paylater">{{t .Lang "loan_type_goods_purchase_paylater"}}</option>
+              </select>
+            </label>
+            <label>{{t .Lang "amount_rp"}} <input name="requested_amount" type="text" inputmode="numeric" placeholder="{{t .Lang "rupiah_placeholder"}}" data-rupiah-input data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" autocomplete="off" required></label>
+            <label>{{t .Lang "duration"}} <input name="duration_months" type="number" min="1" max="24" required></label>
+            <label>{{t .Lang "purpose"}} <textarea name="purpose" rows="3" required></textarea></label>
+            <label class="remember-field"><input name="acknowledge_warnings" type="checkbox"> {{t .Lang "acknowledge_admin_loan_warnings"}}</label>
+            <input type="hidden" name="idempotency_key" value="{{.SingleIdempotencyKey}}">
+            <button type="submit">{{t .Lang "admin_loan_create_single"}}</button>
+          </form>
+          {{template "form-error" (dict "ID" "admin-loan-create-error")}}
+        </article>
+        <article class="panel form-panel">
+          <h2>{{t .Lang "admin_loan_bulk"}}</h2>
+          <p class="field-help">{{t .Lang "admin_loan_bulk_help"}}</p>
+          <p><a class="button-link button-link-secondary" href="/api/admin/loan-requests/template.xlsx">{{t .Lang "download_admin_loan_template"}}</a></p>
+          <form method="post" action="/api/admin/loan-requests/bulk/preview" enctype="multipart/form-data" hx-post="/api/admin/loan-requests/bulk/preview" hx-target="#admin-loan-bulk-error" hx-swap="innerHTML">
+            <label>{{t .Lang "xlsx_file"}}
+              <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+            </label>
+            <button type="submit">{{t .Lang "preview_admin_loan_batch"}}</button>
+          </form>
+          {{template "form-error" (dict "ID" "admin-loan-bulk-error")}}
+        </article>
+      </section>
+      {{end}}
+      <section class="panel">
+        <form class="filter-form" method="get" action="/admin/loan-requests">
+          <label>{{t .Lang "status"}}
+            <select name="status">
+              <option value="pending" {{if eq .LoanRequestStatus "pending"}}selected{{end}}>{{t .Lang "pending"}}</option>
+              <option value="approved" {{if eq .LoanRequestStatus "approved"}}selected{{end}}>{{t .Lang "approved"}}</option>
+              <option value="rejected" {{if eq .LoanRequestStatus "rejected"}}selected{{end}}>{{t .Lang "rejected"}}</option>
+              <option value="cancelled" {{if eq .LoanRequestStatus "cancelled"}}selected{{end}}>{{t .Lang "status_cancelled"}}</option>
+            </select>
+          </label>
+          <label>{{t .Lang "admin_loan_source"}}
+            <select name="source">
+              <option value="">{{t .Lang "all_types"}}</option>
+              <option value="member" {{if eq .LoanRequestSource "member"}}selected{{end}}>{{t .Lang "admin_loan_source_member"}}</option>
+              <option value="admin" {{if eq .LoanRequestSource "admin"}}selected{{end}}>{{t .Lang "admin_loan_source_admin"}}</option>
+            </select>
+          </label>
+          <label>{{t .Lang "admin_loan_batch_filter"}} <input name="batch_id" value="{{.LoanRequestBatchID}}"></label>
+          <button type="submit">{{t .Lang "apply_filters"}}</button>
+        </form>
+      </section>
       <section class="panel">
         {{if .LoanRequests}}
 {{template "table-open" .}}
@@ -1340,6 +1460,9 @@
               <th>{{t $.Lang "duration"}}</th>
               <th>{{t $.Lang "purpose"}}</th>
               <th>{{t $.Lang "status"}}</th>
+              <th>{{t $.Lang "admin_loan_source"}}</th>
+              <th>{{t $.Lang "admin_loan_creator"}}</th>
+              <th>{{t $.Lang "admin_loan_batch_id"}}</th>
               <th>{{t $.Lang "created"}}</th>
               <th>{{t $.Lang "review"}}</th>
             </tr>
@@ -1353,6 +1476,9 @@
               <td>{{.DurationMonths}} {{t $.Lang "months"}}</td>
               <td>{{.Purpose}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}{{if .CurrentApprovalStage}}<small>{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}</small>{{end}}</td>
+              <td>{{t $.Lang (printf "admin_loan_source_%s" .CreationSource)}}</td>
+              <td>{{if .CreatedByName}}{{.CreatedByName}}{{else}}{{t $.Lang "none"}}{{end}}</td>
+              <td>{{if .BatchID}}<a href="/admin/loan-request-batches/{{.BatchID}}">{{.BatchID}}</a>{{else}}{{t $.Lang "none"}}{{end}}</td>
               <td>{{.CreatedAt}}</td>
               <td class="review-cell">
                 <a class="button-link button-link-secondary" href="#loan-request-review-{{.ID}}">{{t $.Lang "review"}}</a>
@@ -1370,6 +1496,7 @@
                       <div><span>{{t $.Lang "duration"}}</span><strong>{{.DurationMonths}} {{t $.Lang "months"}}</strong></div>
                       <div><span>{{t $.Lang "purpose"}}</span><strong>{{.Purpose}}</strong></div>
                       <div><span>{{t $.Lang "status"}}</span><strong>{{t $.Lang (printf "status_%s" .Status)}}{{if .CurrentApprovalStage}} · {{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}{{end}}</strong></div>
+                      <div><span>{{t $.Lang "admin_loan_provenance"}}</span><strong>{{t $.Lang (printf "admin_loan_source_%s" .CreationSource)}} · {{if .CreatedByName}}{{.CreatedByName}}{{else}}{{t $.Lang "admin_loan_source_member"}}{{end}}{{if .BatchID}} · <a href="/admin/loan-request-batches/{{.BatchID}}">{{.BatchID}}</a>{{end}}</strong></div>
                     </div>
                     {{if and (eq $.Role "super_admin") (index $.Permissions "requests.override") (eq .Status "pending")}}
                     <div class="review-modal-actions">
@@ -1416,6 +1543,14 @@
                     </div>
                     {{else}}
                     <p>{{t $.Lang "read_only"}}</p>
+                    {{end}}
+                    {{if and (eq .Status "pending") (eq .CreationSource "admin")}}
+                    {{if or (and (eq $.Role "admin") (eq .CreatedByID $.CurrentUser.ID)) (eq $.Role "super_admin")}}
+                    <form class="inline-rejection-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/cancel" hx-post="/api/admin/loan-requests/{{.ID}}/cancel" hx-target="#loan-review-error" hx-swap="innerHTML">
+                      <label>{{t $.Lang "admin_loan_cancellation_reason"}} <input name="cancellation_reason" required></label>
+                      <button class="button-secondary" type="submit">{{t $.Lang "cancel"}}</button>
+                    </form>
+                    {{end}}
                     {{end}}
                     {{if .ApprovalHistory}}<section class="review-approval-history"><h3>{{t $.Lang "approval_history"}}</h3><ol>{{range .ApprovalHistory}}<li>{{t $.Lang (printf "role_%s" .OfficerRole)}} — {{t $.Lang (printf "status_%s" .Decision)}} — {{.OfficerName}} — {{.CreatedAt}}{{if .Note}} · {{.Note}}{{end}}{{if .Reason}} · {{.Reason}}{{end}}</li>{{end}}</ol></section>{{end}}
                   </div>

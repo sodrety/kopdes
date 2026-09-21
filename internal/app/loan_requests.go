@@ -3,6 +3,7 @@ package app
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -39,6 +40,10 @@ type AdminLoanRequest struct {
 	MaxLoanAmount   int64              `json:"max_loan_amount"`
 	ApprovalHistory []ApprovalDecision `json:"approval_history"`
 	CanDecide       bool               `json:"can_decide"`
+	CreationSource  string             `json:"creation_source"`
+	CreatedByID     string             `json:"created_by_id,omitempty"`
+	CreatedByName   string             `json:"created_by_name,omitempty"`
+	BatchID         string             `json:"batch_id,omitempty"`
 }
 
 type loanRequestInput struct {
@@ -130,7 +135,7 @@ func (s *Server) memberLoanRequests(c *gin.Context) {
 
 func (s *Server) adminLoanRequests(c *gin.Context) {
 	user, _ := currentUser(c)
-	requests, err := s.loanRequestsForAdmin(c.Query("status"))
+	requests, err := s.loanRequestsForAdminFiltered(c.Query("status"), c.Query("source"), c.Query("batch_id"))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
@@ -191,18 +196,7 @@ var (
 
 func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanRequest, error) {
 	loanType := strings.TrimSpace(req.LoanType)
-	maxDuration := 0
-	switch loanType {
-	case "regular":
-		maxDuration = maxRegularLoanDurationMonths
-	case "secondary_goods":
-		maxDuration = maxSecondaryGoodsDuration
-	case "goods_purchase_paylater":
-		maxDuration = 1
-	default:
-		return LoanRequest{}, errInvalidLoanRequest
-	}
-	if req.RequestedAmount <= 0 || req.DurationMonths <= 0 || req.DurationMonths > maxDuration || strings.TrimSpace(req.Purpose) == "" {
+	if err := validateLoanRequestInput(req); err != nil {
 		return LoanRequest{}, errInvalidLoanRequest
 	}
 	s.financialMu.Lock()
@@ -313,14 +307,31 @@ func (s *Server) loanRequestsByMember(memberID string) ([]LoanRequest, error) {
 }
 
 func (s *Server) loanRequestsForAdmin(status string) ([]AdminLoanRequest, error) {
+	return s.loanRequestsForAdminFiltered(status, "", "")
+}
+
+func (s *Server) loanRequestsForAdminFiltered(status, source, batchID string) ([]AdminLoanRequest, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.loan_type, lr.legacy_terms, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_admin_fee_policy,''), lr.proposed_monthly_admin_fee, COALESCE(lr.proposed_total_admin_fee,0), COALESCE(lr.proposed_total_obligation,0), lr.rejection_reason, lr.created_at, lr.updated_at
+	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.loan_type, lr.legacy_terms, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_admin_fee_policy,''), lr.proposed_monthly_admin_fee, COALESCE(lr.proposed_total_admin_fee,0), COALESCE(lr.proposed_total_obligation,0), lr.rejection_reason, lr.created_at, lr.updated_at, COALESCE(lr.creation_source,'member'), COALESCE(lr.created_by,''), COALESCE(creator.full_name,creator.email,''), COALESCE(lr.batch_id,'')
 		FROM loan_requests lr
-		INNER JOIN members m ON m.id = lr.member_id`
+		INNER JOIN members m ON m.id = lr.member_id
+		LEFT JOIN users creator ON creator.id = lr.created_by`
 	args := []any{}
+	filters := []string{}
 	if status != "" {
-		query += ` WHERE lr.status = $1`
+		filters = append(filters, fmt.Sprintf("lr.status = $%d", len(args)+1))
 		args = append(args, status)
+	}
+	if source != "" {
+		filters = append(filters, fmt.Sprintf("COALESCE(lr.creation_source,'member') = $%d", len(args)+1))
+		args = append(args, source)
+	}
+	if batchID != "" {
+		filters = append(filters, fmt.Sprintf("lr.batch_id = $%d", len(args)+1))
+		args = append(args, batchID)
+	}
+	if len(filters) > 0 {
+		query += ` WHERE ` + strings.Join(filters, " AND ")
 	}
 	query += ` ORDER BY lr.created_at DESC`
 
@@ -331,7 +342,7 @@ func (s *Server) loanRequestsForAdmin(status string) ([]AdminLoanRequest, error)
 	var requests []AdminLoanRequest
 	for rows.Next() {
 		var request AdminLoanRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.CreationSource, &request.CreatedByID, &request.CreatedByName, &request.BatchID); err != nil {
 			return nil, err
 		}
 		requests = append(requests, request)

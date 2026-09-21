@@ -298,14 +298,36 @@ func (s *Server) adminMemberDetailPage(c *gin.Context) {
 }
 
 func (s *Server) adminLoanRequestsPage(c *gin.Context) {
-	requests, err := s.loanRequestsForAdmin("pending")
+	status := c.Query("status")
+	if status == "" {
+		status = "pending"
+	}
+	requests, err := s.loanRequestsForAdminFiltered(status, c.Query("source"), c.Query("batch_id"))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	members, err := s.allMembers()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	activeMembers := members[:0]
+	for _, member := range members {
+		if member.Status == "active" {
+			activeMembers = append(activeMembers, member)
+		}
+	}
+	current, _ := currentUser(c)
 	renderPage(c, "admin-loan-requests", pageData(c, "Loan request review - KKSUK PD Dharma Jaya", "loan-requests", "loan_request_review", "inspect_pending_loan_requests", gin.H{
-		"LoanRequests": requests,
-		"CurrentDate":  time.Now().In(jakartaLocation).Format("2006-01-02"),
+		"LoanRequests":         requests,
+		"Members":              activeMembers,
+		"AdminCanCreate":       current.Role == "admin",
+		"SingleIdempotencyKey": newID(),
+		"LoanRequestStatus":    status,
+		"LoanRequestSource":    c.Query("source"),
+		"LoanRequestBatchID":   c.Query("batch_id"),
+		"CurrentDate":          time.Now().In(jakartaLocation).Format("2006-01-02"),
 	}))
 }
 
