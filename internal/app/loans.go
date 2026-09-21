@@ -316,11 +316,12 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 	if request.Status != "pending" {
 		return LoanApprovalResult{}, errLoanRequestNotPending
 	}
-	if request.Stage != officer.Role {
+	stageRole := approvalStageForOfficer(officer.Role)
+	if request.Stage != stageRole {
 		return LoanApprovalResult{}, errWrongApprovalStage
 	}
 
-	if officer.Role == approvalStageManager {
+	if stageRole == approvalStageManager {
 		startDate := strings.TrimSpace(req.StartDate)
 		if req.ApprovedAmount <= 0 || req.DurationMonths <= 0 || startDate == "" {
 			return LoanApprovalResult{}, errInvalidLoanApproval
@@ -385,15 +386,15 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 	if err := resolveRequestNotifications(tx, "loan", requestID); err != nil {
 		return LoanApprovalResult{}, err
 	}
-	if officer.Role == approvalStageManager && (request.ProposedApprovedAmount != request.RequestedAmount || request.ProposedDurationMonths != request.RequestedDurationMonths) {
+	if stageRole == approvalStageManager && (request.ProposedApprovedAmount != request.RequestedAmount || request.ProposedDurationMonths != request.RequestedDurationMonths) {
 		if err := createMemberLoanTermsChangedNotification(tx, requestID, request.MemberID); err != nil {
 			return LoanApprovalResult{}, err
 		}
 	}
 
-	nextStage := nextLoanApprovalStage(officer.Role)
+	nextStage := nextLoanApprovalStage(stageRole)
 	if nextStage != "" {
-		result, err := tx.Exec(`UPDATE loan_requests SET current_approval_stage=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='pending' AND current_approval_stage=$3`, nextStage, requestID, officer.Role)
+		result, err := tx.Exec(`UPDATE loan_requests SET current_approval_stage=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='pending' AND current_approval_stage=$3`, nextStage, requestID, stageRole)
 		if err != nil {
 			return LoanApprovalResult{}, err
 		}

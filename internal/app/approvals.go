@@ -31,6 +31,13 @@ type ApprovalDecision struct {
 
 var errWrongApprovalStage = errors.New("wrong approval stage")
 
+func approvalStageForOfficer(role string) string {
+	if role == "admin" {
+		return approvalStageManager
+	}
+	return role
+}
+
 func nextApprovalStage(stage string) string {
 	switch stage {
 	case approvalStageManager:
@@ -65,8 +72,9 @@ func insertApprovalDecision(tx *sql.Tx, table, requestID string, officer User, d
 	if name == "" {
 		name = officer.Email
 	}
+	stage := approvalStageForOfficer(officer.Role)
 	query := `INSERT INTO ` + table + ` (id,request_id,stage,decision,officer_id,officer_member_id,officer_member_no,officer_name,officer_role,note,reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`
-	_, err := tx.Exec(query, newID(), requestID, officer.Role, decision, officer.ID, officer.MemberID.String, officer.MemberNo, name, officer.Role, strings.TrimSpace(note), strings.TrimSpace(reason))
+	_, err := tx.Exec(query, newID(), requestID, stage, decision, officer.ID, officer.MemberID.String, officer.MemberNo, name, officer.Role, strings.TrimSpace(note), strings.TrimSpace(reason))
 	return err
 }
 
@@ -110,7 +118,13 @@ func createStageNotification(tx *sql.Tx, requestType, requestID, stage, link str
 	if _, err := tx.Exec(`INSERT INTO notification_events (id,event_type,request_type,request_id,payload) VALUES ($1,'approval_stage_ready',$2,$3,$4)`, eventID, requestType, requestID, string(payload)); err != nil {
 		return err
 	}
-	rows, err := tx.Query(`SELECT u.id FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE WHERE oa.role=$1 AND oa.active=TRUE AND m.status='active' AND u.active=TRUE`, stage)
+	var rows *sql.Rows
+	var err error
+	if stage == approvalStageManager {
+		rows, err = tx.Query(`SELECT u.id FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE WHERE oa.role IN ('manager','admin') AND oa.active=TRUE AND m.status='active' AND u.active=TRUE`)
+	} else {
+		rows, err = tx.Query(`SELECT u.id FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE WHERE oa.role=$1 AND oa.active=TRUE AND m.status='active' AND u.active=TRUE`, stage)
+	}
 	if err != nil {
 		return err
 	}
@@ -156,6 +170,7 @@ func syncOfficerNotifications(tx *sql.Tx, userID, role string, active bool) erro
 		Link        string
 	}
 	var pending []pendingRequest
+	stage := approvalStageForOfficer(role)
 	for _, source := range []struct {
 		RequestType string
 		Table       string
@@ -164,7 +179,7 @@ func syncOfficerNotifications(tx *sql.Tx, userID, role string, active bool) erro
 		{RequestType: "loan", Table: "loan_requests", Link: "/admin/loan-requests"},
 		{RequestType: "withdrawal", Table: "withdrawal_requests", Link: "/admin/withdrawal-requests"},
 	} {
-		rows, err := tx.Query(`SELECT id FROM `+source.Table+` WHERE status='pending' AND current_approval_stage=$1 ORDER BY created_at,id`, role)
+		rows, err := tx.Query(`SELECT id FROM `+source.Table+` WHERE status='pending' AND current_approval_stage=$1 ORDER BY created_at,id`, stage)
 		if err != nil {
 			return err
 		}

@@ -51,6 +51,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.Use(server.observeRequests())
 	router.Use(server.securityHeaders())
 	router.Use(server.requireSameOriginForCookieMutations())
+	router.Use(server.auditPrivilegedMutations())
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -81,6 +82,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	admin.GET("/members/:id", server.requirePermission(PermissionMembersView), server.getMember)
 	admin.POST("/members/:id/type", server.requirePermission(PermissionMembersManage), server.updateMemberType)
 	admin.POST("/members/:id/bank-details", server.requirePermission(PermissionMembersManage), server.updateMemberBankDetails)
+	admin.POST("/members/:id/tagihan-config", server.requireRole("admin"), server.updateMemberTagihanConfig)
 	admin.POST("/members/:id/user", server.requirePermission(PermissionMemberAccountsManage), server.createMemberUser)
 	admin.POST("/members/:id/user/update", server.requirePermission(PermissionMemberAccountsManage), server.updateMemberUser)
 	admin.POST("/members/:id/user/reset-password", server.requirePermission(PermissionMemberAccountsManage), server.resetMemberPassword)
@@ -89,15 +91,21 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	admin.GET("/withdrawal-requests", server.requirePermission(PermissionRequestsView), server.adminWithdrawalRequests)
 	admin.POST("/withdrawal-requests/:id/approve", server.requirePermission(PermissionRequestsDecide), server.approveWithdrawalRequest)
 	admin.POST("/withdrawal-requests/:id/reject", server.requirePermission(PermissionRequestsDecide), server.rejectWithdrawalRequest)
+	admin.POST("/withdrawal-requests/:id/override-approve", server.requirePermission(PermissionRequestsOverride), server.overrideWithdrawalRequest)
+	admin.POST("/withdrawal-requests/:id/override-reject", server.requirePermission(PermissionRequestsOverride), server.overrideWithdrawalRejection)
 	admin.GET("/loan-requests", server.requirePermission(PermissionRequestsView), server.adminLoanRequests)
 	admin.POST("/loan-requests/:id/approve", server.requirePermission(PermissionRequestsDecide), server.approveLoanRequest)
 	admin.POST("/loan-requests/:id/reject", server.requirePermission(PermissionRequestsDecide), server.rejectLoanRequest)
+	admin.POST("/loan-requests/:id/override-approve", server.requirePermission(PermissionRequestsOverride), server.overrideLoanRequest)
+	admin.POST("/loan-requests/:id/override-reject", server.requirePermission(PermissionRequestsOverride), server.overrideLoanRejection)
 	admin.GET("/loans", server.requirePermission(PermissionLoansView), server.adminLoans)
 	admin.GET("/loans/:id", server.requirePermission(PermissionLoansView), server.adminLoanDetail)
 	admin.POST("/loans/:id/repayments", server.requirePermission(PermissionRepaymentsRecord), server.recordLoanRepayment)
 	admin.POST("/transactions", server.requirePermission(PermissionTransactionsRecord), server.recordManualCashTransaction)
 	admin.POST("/transaction-categories", server.requirePermission(PermissionTransactionCategoriesManage), server.createCashTransactionCategory)
 	admin.POST("/transaction-categories/:id/update", server.requirePermission(PermissionTransactionCategoriesManage), server.updateCashTransactionCategory)
+	admin.GET("/transaction-categories/template.xlsx", server.requirePermission(PermissionTransactionCategoriesManage), server.downloadCashTransactionCategoryTemplate)
+	admin.POST("/transaction-categories/import", server.requirePermission(PermissionTransactionCategoriesManage), server.importCashTransactionCategoryTemplate)
 	admin.GET("/exports/savings.csv", server.requirePermission(PermissionReportsView), server.exportSavingsCSV)
 	admin.GET("/exports/withdrawal-requests.csv", server.requirePermission(PermissionReportsView), server.exportWithdrawalRequestsCSV)
 	admin.GET("/exports/loans.csv", server.requirePermission(PermissionReportsView), server.exportLoansCSV)
@@ -263,6 +271,9 @@ func (s *Server) login(c *gin.Context) {
 	}
 
 	redirectPath := "/member/dashboard"
+	if user.Role == "super_admin" {
+		redirectPath = "/admin/dashboard"
+	}
 	if user.MustChangePassword {
 		redirectPath = "/password/change"
 	}
@@ -428,13 +439,22 @@ func (s *Server) validateSessionUser(tokenUser User) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
-	if !current.Active || current.MemberStatus != "active" || current.Role != tokenUser.Role || !strings.EqualFold(current.Email, tokenUser.Email) {
+	if !current.Active || current.Role != tokenUser.Role || !strings.EqualFold(current.Email, tokenUser.Email) {
+		return User{}, ErrUnauthorized
+	}
+	if current.Role != "super_admin" && current.MemberStatus != "active" {
 		return User{}, ErrUnauthorized
 	}
 	return current, nil
 }
 
 func (s *Server) validateMemberSession(tokenUser, current User) error {
+	if current.Role == "super_admin" {
+		if current.MemberID.Valid || tokenUser.MemberID.Valid {
+			return ErrUnauthorized
+		}
+		return nil
+	}
 	if !current.MemberID.Valid || !tokenUser.MemberID.Valid || current.MemberID.String != tokenUser.MemberID.String {
 		return ErrUnauthorized
 	}

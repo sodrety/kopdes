@@ -256,6 +256,12 @@ func RunSeedImport(db *sql.DB, manifest seeddata.Manifest, options SeedImportOpt
 		_ = writeSeedReport(options.ReportPath, report)
 		return report, fmt.Errorf("seed base data: %w", err)
 	}
+	if err := ensureMissingMemberTagihanConfigs(db); err != nil {
+		report.Status = "failed"
+		_ = updateSeedRun(db, runID, report.Status)
+		_ = writeSeedReport(options.ReportPath, report)
+		return report, fmt.Errorf("initialize member Tagihan configurations: %w", err)
+	}
 	if !options.Append && !needsExtendedSavingCategories {
 		if err := MigrateTo(db, 15); err != nil {
 			return report, fmt.Errorf("apply migration 15 after seed staging: %w", err)

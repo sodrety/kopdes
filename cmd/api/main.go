@@ -45,6 +45,9 @@ func main() {
 	if err := app.Migrate(db); err != nil {
 		log.Fatal(err)
 	}
+	if err := app.EnsureSuperAdminUser(db, cfg.SuperAdminEmail, cfg.SuperAdminPassword, cfg.SuperAdminName); err != nil {
+		log.Fatal(err)
+	}
 	if err := app.EnsureKetuaUtamaUser(db, cfg.KetuaUtamaMemberID, cfg.KetuaUtamaEmail, cfg.KetuaUtamaPassword); err != nil {
 		log.Fatal(err)
 	}

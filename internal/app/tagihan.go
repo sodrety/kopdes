@@ -21,7 +21,7 @@ type TagihanConfig struct {
 
 func tagihanConfiguration() TagihanConfig {
 	return TagihanConfig{
-		SavingSource: "latest_member_savings",
+		SavingSource: "member_tagihan_config",
 		ReadOnly:     true,
 	}
 }
@@ -310,14 +310,12 @@ type tagihanSavingAmounts struct {
 }
 
 func (s *Server) tagihanSavingAmounts(memberID string, statementMonth tagihanStatementMonth) (tagihanSavingAmounts, error) {
-	wajib, err := s.tagihanLatestSavingAmount(memberID, "wajib", statementMonth.CutoffDate)
+	config, err := s.memberTagihanConfig(memberID)
 	if err != nil {
 		return tagihanSavingAmounts{}, err
 	}
-	manasuka, err := s.tagihanLatestSavingAmount(memberID, "sukarela", statementMonth.CutoffDate)
-	if err != nil {
-		return tagihanSavingAmounts{}, err
-	}
+	wajib := config.SimpananWajib
+	manasuka := config.SimpananManasuka
 	if wajib > 0 && s.tagihanSavingRecordedForStatementMonth(memberID, "wajib", statementMonth) {
 		wajib = 0
 	}

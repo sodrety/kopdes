@@ -420,6 +420,9 @@ func (s *Server) insertMember(req memberRequest) (Member, error) {
 	if err != nil {
 		return Member{}, err
 	}
+	if _, err := s.db.Exec(`INSERT INTO member_tagihan_configs (member_id) VALUES ($1) ON CONFLICT (member_id) DO NOTHING`, member.ID); err != nil {
+		return Member{}, err
+	}
 	return member, nil
 }
 

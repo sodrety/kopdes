@@ -295,8 +295,34 @@ var migrations = []migration{
 		Statements: memberTypeCaseInsensitiveSyncMigrationStatements,
 	},
 	{
+		Version: 26,
+		Name:    "add_cash_transaction_category_tree",
+		Statements: []string{
+			`ALTER TABLE cash_transaction_categories ADD COLUMN category_key TEXT`,
+			`ALTER TABLE cash_transaction_categories ADD COLUMN account_code TEXT`,
+			`ALTER TABLE cash_transaction_categories ADD COLUMN normal_balance TEXT CHECK (normal_balance IS NULL OR normal_balance IN ('D','C'))`,
+			`ALTER TABLE cash_transaction_categories ADD COLUMN parent_id TEXT NULL REFERENCES cash_transaction_categories(id)`,
+			`ALTER TABLE cash_transaction_categories ADD COLUMN is_group BOOLEAN NOT NULL DEFAULT FALSE`,
+			`UPDATE cash_transaction_categories SET category_key=id WHERE category_key IS NULL OR category_key=''`,
+			`CREATE UNIQUE INDEX idx_cash_transaction_categories_category_key ON cash_transaction_categories(category_key)`,
+			`CREATE INDEX idx_cash_transaction_categories_parent ON cash_transaction_categories(parent_id)`,
+		},
+	},
+	{
 		Version: 27,
 		Name:    "change_loan_approval_hierarchy",
+	},
+	{
+		Version: 28,
+		Name:    "add_super_admin_support",
+	},
+	{
+		Version: 29,
+		Name:    "add_admin_role_and_member_tagihan_config",
+	},
+	{
+		Version: 30,
+		Name:    "add_admin_loan_request_intake_audit",
 	},
 }
 
@@ -357,7 +383,7 @@ func migrationApplied(db *sql.DB, version int) (bool, error) {
 
 func applyMigration(db *sql.DB, migration migration) error {
 	isSQLite := strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
-	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19 || migration.Version == 22 || migration.Version == 23) {
+	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19 || migration.Version == 22 || migration.Version == 23 || migration.Version == 26 || migration.Version == 28 || migration.Version == 29 || migration.Version == 30) {
 		conn, err := db.Conn(context.Background())
 		if err != nil {
 			return err
@@ -490,6 +516,21 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 	}
 	if migration.Version == 27 {
 		if err := changeLoanApprovalHierarchy(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 28 {
+		if err := addSuperAdminSupport(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 29 {
+		if err := addAdminRoleAndMemberTagihanConfig(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 30 {
+		if err := addAdminLoanRequestIntakeAudit(tx, isSQLite); err != nil {
 			return err
 		}
 	}

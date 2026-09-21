@@ -13,6 +13,9 @@ type Config struct {
 	DatabaseDriver              string
 	DatabaseURL                 string
 	JWTSecret                   string
+	SuperAdminEmail             string
+	SuperAdminPassword          string
+	SuperAdminName              string
 	KetuaUtamaMemberID          string
 	KetuaUtamaEmail             string
 	KetuaUtamaPassword          string
@@ -38,6 +41,9 @@ func ConfigFromEnv() (Config, error) {
 		DatabaseDriver:     envOrDefault("DATABASE_DRIVER", "pgx"),
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		JWTSecret:          os.Getenv("JWT_SECRET"),
+		SuperAdminEmail:    os.Getenv("SUPER_ADMIN_EMAIL"),
+		SuperAdminPassword: os.Getenv("SUPER_ADMIN_PASSWORD"),
+		SuperAdminName:     os.Getenv("SUPER_ADMIN_NAME"),
 		KetuaUtamaMemberID: os.Getenv("KETUA_UTAMA_MEMBER_ID"),
 		KetuaUtamaEmail:    os.Getenv("KETUA_UTAMA_EMAIL"),
 		KetuaUtamaPassword: os.Getenv("KETUA_UTAMA_PASSWORD"),

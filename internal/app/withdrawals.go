@@ -120,7 +120,7 @@ func (s *Server) adminWithdrawalRequests(c *gin.Context) {
 		return
 	}
 	for index := range requests {
-		requests[index].CanDecide = requests[index].Status == "pending" && requests[index].CurrentApprovalStage == user.Role
+		requests[index].CanDecide = requests[index].Status == "pending" && (requests[index].CurrentApprovalStage == approvalStageForOfficer(user.Role) || isSuperAdmin(user))
 	}
 	c.JSON(http.StatusOK, gin.H{"withdrawal_requests": requests})
 }
@@ -336,7 +336,7 @@ func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalReq
 		return nil, err
 	}
 	for index := range requests {
-		requests[index].ApprovalHistory, err = approvalHistory(s.db, "withdrawal_request_approvals", requests[index].ID, true)
+		requests[index].ApprovalHistory, err = approvalHistoryWithOverrides(s.db, "withdrawal_request_approvals", "withdrawal", requests[index].ID, true)
 		if err != nil {
 			return nil, err
 		}
@@ -369,7 +369,8 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	if request.Status != "pending" {
 		return WithdrawalRequest{}, errWithdrawalRequestNotPending
 	}
-	if request.CurrentApprovalStage != officer.Role {
+	stageRole := approvalStageForOfficer(officer.Role)
+	if request.CurrentApprovalStage != stageRole {
 		return WithdrawalRequest{}, errWrongApprovalStage
 	}
 	if err := insertApprovalDecision(tx, "withdrawal_request_approvals", requestID, officer, "approved", req.Note, ""); err != nil {
@@ -378,9 +379,9 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	if err := resolveRequestNotifications(tx, "withdrawal", requestID); err != nil {
 		return WithdrawalRequest{}, err
 	}
-	nextStage := nextApprovalStage(officer.Role)
+	nextStage := nextApprovalStage(stageRole)
 	if nextStage != "" {
-		result, err := tx.Exec(`UPDATE withdrawal_requests SET current_approval_stage=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='pending' AND current_approval_stage=$3`, nextStage, requestID, officer.Role)
+		result, err := tx.Exec(`UPDATE withdrawal_requests SET current_approval_stage=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='pending' AND current_approval_stage=$3`, nextStage, requestID, stageRole)
 		if err != nil {
 			return WithdrawalRequest{}, err
 		}
@@ -482,7 +483,8 @@ func (s *Server) rejectWithdrawalRequestByID(requestID string, officer User, req
 	if status != "pending" {
 		return WithdrawalRequest{}, errWithdrawalRequestNotPending
 	}
-	if stage != officer.Role {
+	stageRole := approvalStageForOfficer(officer.Role)
+	if stage != stageRole {
 		return WithdrawalRequest{}, errWrongApprovalStage
 	}
 	if err := insertApprovalDecision(tx, "withdrawal_request_approvals", requestID, officer, "rejected", "", reason); err != nil {
@@ -495,7 +497,7 @@ func (s *Server) rejectWithdrawalRequestByID(requestID string, officer User, req
 		officer.ID,
 		reason,
 		requestID,
-		officer.Role,
+		stageRole,
 	)
 	if err != nil {
 		return WithdrawalRequest{}, err
@@ -586,7 +588,7 @@ func (s *Server) withdrawalRequestByID(id string) (WithdrawalRequest, error) {
 		id,
 	).Scan(&request.ID, &request.MemberID, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt)
 	if err == nil {
-		request.LatestDecision, err = latestApprovalDecision(s.db, "withdrawal_request_approvals", request.ID)
+		request.LatestDecision, err = latestDecisionWithOverrides(s.db, "withdrawal_request_approvals", "withdrawal", request.ID)
 	}
 	return request, err
 }

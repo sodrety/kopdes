@@ -136,7 +136,7 @@ func (s *Server) adminLoanRequests(c *gin.Context) {
 		return
 	}
 	for index := range requests {
-		requests[index].CanDecide = requests[index].Status == "pending" && requests[index].CurrentApprovalStage == user.Role
+		requests[index].CanDecide = requests[index].Status == "pending" && (requests[index].CurrentApprovalStage == approvalStageForOfficer(user.Role) || isSuperAdmin(user))
 	}
 	c.JSON(http.StatusOK, gin.H{"loan_requests": requests})
 }
@@ -349,7 +349,7 @@ func (s *Server) loanRequestsForAdmin(status string) ([]AdminLoanRequest, error)
 			return nil, summaryErr
 		}
 		requests[index].MaxLoanAmount = maxLoanAmountForSavingBalance(summary.CurrentBalance)
-		requests[index].ApprovalHistory, err = approvalHistory(s.db, "loan_request_approvals", requests[index].ID, true)
+		requests[index].ApprovalHistory, err = approvalHistoryWithOverrides(s.db, "loan_request_approvals", "loan", requests[index].ID, true)
 		if err != nil {
 			return nil, err
 		}
@@ -378,7 +378,8 @@ func (s *Server) rejectLoanRequestByID(requestID string, officer User, req rejec
 	if status != "pending" {
 		return LoanRequest{}, errLoanRequestNotPending
 	}
-	if stage != officer.Role {
+	stageRole := approvalStageForOfficer(officer.Role)
+	if stage != stageRole {
 		return LoanRequest{}, errWrongApprovalStage
 	}
 	if err := insertApprovalDecision(tx, "loan_request_approvals", requestID, officer, "rejected", "", reason); err != nil {
@@ -391,7 +392,7 @@ func (s *Server) rejectLoanRequestByID(requestID string, officer User, req rejec
 		officer.ID,
 		reason,
 		requestID,
-		officer.Role,
+		stageRole,
 	)
 	if err != nil {
 		return LoanRequest{}, err
@@ -475,7 +476,7 @@ func (s *Server) loanRequestByID(id string) (LoanRequest, error) {
 		id,
 	).Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt)
 	if err == nil {
-		request.LatestDecision, err = latestApprovalDecision(s.db, "loan_request_approvals", request.ID)
+		request.LatestDecision, err = latestDecisionWithOverrides(s.db, "loan_request_approvals", "loan", request.ID)
 	}
 	return request, err
 }

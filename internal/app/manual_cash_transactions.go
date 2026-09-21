@@ -13,12 +13,22 @@ import (
 )
 
 type CashTransactionCategory struct {
-	ID        string `json:"id"`
-	Direction string `json:"direction"`
-	Name      string `json:"name"`
-	Active    bool   `json:"active"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	ID            string `json:"id"`
+	CategoryKey   string `json:"category_key"`
+	AccountCode   string `json:"account_code,omitempty"`
+	ParentID      string `json:"parent_id,omitempty"`
+	ParentKey     string `json:"parent_key,omitempty"`
+	ParentName    string `json:"parent_name,omitempty"`
+	Direction     string `json:"direction"`
+	Name          string `json:"name"`
+	DisplayName   string `json:"display_name,omitempty"`
+	NormalBalance string `json:"normal_balance,omitempty"`
+	IsGroup       bool   `json:"is_group"`
+	HasChildren   bool   `json:"has_children"`
+	Depth         int    `json:"depth"`
+	Active        bool   `json:"active"`
+	CreatedAt     string `json:"created_at,omitempty"`
+	UpdatedAt     string `json:"updated_at,omitempty"`
 }
 
 type manualCashTransactionRequest struct {
@@ -32,27 +42,66 @@ type manualCashTransactionRequest struct {
 }
 
 type cashTransactionCategoryRequest struct {
-	Direction string `json:"direction" form:"direction"`
-	Name      string `json:"name" form:"name"`
+	Direction     string `json:"direction" form:"direction"`
+	Name          string `json:"name" form:"name"`
+	AccountCode   string `json:"account_code" form:"account_code"`
+	ParentID      string `json:"parent_id" form:"parent_id"`
+	NormalBalance string `json:"normal_balance" form:"normal_balance"`
 }
 
 type cashTransactionCategoryUpdateRequest struct {
-	Name   string `json:"name" form:"name"`
-	Active *bool  `json:"active" form:"active"`
+	Name          string `json:"name" form:"name"`
+	Active        *bool  `json:"active" form:"active"`
+	AccountCode   string `json:"account_code" form:"account_code"`
+	ParentID      string `json:"parent_id" form:"parent_id"`
+	NormalBalance string `json:"normal_balance" form:"normal_balance"`
 }
 
 var (
-	errInvalidManualCashTransaction      = errors.New("invalid manual cash transaction")
-	errFutureManualCashTransaction       = errors.New("manual cash transaction date is in the future")
-	errCashTransactionCategoryNotFound   = errors.New("cash transaction category not found")
-	errCashTransactionCategoryInactive   = errors.New("cash transaction category is inactive")
-	errCashTransactionCategoryDirection  = errors.New("cash transaction category direction mismatch")
-	errCashTransactionCategoryNameLocked = errors.New("used cash transaction category names are immutable")
-	errInvalidCashTransactionCategory    = errors.New("invalid cash transaction category")
+	errInvalidManualCashTransaction           = errors.New("invalid manual cash transaction")
+	errFutureManualCashTransaction            = errors.New("manual cash transaction date is in the future")
+	errCashTransactionCategoryNotFound        = errors.New("cash transaction category not found")
+	errCashTransactionCategoryInactive        = errors.New("cash transaction category is inactive")
+	errCashTransactionCategoryDirection       = errors.New("cash transaction category direction mismatch")
+	errCashTransactionCategoryGroup           = errors.New("cash transaction category group cannot be used directly")
+	errCashTransactionCategoryNameLocked      = errors.New("used cash transaction category names are immutable")
+	errCashTransactionCategoryDirectionLocked = errors.New("used cash transaction category directions are immutable")
+	errInvalidCashTransactionCategory         = errors.New("invalid cash transaction category")
+	errCashTransactionCategoryParentNotFound  = errors.New("cash transaction category parent not found")
+	errCashTransactionCategoryParentDirection = errors.New("cash transaction category parent direction mismatch")
+	errCashTransactionCategoryCycle           = errors.New("cash transaction category parent cycle")
 )
 
 func normalizeCashTransactionCategoryName(value string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+}
+
+func normalizeCashTransactionCategoryKey(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func normalizeCashTransactionCategoryAccountCode(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+}
+
+func validCashTransactionCategoryKey(value string) bool {
+	if value == "" || len(value) > 100 {
+		return false
+	}
+	for index, character := range value {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '_' || character == '-' {
+			if index == 0 && (character == '_' || character == '-') {
+				return false
+			}
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validCashTransactionNormalBalance(value string) bool {
+	return value == "" || value == "D" || value == "C"
 }
 
 func validateManualCashTransactionRequest(req manualCashTransactionRequest) error {
@@ -98,6 +147,8 @@ func (s *Server) recordManualCashTransaction(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_cash_transaction_category_not_found"))
 	case errors.Is(err, errCashTransactionCategoryInactive):
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_cash_transaction_category_inactive"))
+	case errors.Is(err, errCashTransactionCategoryGroup):
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_cash_transaction_category_group"))
 	case errors.Is(err, errCashTransactionCategoryDirection):
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_cash_transaction_category_direction"))
 	case isUniqueViolation(err):
@@ -130,8 +181,8 @@ func (s *Server) insertManualCashTransaction(req manualCashTransactionRequest, r
 	defer func() { _ = tx.Rollback() }()
 
 	var categoryDirection, categoryName string
-	var categoryActive bool
-	err = tx.QueryRow(`SELECT direction,name,active FROM cash_transaction_categories WHERE id=$1`, req.CategoryID).Scan(&categoryDirection, &categoryName, &categoryActive)
+	var categoryActive, categoryIsGroup bool
+	err = tx.QueryRow(`SELECT direction,name,active,is_group FROM cash_transaction_categories WHERE id=$1`, req.CategoryID).Scan(&categoryDirection, &categoryName, &categoryActive, &categoryIsGroup)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errCashTransactionCategoryNotFound
 	}
@@ -140,6 +191,9 @@ func (s *Server) insertManualCashTransaction(req manualCashTransactionRequest, r
 	}
 	if !categoryActive {
 		return nil, errCashTransactionCategoryInactive
+	}
+	if categoryIsGroup {
+		return nil, errCashTransactionCategoryGroup
 	}
 	if categoryDirection != req.Direction {
 		return nil, errCashTransactionCategoryDirection
@@ -242,11 +296,11 @@ func (s *Server) manualCashTotals(dateFrom, dateTo string) (income, expense, inc
 }
 
 func (s *Server) cashTransactionCategoriesForAdmin(includeInactive bool) ([]CashTransactionCategory, error) {
-	query := `SELECT id,direction,name,active,CAST(created_at AS TEXT),CAST(updated_at AS TEXT) FROM cash_transaction_categories`
+	query := `SELECT c.id,COALESCE(NULLIF(c.category_key,''),c.id),COALESCE(c.account_code,''),COALESCE(c.parent_id,''),COALESCE(p.category_key,''),c.direction,c.name,COALESCE(c.normal_balance,''),c.is_group,c.active,CAST(c.created_at AS TEXT),CAST(c.updated_at AS TEXT),EXISTS (SELECT 1 FROM cash_transaction_categories child WHERE child.parent_id=c.id) FROM cash_transaction_categories c LEFT JOIN cash_transaction_categories p ON p.id=c.parent_id`
 	if !includeInactive {
-		query += ` WHERE active=TRUE`
+		query += ` WHERE c.active=TRUE`
 	}
-	query += ` ORDER BY direction,name`
+	query += ` ORDER BY c.direction,COALESCE(NULLIF(c.account_code,''),'999999999'),c.name,c.id`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -255,12 +309,15 @@ func (s *Server) cashTransactionCategoriesForAdmin(includeInactive bool) ([]Cash
 	var categories []CashTransactionCategory
 	for rows.Next() {
 		var category CashTransactionCategory
-		if err := rows.Scan(&category.ID, &category.Direction, &category.Name, &category.Active, &category.CreatedAt, &category.UpdatedAt); err != nil {
+		if err := rows.Scan(&category.ID, &category.CategoryKey, &category.AccountCode, &category.ParentID, &category.ParentKey, &category.Direction, &category.Name, &category.NormalBalance, &category.IsGroup, &category.Active, &category.CreatedAt, &category.UpdatedAt, &category.HasChildren); err != nil {
 			return nil, err
 		}
 		categories = append(categories, category)
 	}
-	return categories, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return flattenCashTransactionCategories(categories), nil
 }
 
 func (s *Server) createCashTransactionCategory(c *gin.Context) {
@@ -278,6 +335,12 @@ func (s *Server) createCashTransactionCategory(c *gin.Context) {
 	switch {
 	case errors.Is(err, errInvalidCashTransactionCategory):
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_cash_transaction_category"))
+	case errors.Is(err, errCashTransactionCategoryParentNotFound):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_cash_transaction_category_parent_not_found"))
+	case errors.Is(err, errCashTransactionCategoryParentDirection):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_cash_transaction_category_parent_direction"))
+	case errors.Is(err, errCashTransactionCategoryCycle):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_cash_transaction_category_cycle"))
 	case isUniqueViolation(err):
 		respondError(c, http.StatusConflict, "DUPLICATE_DATA", translate(languageFromRequest(c), "error_cash_transaction_category_exists"))
 	case err != nil:
@@ -290,17 +353,31 @@ func (s *Server) createCashTransactionCategory(c *gin.Context) {
 func (s *Server) insertCashTransactionCategory(actorID string, req cashTransactionCategoryRequest) (CashTransactionCategory, error) {
 	req.Direction = strings.TrimSpace(req.Direction)
 	req.Name = normalizeCashTransactionCategoryName(req.Name)
-	if !validCashTransactionDirection(req.Direction) || req.Name == "" {
+	req.AccountCode = normalizeCashTransactionCategoryAccountCode(req.AccountCode)
+	req.ParentID = strings.TrimSpace(req.ParentID)
+	req.NormalBalance = strings.ToUpper(strings.TrimSpace(req.NormalBalance))
+	if !validCashTransactionDirection(req.Direction) || req.Name == "" || len(req.Name) > 100 || !validCashTransactionNormalBalance(req.NormalBalance) {
 		return CashTransactionCategory{}, errInvalidCashTransactionCategory
 	}
-	category := CashTransactionCategory{ID: newID(), Direction: req.Direction, Name: req.Name, Active: true}
+	category := CashTransactionCategory{ID: newID(), CategoryKey: cashTransactionCategoryKey(req.Direction, req.AccountCode, req.Name), AccountCode: req.AccountCode, ParentID: req.ParentID, Direction: req.Direction, Name: req.Name, NormalBalance: req.NormalBalance, Active: true}
+	if !validCashTransactionCategoryKey(category.CategoryKey) {
+		return CashTransactionCategory{}, errInvalidCashTransactionCategory
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return CashTransactionCategory{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`INSERT INTO cash_transaction_categories (id,direction,name,active,created_by) VALUES ($1,$2,$3,TRUE,$4)`, category.ID, category.Direction, category.Name, actorID); err != nil {
+	if err := validateCashTransactionCategoryParentTx(tx, category.ID, category.ParentID, category.Direction); err != nil {
 		return CashTransactionCategory{}, err
+	}
+	if _, err := tx.Exec(`INSERT INTO cash_transaction_categories (id,category_key,account_code,parent_id,direction,name,normal_balance,is_group,active,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,FALSE,TRUE,$8)`, category.ID, category.CategoryKey, category.AccountCode, nullIfEmpty(category.ParentID), category.Direction, category.Name, nullIfEmpty(category.NormalBalance), actorID); err != nil {
+		return CashTransactionCategory{}, err
+	}
+	if category.ParentID != "" {
+		if _, err := tx.Exec(`UPDATE cash_transaction_categories SET is_group=TRUE WHERE id=$1`, category.ParentID); err != nil {
+			return CashTransactionCategory{}, err
+		}
 	}
 	if _, err := tx.Exec(`INSERT INTO cash_transaction_category_audits (id,category_id,actor_id,action,new_name) VALUES ($1,$2,$3,'created',$4)`, newID(), category.ID, actorID, category.Name); err != nil {
 		return CashTransactionCategory{}, err
@@ -327,12 +404,27 @@ func (s *Server) updateCashTransactionCategory(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_cash_transaction_category"))
 		return
 	}
+	req.AccountCode = normalizeCashTransactionCategoryAccountCode(req.AccountCode)
+	req.ParentID = strings.TrimSpace(req.ParentID)
+	req.NormalBalance = strings.ToUpper(strings.TrimSpace(req.NormalBalance))
+	if !validCashTransactionNormalBalance(req.NormalBalance) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_cash_transaction_category"))
+		return
+	}
 	category, err := s.updateCashTransactionCategoryByID(actor.ID, c.Param("id"), req)
 	switch {
 	case errors.Is(err, errCashTransactionCategoryNotFound):
 		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_cash_transaction_category_not_found"))
 	case errors.Is(err, errCashTransactionCategoryNameLocked):
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_cash_transaction_category_name_locked"))
+	case errors.Is(err, errCashTransactionCategoryDirectionLocked):
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_cash_transaction_category_direction_locked"))
+	case errors.Is(err, errCashTransactionCategoryParentNotFound):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_cash_transaction_category_parent_not_found"))
+	case errors.Is(err, errCashTransactionCategoryParentDirection):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_cash_transaction_category_parent_direction"))
+	case errors.Is(err, errCashTransactionCategoryCycle):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_cash_transaction_category_cycle"))
 	case isUniqueViolation(err):
 		respondError(c, http.StatusConflict, "DUPLICATE_DATA", translate(languageFromRequest(c), "error_cash_transaction_category_exists"))
 	case err != nil:
@@ -349,7 +441,7 @@ func (s *Server) updateCashTransactionCategoryByID(actorID, id string, req cashT
 	}
 	defer func() { _ = tx.Rollback() }()
 	var current CashTransactionCategory
-	err = tx.QueryRow(`SELECT id,direction,name,active,CAST(created_at AS TEXT),CAST(updated_at AS TEXT) FROM cash_transaction_categories WHERE id=$1`, id).Scan(&current.ID, &current.Direction, &current.Name, &current.Active, &current.CreatedAt, &current.UpdatedAt)
+	err = tx.QueryRow(`SELECT id,COALESCE(NULLIF(category_key,''),id),COALESCE(account_code,''),COALESCE(parent_id,''),direction,name,COALESCE(normal_balance,''),is_group,active,CAST(created_at AS TEXT),CAST(updated_at AS TEXT) FROM cash_transaction_categories WHERE id=$1`, id).Scan(&current.ID, &current.CategoryKey, &current.AccountCode, &current.ParentID, &current.Direction, &current.Name, &current.NormalBalance, &current.IsGroup, &current.Active, &current.CreatedAt, &current.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CashTransactionCategory{}, errCashTransactionCategoryNotFound
 	}
@@ -365,8 +457,16 @@ func (s *Server) updateCashTransactionCategoryByID(actorID, id string, req cashT
 			return CashTransactionCategory{}, errCashTransactionCategoryNameLocked
 		}
 	}
-	if _, err := tx.Exec(`UPDATE cash_transaction_categories SET name=$1,active=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$3`, req.Name, *req.Active, id); err != nil {
+	if err := validateCashTransactionCategoryParentTx(tx, id, req.ParentID, current.Direction); err != nil {
 		return CashTransactionCategory{}, err
+	}
+	if _, err := tx.Exec(`UPDATE cash_transaction_categories SET name=$1,account_code=$2,parent_id=$3,normal_balance=$4,active=$5,updated_at=CURRENT_TIMESTAMP WHERE id=$6`, req.Name, nullIfEmpty(req.AccountCode), nullIfEmpty(req.ParentID), nullIfEmpty(req.NormalBalance), *req.Active, id); err != nil {
+		return CashTransactionCategory{}, err
+	}
+	if req.ParentID != "" {
+		if _, err := tx.Exec(`UPDATE cash_transaction_categories SET is_group=TRUE WHERE id=$1`, req.ParentID); err != nil {
+			return CashTransactionCategory{}, err
+		}
 	}
 	if current.Name != req.Name {
 		if _, err := tx.Exec(`INSERT INTO cash_transaction_category_audits (id,category_id,actor_id,action,old_name,new_name) VALUES ($1,$2,$3,'renamed',$4,$5)`, newID(), id, actorID, current.Name, req.Name); err != nil {
@@ -385,6 +485,6 @@ func (s *Server) updateCashTransactionCategoryByID(actorID, id string, req cashT
 	if err := tx.Commit(); err != nil {
 		return CashTransactionCategory{}, err
 	}
-	current.Name, current.Active = req.Name, *req.Active
+	current.Name, current.AccountCode, current.ParentID, current.NormalBalance, current.Active = req.Name, req.AccountCode, req.ParentID, req.NormalBalance, *req.Active
 	return current, nil
 }

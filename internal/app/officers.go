@@ -54,6 +54,7 @@ type resetOfficerPasswordInput struct {
 
 var (
 	errInvalidOfficer           = errors.New("invalid officer")
+	errAdminRoleSuperAdminOnly  = errors.New("admin role requires super admin")
 	errOfficerNotFound          = errors.New("officer not found")
 	errLastActiveKetuaUtama     = errors.New("last active ketua utama")
 	errInvalidTemporaryPassword = errors.New("invalid temporary password")
@@ -106,6 +107,10 @@ func (s *Server) createOfficer(c *gin.Context) {
 		return
 	}
 	officer, err := s.insertOfficer(actor, req)
+	if errors.Is(err, errAdminRoleSuperAdminOnly) {
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(languageFromRequest(c), "error_admin_role_super_admin_only"))
+		return
+	}
 	if errors.Is(err, errMemberLoginRequired) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_member_login_required"))
 		return
@@ -145,6 +150,10 @@ func (s *Server) updateOfficer(c *gin.Context) {
 		return
 	}
 	officer, err := s.updateOfficerByID(actor, c.Param("id"), req)
+	if errors.Is(err, errAdminRoleSuperAdminOnly) {
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(languageFromRequest(c), "error_admin_role_super_admin_only"))
+		return
+	}
 	if errors.Is(err, errInvalidOfficer) || errors.Is(err, errInactiveOfficerMember) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid Officer details")
 		return
@@ -210,7 +219,11 @@ func (s *Server) changePassword(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	respondOKOrHXRedirect(c, "/member/dashboard", gin.H{"status": "ok"})
+	redirectPath := "/member/dashboard"
+	if user.Role == "super_admin" {
+		redirectPath = "/admin/dashboard"
+	}
+	respondOKOrHXRedirect(c, redirectPath, gin.H{"status": "ok"})
 }
 
 func (s *Server) officers() ([]Officer, error) {
@@ -261,6 +274,9 @@ func (s *Server) insertOfficer(actor User, req createOfficerInput) (Officer, err
 	role := strings.TrimSpace(req.Role)
 	if memberID == "" || !validOfficerRole(role) {
 		return Officer{}, errInvalidOfficer
+	}
+	if role == "admin" && actor.Role != "super_admin" {
+		return Officer{}, errAdminRoleSuperAdminOnly
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -327,6 +343,9 @@ func (s *Server) updateOfficerByID(actor User, id string, req updateOfficerInput
 	if !validOfficerRole(role) || req.Active == nil {
 		return Officer{}, errInvalidOfficer
 	}
+	if role == "admin" && actor.Role != "super_admin" {
+		return Officer{}, errAdminRoleSuperAdminOnly
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Officer{}, err
@@ -341,6 +360,9 @@ func (s *Server) updateOfficerByID(actor User, id string, req updateOfficerInput
 	}
 	if err != nil {
 		return Officer{}, err
+	}
+	if current.Role == "admin" && actor.Role != "super_admin" {
+		return Officer{}, errAdminRoleSuperAdminOnly
 	}
 	var memberStatus string
 	if err := tx.QueryRow(`SELECT status FROM members WHERE id=$1`, current.MemberID).Scan(&memberStatus); err != nil {

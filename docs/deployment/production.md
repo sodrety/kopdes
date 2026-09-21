@@ -184,6 +184,10 @@ JWT_SECRET=<at-least-32-random-characters>
 KETUA_UTAMA_MEMBER_ID=ketua-utama-bootstrap
 KETUA_UTAMA_EMAIL=<production-admin-email>
 KETUA_UTAMA_PASSWORD=<temporary-bootstrap-password>
+
+SUPER_ADMIN_EMAIL=<production-super-admin-email>
+SUPER_ADMIN_PASSWORD=<temporary-bootstrap-password>
+SUPER_ADMIN_NAME=Platform Super Admin
 ```
 
 Generate random values on the VPS:

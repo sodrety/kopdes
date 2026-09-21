@@ -163,6 +163,10 @@ func (s *Server) homePage(c *gin.Context) {
 		c.Redirect(http.StatusSeeOther, "/login")
 		return
 	}
+	if user.Role == "super_admin" {
+		c.Redirect(http.StatusSeeOther, "/admin/dashboard")
+		return
+	}
 	c.Redirect(http.StatusSeeOther, "/member/dashboard")
 }
 
@@ -277,8 +281,14 @@ func (s *Server) adminMemberDetailPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	tagihanConfig, err := s.memberTagihanConfig(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
 	renderPage(c, "admin-member-detail", pageData(c, "Member detail - KKSUK PD Dharma Jaya", "members", "member_detail", member.FullName, gin.H{
 		"Member":           member,
+		"TagihanConfig":    tagihanConfig,
 		"Summary":          summary,
 		"Savings":          savings,
 		"LoanRequests":     requests,
@@ -295,6 +305,7 @@ func (s *Server) adminLoanRequestsPage(c *gin.Context) {
 	}
 	renderPage(c, "admin-loan-requests", pageData(c, "Loan request review - KKSUK PD Dharma Jaya", "loan-requests", "loan_request_review", "inspect_pending_loan_requests", gin.H{
 		"LoanRequests": requests,
+		"CurrentDate":  time.Now().In(jakartaLocation).Format("2006-01-02"),
 	}))
 }
 
@@ -355,7 +366,7 @@ func (s *Server) adminTransactionsPage(c *gin.Context) {
 		"Transactions":  transactions.Rows,
 		"Summary":       transactions.Summary,
 		"Filters":       filters,
-		"Categories":    categories,
+		"Categories":    cashTransactionCategoryLeaves(categories),
 		"AllCategories": allCategories,
 		"CurrentDate":   currentDate,
 		"NextReference": nextReference,
@@ -419,9 +430,9 @@ func (s *Server) memberDashboardPage(c *gin.Context) {
 		return
 	}
 	renderPage(c, "member-dashboard", pageData(c, "Member dashboard - KKSUK PD Dharma Jaya", "dashboard", "dashboard", member.FullName, gin.H{
-		"Member":       member,
-		"Dashboard":    dashboard,
-		"ShellClass":   "member-dashboard-shell",
+		"Member":     member,
+		"Dashboard":  dashboard,
+		"ShellClass": "member-dashboard-shell",
 	}))
 }
 

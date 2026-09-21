@@ -30,6 +30,9 @@ Optional initial Ketua Utama bootstrap:
 KETUA_UTAMA_MEMBER_ID=<existing-active-member-id>
 KETUA_UTAMA_EMAIL=ketua-utama@coop.test
 KETUA_UTAMA_PASSWORD=<temporary-bootstrap-password>
+SUPER_ADMIN_EMAIL=super-admin@coop.test
+SUPER_ADMIN_PASSWORD=<temporary-bootstrap-password>
+SUPER_ADMIN_NAME=Platform Super Admin
 LEGACY_OFFICER_MEMBER_MAPPINGS='{"legacy-officer@coop.test":"existing-active-member-id"}'
 ```
 

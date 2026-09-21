@@ -736,7 +736,7 @@
             <label>{{t .Lang "transaction_category"}}
               <select name="category_id" data-cash-category required>
                 <option value="">{{t .Lang "select_transaction_category"}}</option>
-                {{range .Categories}}<option value="{{.ID}}" data-direction="{{.Direction}}">{{.Name}} ({{t $.Lang .Direction}})</option>{{end}}
+                {{range .Categories}}<option value="{{.ID}}" data-direction="{{.Direction}}">{{.DisplayName}} ({{t $.Lang .Direction}})</option>{{end}}
               </select>
             </label>
             <label>{{t .Lang "date"}}
@@ -788,7 +788,7 @@
           <label>{{t .Lang "transaction_category_filter"}}
             <select name="transaction_category">
               <option value="">{{t .Lang "all_categories"}}</option>
-              {{range .AllCategories}}<option value="{{.ID}}" {{if eq $.Filters.TransactionCategory .ID}}selected{{end}}>{{.Name}}{{if not .Active}} ({{t $.Lang "inactive"}}){{end}}</option>{{end}}
+              {{range .AllCategories}}<option value="{{.ID}}" {{if eq $.Filters.TransactionCategory .ID}}selected{{end}}>{{.DisplayName}}{{if not .Active}} ({{t $.Lang "inactive"}}){{end}}</option>{{end}}
             </select>
           </label>
           <button type="submit">{{t .Lang "apply_filters"}}</button>
@@ -869,39 +869,67 @@
 
 {{define "admin-transaction-categories"}}
 {{template "admin-shell-start" .}}
+      <section class="panel">
+        <div class="section-heading-row">
+          <div><h2>{{t .Lang "cash_transaction_category"}}</h2><p class="field-help">{{t .Lang "categories_description"}}</p></div>
+          <div class="button-row"><a class="button-link button-link-secondary" href="/api/admin/transaction-categories/template.xlsx">{{t .Lang "download_category_template"}}</a><a class="button-link button-link-secondary" href="/admin/transactions">{{t .Lang "cash_transactions"}}</a></div>
+        </div>
+        <p class="field-help">{{t .Lang "category_template_help"}}</p>
+        <form class="filter-form" method="post" action="/api/admin/transaction-categories/import" enctype="multipart/form-data" hx-post="/api/admin/transaction-categories/import" hx-target="#cash-category-import-error" hx-swap="innerHTML">
+          <label>{{t .Lang "xlsx_file"}}
+            <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+          </label>
+          <button type="submit">{{t .Lang "import_category_template"}}</button>
+        </form>
+        {{template "form-error" (dict "ID" "cash-category-import-error")}}
+      </section>
       <section class="content-grid content-grid-two">
         <article class="panel form-panel">
           <h2>{{t .Lang "add_cash_transaction_category"}}</h2>
-          <p class="field-help">{{t .Lang "categories_description"}}</p>
           <form method="post" action="/api/admin/transaction-categories" hx-post="/api/admin/transaction-categories" hx-target="#cash-category-error" hx-swap="innerHTML">
             <label>{{t .Lang "direction"}}
-              <select name="direction" required>
+              <select name="direction" data-cash-category-direction required>
                 <option value="">{{t .Lang "select_direction"}}</option>
                 <option value="cash_in">{{t .Lang "cash_in"}}</option>
                 <option value="cash_out">{{t .Lang "cash_out"}}</option>
               </select>
             </label>
+            <label>{{t .Lang "account_code"}} <span class="field-help">({{t .Lang "optional"}})</span><input name="account_code" maxlength="50"></label>
             <label>{{t .Lang "category_name"}} <input name="name" maxlength="100" required></label>
+            <label>{{t .Lang "parent_category"}} <span class="field-help">({{t .Lang "optional"}})</span>
+              <select name="parent_id" data-cash-category-parent>
+                <option value="">{{t .Lang "root_category"}}</option>
+                {{range .Categories}}{{if .Active}}<option value="{{.ID}}" data-direction="{{.Direction}}">{{.DisplayName}}</option>{{end}}{{end}}
+              </select>
+            </label>
+            <label>{{t .Lang "normal_balance"}} <span class="field-help">({{t .Lang "optional"}})</span>
+              <select name="normal_balance"><option value="">—</option><option value="D">D</option><option value="C">C</option></select>
+            </label>
             <button type="submit">{{t .Lang "add_cash_transaction_category"}}</button>
           </form>
           {{template "form-error" (dict "ID" "cash-category-error")}}
         </article>
         <article class="panel">
-          <div class="section-heading-row"><h2>{{t .Lang "cash_transaction_category"}}</h2><a class="button-link button-link-secondary" href="/admin/transactions">{{t .Lang "cash_transactions"}}</a></div>
+          <div class="section-heading-row"><h2>{{t .Lang "cash_transaction_category"}}</h2><span class="field-help">{{t .Lang "category_tree"}}</span></div>
           {{if .Categories}}
 {{template "table-open" .}}
-            <thead><tr><th>{{t $.Lang "direction"}}</th><th>{{t $.Lang "category_name"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
+            <thead><tr><th>{{t $.Lang "direction"}}</th><th>{{t $.Lang "account_code"}}</th><th>{{t $.Lang "category_name"}}</th><th>{{t $.Lang "parent_category"}}</th><th>{{t $.Lang "normal_balance"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
             <tbody>
               {{range .Categories}}
               <tr>
                 <td>{{t $.Lang .Direction}}</td>
+                <td>{{if .AccountCode}}{{.AccountCode}}{{else}}-{{end}}</td>
                 <td>
+                    <div class="category-tree-label">{{.DisplayName}}</div>
                     <input name="name" form="cash-category-form-{{.ID}}" value="{{.Name}}" maxlength="100" required>
+                    {{if or .IsGroup .HasChildren}}<small class="field-help">{{t $.Lang "group_category"}}</small>{{end}}
                 </td>
+                <td>{{if .ParentName}}{{.ParentName}}{{else}}-{{end}}</td>
+                <td>{{if .NormalBalance}}{{.NormalBalance}}{{else}}-{{end}}</td>
                 <td>
                     <select name="active" form="cash-category-form-{{.ID}}"><option value="true" {{if .Active}}selected{{end}}>{{t $.Lang "active"}}</option><option value="false" {{if not .Active}}selected{{end}}>{{t $.Lang "inactive"}}</option></select>
                 </td>
-                <td><form id="cash-category-form-{{.ID}}" method="post" action="/api/admin/transaction-categories/{{.ID}}/update" hx-post="/api/admin/transaction-categories/{{.ID}}/update" hx-target="#cash-category-error-{{.ID}}" hx-swap="innerHTML"><button class="button-secondary" type="submit">{{t $.Lang "save"}}</button></form><p id="cash-category-error-{{.ID}}" class="form-error"></p></td>
+                <td><form id="cash-category-form-{{.ID}}" method="post" action="/api/admin/transaction-categories/{{.ID}}/update" hx-post="/api/admin/transaction-categories/{{.ID}}/update" hx-target="#cash-category-error-{{.ID}}" hx-swap="innerHTML"><input type="hidden" name="account_code" value="{{.AccountCode}}"><input type="hidden" name="parent_id" value="{{.ParentID}}"><input type="hidden" name="normal_balance" value="{{.NormalBalance}}"><button class="button-secondary" type="submit">{{t $.Lang "save"}}</button></form><p id="cash-category-error-{{.ID}}" class="form-error"></p></td>
               </tr>
               {{end}}
             </tbody>
@@ -911,6 +939,22 @@
           {{end}}
         </article>
       </section>
+      <script>
+        document.addEventListener("DOMContentLoaded", function () {
+          var direction = document.querySelector("[data-cash-category-direction]");
+          var parent = document.querySelector("[data-cash-category-parent]");
+          if (!direction || !parent) return;
+          function filterParents() {
+            Array.prototype.forEach.call(parent.options, function (option) {
+              if (!option.dataset.direction) return;
+              option.hidden = direction.value !== "" && option.dataset.direction !== direction.value;
+            });
+            if (parent.selectedOptions.length && parent.selectedOptions[0].hidden) parent.value = "";
+          }
+          direction.addEventListener("change", filterParents);
+          filterParents();
+        });
+      </script>
 {{template "admin-shell-end" .}}
 {{end}}
 
@@ -932,6 +976,24 @@
         <div><span>{{t .Lang "join_date"}}</span><strong>{{.Member.JoinDate}}</strong></div>
         <div><span>{{t .Lang "member_type"}}</span><strong>{{.Member.MemberTypeLabel}}</strong></div>
         <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .Member.Status}}</strong></div>
+      </section>
+      <section class="panel form-panel">
+        <h2>{{t .Lang "tagihan_member_config"}}</h2>
+        <p class="field-help">{{t .Lang "tagihan_member_config_description"}}</p>
+        {{if eq .Role "admin"}}
+        <form method="post" action="/api/admin/members/{{.Member.ID}}/tagihan-config" hx-post="/api/admin/members/{{.Member.ID}}/tagihan-config" hx-target="#member-tagihan-config-error" hx-swap="innerHTML">
+          <label>{{t .Lang "simpanan_wajib"}} <input name="simpanan_wajib" type="number" min="0" step="1" inputmode="numeric" value="{{.TagihanConfig.SimpananWajib}}" required></label>
+          <label>{{t .Lang "simpanan_manasuka"}} <input name="simpanan_manasuka" type="number" min="0" step="1" inputmode="numeric" value="{{.TagihanConfig.SimpananManasuka}}" required></label>
+          <button type="submit">{{t .Lang "save_tagihan_config"}}</button>
+        </form>
+        {{else}}
+        <div class="form-grid form-grid-two">
+          <label>{{t .Lang "simpanan_wajib"}} <input type="number" value="{{.TagihanConfig.SimpananWajib}}" readonly></label>
+          <label>{{t .Lang "simpanan_manasuka"}} <input type="number" value="{{.TagihanConfig.SimpananManasuka}}" readonly></label>
+        </div>
+        <p class="field-help">{{t .Lang "read_only"}}</p>
+        {{end}}
+        {{template "form-error" (dict "ID" "member-tagihan-config-error")}}
       </section>
       {{if or (index .Permissions "member_accounts.manage") (index .Permissions "officers.manage")}}
       <section class="content-grid content-grid-two">
@@ -976,6 +1038,7 @@
                 <option value="ketua_i" {{if eq .Member.OfficerRole "ketua_i"}}selected{{end}}>{{t $.Lang "role_ketua_i"}}</option>
                 <option value="ketua_ii" {{if eq .Member.OfficerRole "ketua_ii"}}selected{{end}}>{{t $.Lang "role_ketua_ii"}}</option>
                 <option value="ketua_utama" {{if eq .Member.OfficerRole "ketua_utama"}}selected{{end}}>{{t $.Lang "role_ketua_utama"}}</option>
+                {{if eq $.Role "super_admin"}}<option value="admin" {{if eq .Member.OfficerRole "admin"}}selected{{end}}>{{t $.Lang "role_admin"}}</option>{{end}}
               </select>
             </label>
             <label>{{t .Lang "status"}}
@@ -1003,6 +1066,7 @@
                 <option value="ketua_i">{{t $.Lang "role_ketua_i"}}</option>
                 <option value="ketua_ii">{{t $.Lang "role_ketua_ii"}}</option>
                 <option value="ketua_utama">{{t $.Lang "role_ketua_utama"}}</option>
+                {{if eq $.Role "super_admin"}}<option value="admin">{{t $.Lang "role_admin"}}</option>{{end}}
               </select>
             </label>
             <button type="submit">{{t .Lang "assign_officer"}}</button>
@@ -1018,6 +1082,7 @@
                 <option value="ketua_i">{{t $.Lang "role_ketua_i"}}</option>
                 <option value="ketua_ii">{{t $.Lang "role_ketua_ii"}}</option>
                 <option value="ketua_utama">{{t $.Lang "role_ketua_utama"}}</option>
+                {{if eq $.Role "super_admin"}}<option value="admin">{{t $.Lang "role_admin"}}</option>{{end}}
               </select>
             </label>
             <label>{{t .Lang "login_email"}} <input name="email" type="email" required autocomplete="off"></label>
@@ -1224,7 +1289,19 @@
               <td>{{.Note}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}{{if .CurrentApprovalStage}}<small>{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}</small>{{end}}</td>
               <td class="review-cell">
-                {{if and (eq .CurrentApprovalStage $.Role) (index $.Permissions "requests.decide")}}
+                {{if and (eq $.Role "super_admin") (index $.Permissions "requests.override") (eq .Status "pending")}}
+                <div class="table-actions">
+                  <strong>{{t $.Lang "super_admin_override"}}</strong>
+                  <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/override-approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/override-approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                    <input name="note" placeholder="{{t $.Lang "approval_note_optional"}}" aria-label="{{t $.Lang "approval_note_optional"}}">
+                    <button type="submit">{{t $.Lang "super_admin_approve"}}</button>
+                  </form>
+                  <form class="inline-rejection-form" method="post" action="/api/admin/withdrawal-requests/{{.ID}}/override-reject" hx-post="/api/admin/withdrawal-requests/{{.ID}}/override-reject" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                    <input name="rejection_reason" placeholder="{{t $.Lang "rejection_reason"}}" aria-label="{{t $.Lang "rejection_reason"}}">
+                    <button class="button-secondary" type="submit">{{t $.Lang "super_admin_reject"}}</button>
+                  </form>
+                </div>
+                {{else if and (eq .CurrentApprovalStage "manager") (or (eq $.Role "manager") (eq $.Role "admin")) (index $.Permissions "requests.decide")}}
                 <div class="table-actions">
                   <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
                     <input name="note" placeholder="{{t $.Lang "approval_note_optional"}}" aria-label="{{t $.Lang "approval_note_optional"}}">
@@ -1294,10 +1371,28 @@
                       <div><span>{{t $.Lang "purpose"}}</span><strong>{{.Purpose}}</strong></div>
                       <div><span>{{t $.Lang "status"}}</span><strong>{{t $.Lang (printf "status_%s" .Status)}}{{if .CurrentApprovalStage}} · {{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}{{end}}</strong></div>
                     </div>
-                    {{if and (eq .CurrentApprovalStage $.Role) (index $.Permissions "requests.decide")}}
+                    {{if and (eq $.Role "super_admin") (index $.Permissions "requests.override") (eq .Status "pending")}}
+                    <div class="review-modal-actions">
+                      <p><strong>{{t $.Lang "super_admin_override"}}</strong> — {{t $.Lang "super_admin_override_help"}}</p>
+                      <form class="inline-approval-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/override-approve" hx-post="/api/admin/loan-requests/{{.ID}}/override-approve" hx-target="#loan-review-error" hx-swap="innerHTML" data-loan-fee-preview data-loan-type-value="{{.LoanType}}" data-monthly-admin-fee-label="{{t $.Lang "monthly_admin_fee"}}" data-total-admin-fee-label="{{t $.Lang "total_admin_fee"}}" data-total-obligation-label="{{t $.Lang "total_obligation"}}" data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}">
+                        <label>{{t $.Lang "approved_amount"}}
+                          <input name="approved_amount" type="text" inputmode="numeric" value="{{if gt .ProposedApprovedAmount 0}}{{.ProposedApprovedAmount}}{{else}}{{.RequestedAmount}}{{end}}" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $.Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="{{.MaxLoanAmount}}" data-rupiah-max-invalid="{{t $.Lang "error_loan_amount_limit"}}" autocomplete="off" spellcheck="false" required>
+                        </label>
+                        <label>{{t $.Lang "duration"}} <input name="duration_months" type="number" min="1" max="{{if eq .LoanType "goods_purchase_paylater"}}1{{else if eq .LoanType "secondary_goods"}}12{{else}}24{{end}}" value="{{if gt .ProposedDurationMonths 0}}{{.ProposedDurationMonths}}{{else}}{{.DurationMonths}}{{end}}" data-loan-duration aria-label="{{t $.Lang "duration_months"}}" required></label>
+                        <label>{{t $.Lang "start_date"}} <input name="start_date" type="date" value="{{if .ProposedStartDate}}{{.ProposedStartDate}}{{else}}{{$.CurrentDate}}{{end}}" required aria-label="{{t $.Lang "start_date"}}"></label>
+                        <p class="loan-fee-preview" data-loan-fee-output aria-live="polite" hidden></p>
+                        <label>{{t $.Lang "approval_note_optional"}} <input name="note" aria-label="{{t $.Lang "approval_note_optional"}}"></label>
+                        <div class="table-actions"><button type="submit">{{t $.Lang "super_admin_approve"}}</button></div>
+                      </form>
+                      <form class="inline-rejection-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/override-reject" hx-post="/api/admin/loan-requests/{{.ID}}/override-reject" hx-target="#loan-review-error" hx-swap="innerHTML">
+                        <label>{{t $.Lang "rejection_reason"}} <input name="rejection_reason" aria-label="{{t $.Lang "rejection_reason"}}" placeholder="{{t $.Lang "rejection_reason"}}"></label>
+                        <button class="button-secondary" type="submit">{{t $.Lang "super_admin_reject"}}</button>
+                      </form>
+                    </div>
+                    {{else if and (eq .CurrentApprovalStage "manager") (or (eq $.Role "manager") (eq $.Role "admin")) (index $.Permissions "requests.decide")}}
                     <div class="review-modal-actions">
                       <form class="inline-approval-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/approve" hx-post="/api/admin/loan-requests/{{.ID}}/approve" hx-target="#loan-review-error" hx-swap="innerHTML" data-loan-fee-preview data-loan-type-value="{{.LoanType}}" data-monthly-admin-fee-label="{{t $.Lang "monthly_admin_fee"}}" data-total-admin-fee-label="{{t $.Lang "total_admin_fee"}}" data-total-obligation-label="{{t $.Lang "total_obligation"}}" data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}">
-                        {{if eq $.Role "manager"}}
+                        {{if or (eq $.Role "manager") (eq $.Role "admin")}}
                         <label>{{t $.Lang "approved_amount"}}
                           <input name="approved_amount" type="text" inputmode="numeric" value="{{.RequestedAmount}}" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $.Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="{{.MaxLoanAmount}}" data-rupiah-max-invalid="{{t $.Lang "error_loan_amount_limit"}}" aria-describedby="approved-amount-hint-{{.ID}}" aria-errormessage="approved-amount-error-{{.ID}}" autocomplete="off" spellcheck="false" required>
                           <small id="approved-amount-hint-{{.ID}}">{{t $.Lang "loan_amount_limit_hint"}}</small>

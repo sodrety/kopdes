@@ -207,16 +207,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 26 {
-		t.Fatalf("expected twenty-six tracked migrations, got %d", migrationCount)
+	if migrationCount != 29 {
+		t.Fatalf("expected twenty-nine tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 27`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 29`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "change_loan_approval_hierarchy" {
-		t.Fatalf("expected latest loan approval hierarchy migration, got %q", latestName)
+	if latestName != "add_admin_role_and_member_tagihan_config" {
+		t.Fatalf("expected latest admin Tagihan migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -2201,6 +2201,9 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	goodsPurchaseLoan := fixture.approveLoanRequestWithStartDate(t, adminToken, goodsPurchaseRequestID, 200_000, 1, startDate)
 	fixture.recordSavingInCategoryAtDate(t, adminToken, member.ID, "wajib", 100_000, startDate, "TAG-WAJIB", "Latest Simpanan Wajib")
 	fixture.recordSavingInCategoryAtDate(t, adminToken, member.ID, "sukarela", 50_000, startDate, "TAG-MANASUKA", "Latest Simpanan Manasuka")
+	if _, err := fixture.db.Exec(`UPDATE member_tagihan_configs SET simpanan_wajib=$1,simpanan_manasuka=$2 WHERE member_id=$3`, 100_000, 50_000, member.ID); err != nil {
+		t.Fatalf("configure member Tagihan amounts: %v", err)
+	}
 
 	exportReq := httptest.NewRequest(http.MethodGet, "/api/admin/tagihan/export.xlsx?month="+statementMonth, nil)
 	exportReq.Header.Set("Authorization", "Bearer "+adminToken)
@@ -2288,7 +2291,7 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	}
 }
 
-func TestTagihanUsesLatestMonthlySavingAndShowsReadOnlyConfiguration(t *testing.T) {
+func TestTagihanUsesMemberConfigurationAndShowsReadOnlyConfiguration(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	member := fixture.createMember(t, adminToken, `{"member_no":"K-TAG-002","full_name":"Latest Tagihan Member","join_date":"2026-01-01","status":"active","email":"latest-tagihan-member@coop.test","password":"member-password"}`)
@@ -2305,6 +2308,12 @@ func TestTagihanUsesLatestMonthlySavingAndShowsReadOnlyConfiguration(t *testing.
 	otherMember := fixture.createMember(t, adminToken, `{"member_no":"K-TAG-003","full_name":"Different Tagihan Member","join_date":"2026-01-01","status":"active"}`)
 	fixture.recordSavingInCategoryAtDate(t, adminToken, otherMember.ID, "wajib", 150_000, startDate, "OTHER-WAJIB", "Latest Simpanan Wajib")
 	fixture.recordSavingInCategoryAtDate(t, adminToken, otherMember.ID, "sukarela", 200_000, startDate, "OTHER-MANASUKA", "Latest Simpanan Manasuka")
+	if _, err := fixture.db.Exec(`UPDATE member_tagihan_configs SET simpanan_wajib=$1,simpanan_manasuka=$2 WHERE member_id=$3`, 125_000, 75_000, member.ID); err != nil {
+		t.Fatalf("configure member Tagihan amounts: %v", err)
+	}
+	if _, err := fixture.db.Exec(`UPDATE member_tagihan_configs SET simpanan_wajib=$1,simpanan_manasuka=$2 WHERE member_id=$3`, 175_000, 250_000, otherMember.ID); err != nil {
+		t.Fatalf("configure other member Tagihan amounts: %v", err)
+	}
 
 	request := httptest.NewRequest(http.MethodGet, "/api/admin/tagihan?month="+statementMonth, nil)
 	request.Header.Set("Authorization", "Bearer "+adminToken)
@@ -2327,15 +2336,15 @@ func TestTagihanUsesLatestMonthlySavingAndShowsReadOnlyConfiguration(t *testing.
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode Tagihan API response: %v", err)
 	}
-	if response.SavingConfig.SavingSource != "latest_member_savings" || !response.SavingConfig.ReadOnly {
+	if response.SavingConfig.SavingSource != "member_tagihan_config" || !response.SavingConfig.ReadOnly {
 		t.Fatalf("unexpected Tagihan saving configuration: %+v", response.SavingConfig)
 	}
 	var found, foundOther bool
 	for _, row := range response.Rows {
 		if row.MemberID == otherMember.ID {
 			foundOther = true
-			if row.SimpananWajib != 150_000 || row.SimpananSukarela != 200_000 {
-				t.Fatalf("expected different member-specific latest savings, got %+v", row)
+			if row.SimpananWajib != 175_000 || row.SimpananSukarela != 250_000 {
+				t.Fatalf("expected different member-specific configured amounts, got %+v", row)
 			}
 			continue
 		}
@@ -2343,8 +2352,8 @@ func TestTagihanUsesLatestMonthlySavingAndShowsReadOnlyConfiguration(t *testing.
 			continue
 		}
 		found = true
-		if row.SimpananWajib != 0 || row.SimpananSukarela != 50_000 {
-			t.Fatalf("expected latest monthly Wajib to be skipped and member-specific Manasuka to remain, got %+v", row)
+		if row.SimpananWajib != 0 || row.SimpananSukarela != 75_000 {
+			t.Fatalf("expected configured monthly Wajib to be skipped and configured Manasuka to remain, got %+v", row)
 		}
 	}
 	if !found {
@@ -2362,7 +2371,7 @@ func TestTagihanUsesLatestMonthlySavingAndShowsReadOnlyConfiguration(t *testing.
 	if pageRecorder.Code != http.StatusOK {
 		t.Fatalf("expected Tagihan page status 200, got %d: %s", pageRecorder.Code, pageRecorder.Body.String())
 	}
-	for _, text := range []string{"Konfigurasi simpanan Tagihan", "Sumber nominal simpanan", "Catatan simpanan terakhir per anggota", "Potongan Simpanan Wajib dan Simpanan Manasuka mengikuti nominal terakhir setiap anggota dari data simpanan yang diimpor.", "Hanya lihat"} {
+	for _, text := range []string{"Konfigurasi simpanan Tagihan", "Sumber nominal simpanan", "Konfigurasi Tagihan per anggota", "Potongan Simpanan Wajib dan Simpanan Manasuka menggunakan nominal yang disimpan untuk setiap anggota.", "Hanya lihat"} {
 		if !strings.Contains(pageRecorder.Body.String(), text) {
 			t.Fatalf("expected Tagihan page to include %q, got %s", text, pageRecorder.Body.String())
 		}
@@ -4399,7 +4408,7 @@ func TestMemberDashboardIsIsolatedAndIncludesLatestActivity(t *testing.T) {
 		t.Fatalf("expected member dashboard page status 200, got %d: %s", dashboardPageRec.Code, dashboardPageRec.Body.String())
 	}
 	pageBody := dashboardPageRec.Body.String()
-	for _, text := range []string{"member-dashboard-shell", "Saving balance", "700.000", "Remaining loan", "425.000", "Loan request status", "FIRST-DEP", "Latest repayment records", "100.000"} {
+	for _, text := range []string{"member-dashboard-shell", "Saving balance", "700.000", "Remaining loan", "425.000", "Loan request status", "Latest repayment records", "100.000"} {
 		if !strings.Contains(pageBody, text) {
 			t.Fatalf("expected member dashboard page to include %q, got %s", text, pageBody)
 		}

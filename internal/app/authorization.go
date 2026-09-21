@@ -18,6 +18,7 @@ const (
 	PermissionSavingsRecord               Permission = "savings.record"
 	PermissionRequestsView                Permission = "requests.view"
 	PermissionRequestsDecide              Permission = "requests.decide"
+	PermissionRequestsOverride            Permission = "requests.override"
 	PermissionLoansView                   Permission = "loans.view"
 	PermissionRepaymentsView              Permission = "repayments.view"
 	PermissionRepaymentsRecord            Permission = "repayments.record"
@@ -29,6 +30,15 @@ const (
 )
 
 var officerPermissions = map[string]map[Permission]bool{
+	"admin": {
+		PermissionDashboardView: true, PermissionReportsView: true,
+		PermissionMembersView: true, PermissionMembersManage: true, PermissionMemberAccountsManage: true,
+		PermissionSavingsView: true, PermissionSavingsRecord: true,
+		PermissionRequestsView: true, PermissionRequestsDecide: true,
+		PermissionLoansView: true, PermissionRepaymentsView: true,
+		PermissionRepaymentsRecord: true, PermissionOfficersManage: true,
+		PermissionNotificationsView: true,
+	},
 	"manager": {
 		PermissionDashboardView: true, PermissionReportsView: true,
 		PermissionMembersView: true, PermissionMembersManage: true, PermissionMemberAccountsManage: true,
@@ -53,6 +63,27 @@ var officerPermissions = map[string]map[Permission]bool{
 	}(),
 }
 
+var allPermissions = []Permission{
+	PermissionDashboardView,
+	PermissionReportsView,
+	PermissionMembersView,
+	PermissionMembersManage,
+	PermissionMemberAccountsManage,
+	PermissionSavingsView,
+	PermissionSavingsRecord,
+	PermissionRequestsView,
+	PermissionRequestsDecide,
+	PermissionRequestsOverride,
+	PermissionLoansView,
+	PermissionRepaymentsView,
+	PermissionRepaymentsRecord,
+	PermissionTransactionsView,
+	PermissionTransactionsRecord,
+	PermissionTransactionCategoriesManage,
+	PermissionOfficersManage,
+	PermissionNotificationsView,
+}
+
 func officerOversightPermissions() map[Permission]bool {
 	return map[Permission]bool{
 		PermissionDashboardView: true, PermissionReportsView: true,
@@ -74,11 +105,20 @@ func validOfficerRole(role string) bool {
 }
 
 func hasPermission(role string, permission Permission) bool {
+	if role == "super_admin" {
+		return true
+	}
 	return officerPermissions[role][permission]
 }
 
 func permissionSet(role string) map[string]bool {
 	result := map[string]bool{}
+	if role == "super_admin" {
+		for _, permission := range allPermissions {
+			result[string(permission)] = true
+		}
+		return result
+	}
 	for permission, allowed := range officerPermissions[role] {
 		if allowed {
 			result[string(permission)] = true
