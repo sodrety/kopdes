@@ -421,7 +421,6 @@ func (s *Server) memberDashboardPage(c *gin.Context) {
 	renderPage(c, "member-dashboard", pageData(c, "Member dashboard - KKSUK PD Dharma Jaya", "dashboard", "dashboard", member.FullName, gin.H{
 		"Member":       member,
 		"Dashboard":    dashboard,
-		"CurrentMonth": time.Now().In(jakartaLocation).Format("2006-01"),
 		"ShellClass":   "member-dashboard-shell",
 	}))
 }

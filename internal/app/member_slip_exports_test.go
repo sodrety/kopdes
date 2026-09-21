@@ -7,10 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
+func TestMemberDashboardExportsLatestSavingsAndLoanSlips(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-SLIP-001","full_name":"Slip Member","join_date":"2026-01-01","status":"active","email":"slip-member@coop.test","password":"member-password"}`)
@@ -33,6 +32,9 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 			t.Fatalf("dashboard missing %q: %s", text, pageResponse.Body.String())
 		}
 	}
+	if strings.Contains(pageResponse.Body.String(), `name="month"`) {
+		t.Fatalf("dashboard should not include a month filter: %s", pageResponse.Body.String())
+	}
 
 	savingsRequest := httptest.NewRequest(http.MethodGet, "/member/exports/savings.pdf?month=2026-02", nil)
 	savingsRequest.AddCookie(cookie)
@@ -44,17 +46,16 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 	if got := savingsResponse.Header().Get("Content-Type"); !strings.Contains(got, "application/pdf") {
 		t.Fatalf("savings slip content type=%q", got)
 	}
-	if got := savingsResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-001-2026-02.pdf`) {
+	if got := savingsResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-001-latest.pdf`) {
 		t.Fatalf("savings slip disposition=%q", got)
 	}
-	for _, text := range []string{"SLIP Simpanan", "SIMPANAN POKOK", "THROUGH MONTH", "250.000"} {
+	for _, text := range []string{"SLIP Simpanan", "LATEST VALUE", "SIMPANAN POKOK", "SHU", "355.000"} {
 		if !strings.Contains(savingsResponse.Body.String(), text) {
 			t.Fatalf("savings slip missing %q", text)
 		}
 	}
 
-	loanMonth := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01")
-	loanRequest := httptest.NewRequest(http.MethodGet, "/member/exports/loans.pdf?month="+loanMonth, nil)
+	loanRequest := httptest.NewRequest(http.MethodGet, "/member/exports/loans.pdf?month=2026-02", nil)
 	loanRequest.AddCookie(cookie)
 	loanResponse := httptest.NewRecorder()
 	fixture.server.ServeHTTP(loanResponse, loanRequest)
@@ -64,10 +65,10 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 	if got := loanResponse.Header().Get("Content-Type"); !strings.Contains(got, "application/pdf") {
 		t.Fatalf("loan slip content type=%q", got)
 	}
-	if got := loanResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-pinjaman-M-SLIP-001-`+loanMonth+`.pdf`) {
+	if got := loanResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-pinjaman-M-SLIP-001-latest.pdf`) {
 		t.Fatalf("loan slip disposition=%q", got)
 	}
-	for _, text := range []string{"SLIP Pinjaman", "INSTALLMENTS", "PRINCIPAL + ADMIN", "REMAINING DEBT"} {
+	for _, text := range []string{"SLIP Pinjaman", "LATEST VALUE", "PRINCIPAL + ADMIN", "REMAINING DEBT"} {
 		if !strings.Contains(loanResponse.Body.String(), text) {
 			t.Fatalf("loan slip missing %q", text)
 		}
@@ -95,7 +96,7 @@ func (f testFixture) recordMemberSlipSavingInCategoryAtDate(t *testing.T, adminT
 	}
 }
 
-func TestMemberSlipExportsRejectInvalidMonth(t *testing.T) {
+func TestMemberSlipExportsIgnoreMonthParameter(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	fixture.createMember(t, adminToken, `{"member_no":"M-SLIP-002","full_name":"Invalid Period","join_date":"2026-01-01","status":"active","email":"invalid-period@coop.test","password":"member-password"}`)
@@ -104,7 +105,10 @@ func TestMemberSlipExportsRejectInvalidMonth(t *testing.T) {
 	request.AddCookie(cookie)
 	response := httptest.NewRecorder()
 	fixture.server.ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "A valid export month is required") {
-		t.Fatalf("expected invalid month response, got %d %s", response.Code, response.Body.String())
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected month parameter to be ignored, got %d %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-002-latest.pdf`) {
+		t.Fatalf("expected latest savings slip filename, got %q", got)
 	}
 }

@@ -20,11 +20,9 @@
       </div>
       <div class="content-grid content-grid-two">
         <form class="form-panel" method="get" action="/member/exports/savings.pdf">
-          <label>{{t .Lang "slip_period"}} <input name="month" type="month" value="{{.CurrentMonth}}" required></label>
           <button type="submit">{{t .Lang "export_savings_slip"}}</button>
         </form>
         <form class="form-panel" method="get" action="/member/exports/loans.pdf">
-          <label>{{t .Lang "slip_period"}} <input name="month" type="month" value="{{.CurrentMonth}}" required></label>
           <button type="submit">{{t .Lang "export_loan_slip"}}</button>
         </form>
       </div>
