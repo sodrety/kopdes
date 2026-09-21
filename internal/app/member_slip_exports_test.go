@@ -36,6 +36,9 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 	if strings.Contains(pageResponse.Body.String(), `name="month"`) {
 		t.Fatalf("dashboard should not include a month filter: %s", pageResponse.Body.String())
 	}
+	if strings.Contains(pageResponse.Body.String(), "<th>Reference</th>") || strings.Contains(pageResponse.Body.String(), "<th>Referensi</th>") {
+		t.Fatalf("dashboard should not include reference columns: %s", pageResponse.Body.String())
+	}
 
 	savingsPeriod := "2026-02"
 	savingsRequest := httptest.NewRequest(http.MethodGet, "/member/exports/savings.pdf?month=2026-02", nil)
