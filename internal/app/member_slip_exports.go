@@ -79,8 +79,7 @@ func (s *Server) memberSavingsSlipPDF(c *gin.Context) {
 	if !ok {
 		return
 	}
-	period := currentSlipPeriod()
-	data, err := s.memberSavingSlipData(member, period)
+	data, err := s.memberSavingSlipData(member, currentSlipPeriod())
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
@@ -90,7 +89,7 @@ func (s *Server) memberSavingsSlipPDF(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
-	filename := fmt.Sprintf("slip-simpanan-%s-%s.pdf", safeSlipFilename(member.MemberNo), period.Format("2006-01"))
+	filename := fmt.Sprintf("slip-simpanan-%s-%s.pdf", safeSlipFilename(member.MemberNo), data.Period.Format("2006-01"))
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	c.Data(http.StatusOK, "application/pdf", pdf)
 }
@@ -124,10 +123,10 @@ func (s *Server) memberSavingSlipData(member Member, period time.Time) (savingSl
 	rows, err := s.db.Query(`
 		SELECT category, type, amount, record_date
 		FROM saving_records
-		WHERE member_id = $1 AND record_date < $2
+		WHERE member_id = $1 AND record_date <= $2
 		ORDER BY record_date, created_at, id`,
 		member.ID,
-		fmt.Sprintf("%04d-01-01", period.Year()+1),
+		time.Now().In(jakartaLocation).Format("2006-01-02"),
 	)
 	if err != nil {
 		return savingSlipData{}, err
@@ -152,6 +151,11 @@ func (s *Server) memberSavingSlipData(member Member, period time.Time) (savingSl
 		return savingSlipData{}, err
 	}
 
+	if len(records) > 0 {
+		if latest, parseErr := time.ParseInLocation("2006-01-02", records[len(records)-1].date, jakartaLocation); parseErr == nil {
+			period = time.Date(latest.Year(), latest.Month(), 1, 0, 0, 0, 0, jakartaLocation)
+		}
+	}
 	period = time.Date(period.Year(), period.Month(), 1, 0, 0, 0, 0, jakartaLocation)
 	yearStart := fmt.Sprintf("%04d-01-01", period.Year())
 	balances := slipBalance{}
