@@ -24,7 +24,7 @@
 
 {{define "table-open"}}
         <div class="table-scroll">
-        <table data-enhanced-table data-page-label="{{t .Lang "table_page_status"}}" data-previous-label="{{t .Lang "previous_page"}}" data-next-label="{{t .Lang "next_page"}}">
+        <table data-enhanced-table{{if .ServerPaginated}} data-server-paginated{{end}} data-page-label="{{t .Lang "table_page_status"}}" data-previous-label="{{t .Lang "previous_page"}}" data-next-label="{{t .Lang "next_page"}}">
 {{end}}
 
 {{define "table-close"}}

@@ -134,23 +134,33 @@
       if (!rows.length) {
         return;
       }
+      var serverPaginated = table.hasAttribute("data-server-paginated");
       var page = 1;
       var sortIndex = -1;
       var sortDirection = 1;
-      var pager = document.createElement("div");
-      pager.className = "table-pagination";
-      var previous = document.createElement("button");
-      previous.type = "button";
-      previous.textContent = table.dataset.previousLabel || "<";
-      var status = document.createElement("span");
-      var next = document.createElement("button");
-      next.type = "button";
-      next.textContent = table.dataset.nextLabel || ">";
-      pager.appendChild(previous);
-      pager.appendChild(status);
-      pager.appendChild(next);
-      table.parentNode.insertAdjacentElement("afterend", pager);
+      var pager;
+      var previous;
+      var status;
+      var next;
+      if (!serverPaginated) {
+        pager = document.createElement("div");
+        pager.className = "table-pagination";
+        previous = document.createElement("button");
+        previous.type = "button";
+        previous.textContent = table.dataset.previousLabel || "<";
+        status = document.createElement("span");
+        next = document.createElement("button");
+        next.type = "button";
+        next.textContent = table.dataset.nextLabel || ">";
+        pager.appendChild(previous);
+        pager.appendChild(status);
+        pager.appendChild(next);
+        table.parentNode.insertAdjacentElement("afterend", pager);
+      }
       function render() {
+        if (serverPaginated) {
+          return;
+        }
         var pages = Math.max(1, Math.ceil(rows.length / pageSize));
         page = Math.min(page, pages);
         rows.forEach(function (row, index) {
@@ -191,14 +201,16 @@
           render();
         });
       });
-      previous.addEventListener("click", function () {
-        page -= 1;
-        render();
-      });
-      next.addEventListener("click", function () {
-        page += 1;
-        render();
-      });
+      if (!serverPaginated) {
+        previous.addEventListener("click", function () {
+          page -= 1;
+          render();
+        });
+        next.addEventListener("click", function () {
+          page += 1;
+          render();
+        });
+      }
       render();
     }
     document.addEventListener("DOMContentLoaded", function () {

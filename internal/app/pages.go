@@ -381,7 +381,8 @@ func (s *Server) adminRepaymentsPage(c *gin.Context) {
 
 func (s *Server) adminTransactionsPage(c *gin.Context) {
 	filters := cashTransactionFiltersFromQuery(c)
-	transactions, err := s.cashTransactionsForAdmin(filters)
+	pageNumber := cashTransactionPageFromQuery(c)
+	transactions, err := s.cashTransactionsPageForAdmin(filters, pageNumber, adminCashTransactionPageSize)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
@@ -408,14 +409,16 @@ func (s *Server) adminTransactionsPage(c *gin.Context) {
 		return
 	}
 	renderPage(c, "admin-transactions", pageData(c, translate(languageFromRequest(c), "cash_transactions_page_title"), "transactions", "cash_transactions", "review_cash_transactions", gin.H{
-		"Transactions":  transactions.Rows,
-		"Summary":       transactions.Summary,
-		"Filters":       filters,
-		"Categories":    cashTransactionCategoryLeaves(categories),
-		"AllCategories": allCategories,
-		"COAAccounts":   coaAccounts,
-		"CurrentDate":   currentDate,
-		"NextReference": nextReference,
+		"Transactions":    transactions.Rows,
+		"Summary":         transactions.Summary,
+		"Pagination":      transactions.Pagination,
+		"ServerPaginated": true,
+		"Filters":         filters,
+		"Categories":      cashTransactionCategoryLeaves(categories),
+		"AllCategories":   allCategories,
+		"COAAccounts":     coaAccounts,
+		"CurrentDate":     currentDate,
+		"NextReference":   nextReference,
 	}))
 }
 

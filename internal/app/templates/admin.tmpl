@@ -833,17 +833,21 @@
 
 {{define "admin-transactions"}}
 {{template "admin-shell-start" .}}
-      <section class="summary-grid">
+      <section class="cash-summary-section" aria-label="{{t .Lang "cash_transactions"}}">
+        <div class="summary-grid cash-summary-primary">
 {{template "summary-card" (dict "Label" (t .Lang "total_cash_in") "Value" (nominal .Summary.TotalIncome) "Icon" "arrow-down-to-line")}}
 {{template "summary-card" (dict "Label" (t .Lang "total_cash_out") "Value" (nominal .Summary.TotalExpense) "Icon" "arrow-up-from-line")}}
 {{template "summary-card" (dict "Label" (t .Lang "ending_balance") "Value" (nominal .Summary.EndingBalance) "Icon" "scale")}}
+        </div>
+        <div class="summary-grid cash-summary-secondary">
 {{template "summary-card" (dict "Label" (t .Lang "cash_balance") "Value" (nominal .Summary.CashBalance) "Icon" "wallet")}}
 {{template "summary-card" (dict "Label" (t .Lang "bank_balance") "Value" (nominal .Summary.BankBalance) "Icon" "landmark")}}
 {{template "summary-card" (dict "Label" (t .Lang "combined_balance") "Value" (nominal .Summary.EndingBalance) "Icon" "scale")}}
+        </div>
       </section>
       {{if lt .Summary.EndingBalance 0}}<p class="form-error-message">{{t .Lang "negative_cash_balance_warning"}}</p>{{end}}
       {{if index .Permissions "transactions.record"}}
-      <section class="panel form-panel">
+      <section class="panel form-panel cash-manual-panel">
         <div class="section-heading-row">
           <div><h2>{{t .Lang "record_manual_cash_transaction"}}</h2><p class="field-help">{{t .Lang "manual_cash_transaction_description"}}</p></div>
           {{if index .Permissions "transaction_categories.manage"}}<a class="button-link button-link-secondary" href="/admin/transactions/categories">{{t .Lang "manage_cash_transaction_categories"}}</a>{{end}}
@@ -894,15 +898,19 @@
         {{template "form-error" (dict "ID" "manual-cash-transaction-error")}}
       </section>
       {{end}}
-      <section class="panel">
+      <section class="panel cash-transactions-panel">
         <div class="section-heading-row"><h2>{{t .Lang "transaction_list"}}</h2><div class="button-row"><a class="button-link button-link-secondary" href="/api/admin/exports/transactions.csv">{{t .Lang "export_csv"}}</a>{{if index .Permissions "transaction_categories.manage"}}<a class="button-link button-link-secondary" href="/admin/transactions/categories">{{t .Lang "manage_cash_transaction_categories"}}</a>{{end}}</div></div>
-        <form id="bulk-source-form" class="filter-form" method="post" action="/api/admin/transactions/source" hx-post="/api/admin/transactions/source" hx-target="#bulk-source-error" hx-swap="innerHTML">
-          <label>{{t .Lang "source"}} <select name="source" required><option value="">{{t .Lang "select_source"}}</option><option value="cash">{{t .Lang "source_cash"}}</option><option value="bank">{{t .Lang "source_bank"}}</option></select></label>
-          <button type="submit">{{t .Lang "bulk_source_update"}}</button>
-          <span class="field-help">{{t .Lang "bulk_source_help"}}</span>
-        </form>
-        {{template "form-error" (dict "ID" "bulk-source-error")}}
-        <form class="filter-form" method="get" action="/admin/transactions">
+        <div class="cash-tools-grid">
+          <div class="cash-tool-panel cash-bulk-panel">
+            <form id="bulk-source-form" class="filter-form cash-bulk-form" method="post" action="/api/admin/transactions/source" hx-post="/api/admin/transactions/source" hx-target="#bulk-source-error" hx-swap="innerHTML">
+              <label>{{t .Lang "source"}} <select name="source" required><option value="">{{t .Lang "select_source"}}</option><option value="cash">{{t .Lang "source_cash"}}</option><option value="bank">{{t .Lang "source_bank"}}</option></select></label>
+              <button type="submit">{{t .Lang "bulk_source_update"}}</button>
+              <span class="field-help">{{t .Lang "bulk_source_help"}}</span>
+            </form>
+            {{template "form-error" (dict "ID" "bulk-source-error")}}
+          </div>
+          <div class="cash-tool-panel cash-filter-panel">
+            <form class="filter-form cash-filter-form" method="get" action="/admin/transactions">
           <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.Filters.DateFrom}}"></label>
           <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.Filters.DateTo}}"></label>
           <label>{{t .Lang "accounting_direction"}}
@@ -936,8 +944,11 @@
             </select>
           </label>
           <button type="submit">{{t .Lang "apply_filters"}}</button>
-          <a class="button-link button-link-secondary" href="/admin/transactions">{{t .Lang "reset"}}</a>
-        </form>
+              <a class="button-link button-link-secondary" href="/admin/transactions">{{t .Lang "reset"}}</a>
+            </form>
+          </div>
+        </div>
+        <div class="cash-results-panel">
         {{if .Transactions}}
 {{template "table-open" .}}
           <thead>
@@ -984,9 +995,17 @@
             {{end}}
           </tbody>
 {{template "table-close" .}}
+        {{if gt .Pagination.TotalPages 1}}
+        <nav class="table-pagination" aria-label="{{t .Lang "transaction_list"}}">
+          {{if .Pagination.PreviousURL}}<a class="button-link button-link-secondary" href="{{.Pagination.PreviousURL}}">{{t .Lang "previous_page"}}</a>{{end}}
+          <span>{{t .Lang "table_page_status"}} {{.Pagination.Page}} / {{.Pagination.TotalPages}}</span>
+          {{if .Pagination.NextURL}}<a class="button-link button-link-secondary" href="{{.Pagination.NextURL}}">{{t .Lang "next_page"}}</a>{{end}}
+        </nav>
+        {{end}}
         {{else}}
 {{template "empty-state" (t .Lang "no_cash_transactions")}}
         {{end}}
+        </div>
       </section>
       <script>
         window.confirmManualCashTransaction = function (form) {

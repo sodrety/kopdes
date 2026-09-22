@@ -1,9 +1,14 @@
 package app
 
 import (
+	"database/sql"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 )
+
+const adminCashTransactionPageSize = 50
 
 type CashTransactionFilters struct {
 	DateFrom            string `form:"date_from"`
@@ -42,8 +47,16 @@ type CashTransactionRow struct {
 }
 
 type CashTransactionPage struct {
-	Rows    []CashTransactionRow
-	Summary CashTransactionSummary
+	Rows       []CashTransactionRow
+	Summary    CashTransactionSummary
+	Pagination CashTransactionPagination
+}
+
+type CashTransactionPagination struct {
+	Page        int
+	TotalPages  int
+	PreviousURL string
+	NextURL     string
 }
 
 func cashTransactionFiltersFromQuery(query interface{ Query(string) string }) CashTransactionFilters {
@@ -76,7 +89,39 @@ func validCashTransactionType(value string) bool {
 	}
 }
 
-func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashTransactionPage, error) {
+func cashTransactionPageFromQuery(query interface{ Query(string) string }) int {
+	page, err := strconv.Atoi(strings.TrimSpace(query.Query("page")))
+	if err != nil || page < 1 {
+		return 1
+	}
+	return page
+}
+
+func cashTransactionPaginationURL(filters CashTransactionFilters, page int) string {
+	values := url.Values{}
+	if filters.DateFrom != "" {
+		values.Set("date_from", filters.DateFrom)
+	}
+	if filters.DateTo != "" {
+		values.Set("date_to", filters.DateTo)
+	}
+	if filters.Category != "" {
+		values.Set("category", filters.Category)
+	}
+	if filters.Type != "" {
+		values.Set("type", filters.Type)
+	}
+	if filters.TransactionCategory != "" {
+		values.Set("transaction_category", filters.TransactionCategory)
+	}
+	if filters.Source != "" {
+		values.Set("source", filters.Source)
+	}
+	values.Set("page", strconv.Itoa(page))
+	return "/admin/transactions?" + values.Encode()
+}
+
+func (s *Server) cashTransactionsQuery(filters CashTransactionFilters) (string, []any) {
 	query := strings.Builder{}
 	query.WriteString(`
 		SELECT id, transaction_date, member_no, full_name, direction, transaction_type, category_id, description, category_name, source, coa_code, income, expense, amount, reference_no, recorded_by, created_at
@@ -219,41 +264,121 @@ func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashT
 	if filters.Source != "" && validTransactionSource(filters.Source) {
 		addFilter("source =", filters.Source)
 	}
-	query.WriteString(" ORDER BY transaction_date DESC, created_at DESC")
+	return query.String(), args
+}
 
-	rows, err := s.db.Query(query.String(), args...)
+func (s *Server) cashTransactionRows(query string, args ...any) ([]CashTransactionRow, error) {
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return CashTransactionPage{}, err
+		return nil, err
 	}
 	defer rows.Close()
 
-	var page CashTransactionPage
+	var transactions []CashTransactionRow
 	for rows.Next() {
 		var row CashTransactionRow
-		var categoryID string
+		var categoryID sql.NullString
 		if err := rows.Scan(&row.ID, &row.TransactionDate, &row.MemberNo, &row.FullName, &row.Direction, &row.Type, &categoryID, &row.Description, &row.Category, &row.Source, &row.COACode, &row.Income, &row.Expense, &row.Amount, &row.ReferenceNo, &row.RecordedBy, &row.CreatedAt); err != nil {
-			return CashTransactionPage{}, err
+			return nil, err
 		}
-		page.Rows = append(page.Rows, row)
-		page.Summary.TotalIncome += row.Income
-		page.Summary.TotalExpense += row.Expense
-		if row.Source == transactionSourceCash {
-			if row.Direction == accountingDirectionDebit {
-				page.Summary.CashBalance += row.Amount
-			} else {
-				page.Summary.CashBalance -= row.Amount
-			}
-		} else {
-			if row.Direction == accountingDirectionDebit {
-				page.Summary.BankBalance += row.Amount
-			} else {
-				page.Summary.BankBalance -= row.Amount
-			}
-		}
+		transactions = append(transactions, row)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return transactions, nil
+}
+
+func (page *CashTransactionPage) addSummary(row CashTransactionRow) {
+	page.Summary.TotalIncome += row.Income
+	page.Summary.TotalExpense += row.Expense
+	if row.Source == transactionSourceCash {
+		if row.Direction == accountingDirectionDebit {
+			page.Summary.CashBalance += row.Amount
+		} else {
+			page.Summary.CashBalance -= row.Amount
+		}
+	} else {
+		if row.Direction == accountingDirectionDebit {
+			page.Summary.BankBalance += row.Amount
+		} else {
+			page.Summary.BankBalance -= row.Amount
+		}
+	}
+}
+
+func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashTransactionPage, error) {
+	query, args := s.cashTransactionsQuery(filters)
+	query += " ORDER BY transaction_date DESC, created_at DESC, id DESC"
+	rows, err := s.cashTransactionRows(query, args...)
+	if err != nil {
+		return CashTransactionPage{}, err
+	}
+
+	var page CashTransactionPage
+	page.Rows = rows
+	for _, row := range rows {
+		page.addSummary(row)
+	}
+	page.Summary.EndingBalance = page.Summary.TotalIncome - page.Summary.TotalExpense
+	return page, nil
+}
+
+func (s *Server) cashTransactionsPageForAdmin(filters CashTransactionFilters, pageNumber, pageSize int) (CashTransactionPage, error) {
+	if pageNumber < 1 {
+		pageNumber = 1
+	}
+	if pageSize < 1 {
+		pageSize = adminCashTransactionPageSize
+	}
+
+	baseQuery, filterArgs := s.cashTransactionsQuery(filters)
+	summaryQuery := fmt.Sprintf(`
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(income), 0),
+			COALESCE(SUM(expense), 0),
+			COALESCE(SUM(CASE WHEN source = 'cash' AND direction = 'debit' THEN amount WHEN source = 'cash' THEN -amount ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN source <> 'cash' AND direction = 'debit' THEN amount WHEN source <> 'cash' THEN -amount ELSE 0 END), 0)
+		FROM (%s) cash_transactions`, baseQuery)
+
+	var page CashTransactionPage
+	var totalRows int
+	if err := s.db.QueryRow(summaryQuery, filterArgs...).Scan(
+		&totalRows,
+		&page.Summary.TotalIncome,
+		&page.Summary.TotalExpense,
+		&page.Summary.CashBalance,
+		&page.Summary.BankBalance,
+	); err != nil {
 		return CashTransactionPage{}, err
 	}
 	page.Summary.EndingBalance = page.Summary.TotalIncome - page.Summary.TotalExpense
+
+	totalPages := (totalRows + pageSize - 1) / pageSize
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	if pageNumber > totalPages {
+		pageNumber = totalPages
+	}
+
+	dataQuery := baseQuery + " ORDER BY transaction_date DESC, created_at DESC, id DESC"
+	dataArgs := append([]any(nil), filterArgs...)
+	dataArgs = append(dataArgs, pageSize, (pageNumber-1)*pageSize)
+	dataQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(filterArgs)+1, len(filterArgs)+2)
+	rows, err := s.cashTransactionRows(dataQuery, dataArgs...)
+	if err != nil {
+		return CashTransactionPage{}, err
+	}
+
+	page.Rows = rows
+	page.Pagination = CashTransactionPagination{Page: pageNumber, TotalPages: totalPages}
+	if pageNumber > 1 {
+		page.Pagination.PreviousURL = cashTransactionPaginationURL(filters, pageNumber-1)
+	}
+	if pageNumber < totalPages {
+		page.Pagination.NextURL = cashTransactionPaginationURL(filters, pageNumber+1)
+	}
 	return page, nil
 }
