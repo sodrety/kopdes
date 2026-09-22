@@ -16,6 +16,8 @@ type Loan struct {
 	MemberID           string `json:"member_id"`
 	LoanType           string `json:"loan_type"`
 	LegacyTerms        bool   `json:"legacy_terms"`
+	Source             string `json:"source"`
+	COACode            string `json:"coa_code,omitempty"`
 	ApprovedAmount     int64  `json:"approved_amount"`
 	DurationMonths     int    `json:"duration_months"`
 	MonthlyInstallment int64  `json:"monthly_installment"`
@@ -41,6 +43,8 @@ type AdminLoan struct {
 	MemberID           string `json:"member_id"`
 	LoanType           string `json:"loan_type"`
 	LegacyTerms        bool   `json:"legacy_terms"`
+	Source             string `json:"source"`
+	COACode            string `json:"coa_code,omitempty"`
 	MemberNo           string `json:"member_no"`
 	FullName           string `json:"full_name"`
 	MemberType         string `json:"member_type"`
@@ -67,6 +71,8 @@ type approveLoanInput struct {
 	ApprovedAmount int64  `json:"approved_amount" form:"approved_amount"`
 	DurationMonths int    `json:"duration_months" form:"duration_months"`
 	StartDate      string `json:"start_date" form:"start_date"`
+	Source         string `json:"source" form:"source"`
+	COACode        string `json:"coa_code" form:"coa_code"`
 	Note           string `json:"note" form:"note"`
 }
 
@@ -147,6 +153,14 @@ func (s *Server) approveLoanRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errLoanRequestNotFound) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error_loan_request_not_found"))
+		return
+	}
+	if errors.Is(err, errInvalidTransactionSource) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_transaction_source"))
+		return
+	}
+	if errors.Is(err, errCOAAccountNotFound) || errors.Is(err, errCOAAccountInactive) || errors.Is(err, errCOAAccountGroup) || errors.Is(err, errJournalAccountConflict) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_transaction_coa"))
 		return
 	}
 	if err != nil {
@@ -278,6 +292,10 @@ func (s *Server) adminLoans(c *gin.Context) {
 }
 
 func (s *Server) approveLoanRequestByID(requestID string, officer User, req approveLoanInput) (LoanApprovalResult, error) {
+	source := normalizeTransactionSource(req.Source)
+	if !validTransactionSource(source) {
+		return LoanApprovalResult{}, errInvalidTransactionSource
+	}
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 
@@ -456,6 +474,8 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		NextDueDate:        calc.Installments[0].DueDate,
 		FinalDueDate:       calc.Installments[len(calc.Installments)-1].DueDate,
 		Status:             "active",
+		Source:             source,
+		COACode:            strings.TrimSpace(req.COACode),
 		ApprovedBy:         officer.ID,
 	}
 
@@ -473,8 +493,8 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		return LoanApprovalResult{}, errLoanRequestNotPending
 	}
 	if _, err := tx.Exec(
-		`INSERT INTO loans (id, loan_request_id, member_id, loan_type, approved_amount, duration_months, monthly_installment, remaining_balance, status, approved_by, start_date, admin_fee_policy, monthly_admin_fee, total_admin_fee, total_obligation, next_due_date, final_due_date)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13, $14, $15, $16)`,
+		`INSERT INTO loans (id, loan_request_id, member_id, loan_type, approved_amount, duration_months, monthly_installment, remaining_balance, status, approved_by, source, coa_code, start_date, admin_fee_policy, monthly_admin_fee, total_admin_fee, total_obligation, next_due_date, final_due_date)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
 		loan.ID,
 		loan.LoanRequestID,
 		loan.MemberID,
@@ -484,7 +504,7 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		loan.MonthlyInstallment,
 		loan.RemainingBalance,
 		loan.ApprovedBy,
-		loan.StartDate, loan.AdminFeePolicy, loan.MonthlyAdminFee, loan.TotalAdminFee, loan.TotalObligation, loan.NextDueDate, loan.FinalDueDate,
+		loan.Source, nullIfEmpty(loan.COACode), loan.StartDate, loan.AdminFeePolicy, loan.MonthlyAdminFee, loan.TotalAdminFee, loan.TotalObligation, loan.NextDueDate, loan.FinalDueDate,
 	); err != nil {
 		return LoanApprovalResult{}, err
 	}
@@ -492,6 +512,13 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		if _, err := tx.Exec(`INSERT INTO loan_installments (id,loan_id,installment_no,due_date,scheduled_amount,paid_amount) VALUES ($1,$2,$3,$4,$5,0)`, newID(), loan.ID, installment.Number, installment.DueDate, installment.ScheduledAmount); err != nil {
 			return LoanApprovalResult{}, err
 		}
+	}
+	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
+		ReferenceNo: loan.LoanRequestID, TransactionID: loan.ID, TransactionType: "loan", TransactionDate: loan.StartDate,
+		Source: loan.Source, Amount: loan.ApprovedAmount, Direction: accountingDirectionCredit, COACode: loan.COACode,
+		Description: "Pencairan pinjaman", RecordedBy: officer.ID,
+	}); err != nil {
+		return LoanApprovalResult{}, err
 	}
 	if err := createMemberOutcomeNotification(tx, "loan", requestID, request.MemberID, "approved", "/member/loan-requests"); err != nil {
 		return LoanApprovalResult{}, err
@@ -513,11 +540,11 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 func (s *Server) loanByID(id string) (Loan, error) {
 	var loan Loan
 	err := s.db.QueryRow(
-		`SELECT id, loan_request_id, member_id, loan_type, legacy_terms, approved_amount, duration_months, monthly_installment, remaining_balance, start_date, admin_fee_policy, monthly_admin_fee, total_admin_fee, total_obligation, next_due_date, final_due_date, status, approved_by, approved_at, created_at, updated_at
+		`SELECT id, loan_request_id, member_id, loan_type, legacy_terms, source, COALESCE(coa_code,''), approved_amount, duration_months, monthly_installment, remaining_balance, start_date, admin_fee_policy, monthly_admin_fee, total_admin_fee, total_obligation, next_due_date, final_due_date, status, approved_by, approved_at, created_at, updated_at
 		FROM loans
 		WHERE id = $1`,
 		id,
-	).Scan(&loan.ID, &loan.LoanRequestID, &loan.MemberID, &loan.LoanType, &loan.LegacyTerms, &loan.ApprovedAmount, &loan.DurationMonths, &loan.MonthlyInstallment, &loan.RemainingBalance, &loan.StartDate, &loan.AdminFeePolicy, &loan.MonthlyAdminFee, &loan.TotalAdminFee, &loan.TotalObligation, &loan.NextDueDate, &loan.FinalDueDate, &loan.Status, &loan.ApprovedBy, &loan.ApprovedAt, &loan.CreatedAt, &loan.UpdatedAt)
+	).Scan(&loan.ID, &loan.LoanRequestID, &loan.MemberID, &loan.LoanType, &loan.LegacyTerms, &loan.Source, &loan.COACode, &loan.ApprovedAmount, &loan.DurationMonths, &loan.MonthlyInstallment, &loan.RemainingBalance, &loan.StartDate, &loan.AdminFeePolicy, &loan.MonthlyAdminFee, &loan.TotalAdminFee, &loan.TotalObligation, &loan.NextDueDate, &loan.FinalDueDate, &loan.Status, &loan.ApprovedBy, &loan.ApprovedAt, &loan.CreatedAt, &loan.UpdatedAt)
 	loan.IsOverdue = loanOverdue(loan.NextDueDate, loan.RemainingBalance)
 	return loan, err
 }
@@ -525,20 +552,20 @@ func (s *Server) loanByID(id string) (Loan, error) {
 func (s *Server) activeLoanByMember(memberID string) (Loan, error) {
 	var loan Loan
 	err := s.db.QueryRow(
-		`SELECT id, loan_request_id, member_id, loan_type, legacy_terms, approved_amount, duration_months, monthly_installment, remaining_balance, start_date, admin_fee_policy, monthly_admin_fee, total_admin_fee, total_obligation, next_due_date, final_due_date, status, approved_by, approved_at, created_at, updated_at
+		`SELECT id, loan_request_id, member_id, loan_type, legacy_terms, source, COALESCE(coa_code,''), approved_amount, duration_months, monthly_installment, remaining_balance, start_date, admin_fee_policy, monthly_admin_fee, total_admin_fee, total_obligation, next_due_date, final_due_date, status, approved_by, approved_at, created_at, updated_at
 		FROM loans
 		WHERE member_id = $1 AND status = 'active'
 		ORDER BY created_at DESC
 		LIMIT 1`,
 		memberID,
-	).Scan(&loan.ID, &loan.LoanRequestID, &loan.MemberID, &loan.LoanType, &loan.LegacyTerms, &loan.ApprovedAmount, &loan.DurationMonths, &loan.MonthlyInstallment, &loan.RemainingBalance, &loan.StartDate, &loan.AdminFeePolicy, &loan.MonthlyAdminFee, &loan.TotalAdminFee, &loan.TotalObligation, &loan.NextDueDate, &loan.FinalDueDate, &loan.Status, &loan.ApprovedBy, &loan.ApprovedAt, &loan.CreatedAt, &loan.UpdatedAt)
+	).Scan(&loan.ID, &loan.LoanRequestID, &loan.MemberID, &loan.LoanType, &loan.LegacyTerms, &loan.Source, &loan.COACode, &loan.ApprovedAmount, &loan.DurationMonths, &loan.MonthlyInstallment, &loan.RemainingBalance, &loan.StartDate, &loan.AdminFeePolicy, &loan.MonthlyAdminFee, &loan.TotalAdminFee, &loan.TotalObligation, &loan.NextDueDate, &loan.FinalDueDate, &loan.Status, &loan.ApprovedBy, &loan.ApprovedAt, &loan.CreatedAt, &loan.UpdatedAt)
 	loan.IsOverdue = loanOverdue(loan.NextDueDate, loan.RemainingBalance)
 	return loan, err
 }
 
 func (s *Server) loansForAdmin(status string) ([]AdminLoan, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT l.id, l.loan_request_id, l.member_id, l.loan_type, l.legacy_terms, m.member_no, m.full_name, m.member_type, l.approved_amount, l.duration_months, l.monthly_installment, l.remaining_balance, l.start_date,l.admin_fee_policy,l.monthly_admin_fee,l.total_admin_fee,l.total_obligation,l.next_due_date,l.final_due_date,l.status, l.approved_at, l.created_at, l.updated_at
+	query := `SELECT l.id, l.loan_request_id, l.member_id, l.loan_type, l.legacy_terms, l.source, COALESCE(l.coa_code,''), m.member_no, m.full_name, m.member_type, l.approved_amount, l.duration_months, l.monthly_installment, l.remaining_balance, l.start_date,l.admin_fee_policy,l.monthly_admin_fee,l.total_admin_fee,l.total_obligation,l.next_due_date,l.final_due_date,l.status, l.approved_at, l.created_at, l.updated_at
 		FROM loans l
 		INNER JOIN members m ON m.id = l.member_id`
 	args := []any{}
@@ -557,7 +584,7 @@ func (s *Server) loansForAdmin(status string) ([]AdminLoan, error) {
 	var loans []AdminLoan
 	for rows.Next() {
 		var loan AdminLoan
-		if err := rows.Scan(&loan.ID, &loan.LoanRequestID, &loan.MemberID, &loan.LoanType, &loan.LegacyTerms, &loan.MemberNo, &loan.FullName, &loan.MemberType, &loan.ApprovedAmount, &loan.DurationMonths, &loan.MonthlyInstallment, &loan.RemainingBalance, &loan.StartDate, &loan.AdminFeePolicy, &loan.MonthlyAdminFee, &loan.TotalAdminFee, &loan.TotalObligation, &loan.NextDueDate, &loan.FinalDueDate, &loan.Status, &loan.ApprovedAt, &loan.CreatedAt, &loan.UpdatedAt); err != nil {
+		if err := rows.Scan(&loan.ID, &loan.LoanRequestID, &loan.MemberID, &loan.LoanType, &loan.LegacyTerms, &loan.Source, &loan.COACode, &loan.MemberNo, &loan.FullName, &loan.MemberType, &loan.ApprovedAmount, &loan.DurationMonths, &loan.MonthlyInstallment, &loan.RemainingBalance, &loan.StartDate, &loan.AdminFeePolicy, &loan.MonthlyAdminFee, &loan.TotalAdminFee, &loan.TotalObligation, &loan.NextDueDate, &loan.FinalDueDate, &loan.Status, &loan.ApprovedAt, &loan.CreatedAt, &loan.UpdatedAt); err != nil {
 			return nil, err
 		}
 		loan.MemberTypeLabel = memberTypeLabel(loan.MemberType)
@@ -568,7 +595,7 @@ func (s *Server) loansForAdmin(status string) ([]AdminLoan, error) {
 }
 
 func (s *Server) outstandingLoansByMember(memberID string) ([]Loan, error) {
-	rows, err := s.db.Query(`SELECT id,loan_request_id,member_id,loan_type,legacy_terms,approved_amount,duration_months,monthly_installment,remaining_balance,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date,status,approved_by,approved_at,created_at,updated_at FROM loans WHERE member_id=$1 AND status <> 'cancelled' AND remaining_balance>0 ORDER BY next_due_date,created_at`, memberID)
+	rows, err := s.db.Query(`SELECT id,loan_request_id,member_id,loan_type,legacy_terms,source,COALESCE(coa_code,''),approved_amount,duration_months,monthly_installment,remaining_balance,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date,status,approved_by,approved_at,created_at,updated_at FROM loans WHERE member_id=$1 AND status <> 'cancelled' AND remaining_balance>0 ORDER BY next_due_date,created_at`, memberID)
 	if err != nil {
 		return nil, err
 	}
@@ -576,7 +603,7 @@ func (s *Server) outstandingLoansByMember(memberID string) ([]Loan, error) {
 	items := []Loan{}
 	for rows.Next() {
 		var l Loan
-		if err = rows.Scan(&l.ID, &l.LoanRequestID, &l.MemberID, &l.LoanType, &l.LegacyTerms, &l.ApprovedAmount, &l.DurationMonths, &l.MonthlyInstallment, &l.RemainingBalance, &l.StartDate, &l.AdminFeePolicy, &l.MonthlyAdminFee, &l.TotalAdminFee, &l.TotalObligation, &l.NextDueDate, &l.FinalDueDate, &l.Status, &l.ApprovedBy, &l.ApprovedAt, &l.CreatedAt, &l.UpdatedAt); err != nil {
+		if err = rows.Scan(&l.ID, &l.LoanRequestID, &l.MemberID, &l.LoanType, &l.LegacyTerms, &l.Source, &l.COACode, &l.ApprovedAmount, &l.DurationMonths, &l.MonthlyInstallment, &l.RemainingBalance, &l.StartDate, &l.AdminFeePolicy, &l.MonthlyAdminFee, &l.TotalAdminFee, &l.TotalObligation, &l.NextDueDate, &l.FinalDueDate, &l.Status, &l.ApprovedBy, &l.ApprovedAt, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			return nil, err
 		}
 		l.IsOverdue = loanOverdue(l.NextDueDate, l.RemainingBalance)

@@ -111,6 +111,14 @@ func (s *Server) overrideLoanRequest(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error_loan_request_not_found"))
 		return
 	}
+	if errors.Is(err, errInvalidTransactionSource) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_transaction_source"))
+		return
+	}
+	if errors.Is(err, errCOAAccountNotFound) || errors.Is(err, errCOAAccountInactive) || errors.Is(err, errCOAAccountGroup) || errors.Is(err, errJournalAccountConflict) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_transaction_coa"))
+		return
+	}
 	if err != nil {
 		slog.Error("super admin loan override failed", "request_id", requestIDFromContext(c), "loan_request_id", c.Param("id"), "error", err)
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
@@ -177,6 +185,14 @@ func (s *Server) overrideWithdrawalRequest(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error_withdrawal_request_not_found"))
 		return
 	}
+	if errors.Is(err, errInvalidTransactionSource) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_transaction_source"))
+		return
+	}
+	if errors.Is(err, errCOAAccountNotFound) || errors.Is(err, errCOAAccountInactive) || errors.Is(err, errCOAAccountGroup) || errors.Is(err, errJournalAccountConflict) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_transaction_coa"))
+		return
+	}
 	if isMonetaryAggregateCapacityError(err) {
 		respondError(c, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", translate(lang, "error_monetary_aggregate_capacity"))
 		return
@@ -219,6 +235,10 @@ func (s *Server) overrideWithdrawalRejection(c *gin.Context) {
 }
 
 func (s *Server) overrideLoanRequestByID(requestID string, admin User, req approveLoanInput) (LoanApprovalResult, error) {
+	source := normalizeTransactionSource(req.Source)
+	if !validTransactionSource(source) {
+		return LoanApprovalResult{}, errInvalidTransactionSource
+	}
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 
@@ -366,17 +386,20 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 	if err != nil {
 		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
 	}
-	loan := Loan{ID: newID(), LoanRequestID: requestID, MemberID: request.MemberID, LoanType: request.LoanType, ApprovedAmount: request.ProposedApprovedAmount, DurationMonths: request.ProposedDurationMonths, MonthlyInstallment: calc.Installments[0].ScheduledAmount, RemainingBalance: request.ProposedTotalObligation, StartDate: request.ProposedStartDate, AdminFeePolicy: request.ProposedAdminFeePolicy, MonthlyAdminFee: request.ProposedMonthlyAdminFee, TotalAdminFee: request.ProposedTotalAdminFee, TotalObligation: request.ProposedTotalObligation, NextDueDate: calc.Installments[0].DueDate, FinalDueDate: calc.Installments[len(calc.Installments)-1].DueDate, Status: "active", ApprovedBy: admin.ID}
+	loan := Loan{ID: newID(), LoanRequestID: requestID, MemberID: request.MemberID, LoanType: request.LoanType, ApprovedAmount: request.ProposedApprovedAmount, DurationMonths: request.ProposedDurationMonths, MonthlyInstallment: calc.Installments[0].ScheduledAmount, RemainingBalance: request.ProposedTotalObligation, StartDate: request.ProposedStartDate, AdminFeePolicy: request.ProposedAdminFeePolicy, MonthlyAdminFee: request.ProposedMonthlyAdminFee, TotalAdminFee: request.ProposedTotalAdminFee, TotalObligation: request.ProposedTotalObligation, NextDueDate: calc.Installments[0].DueDate, FinalDueDate: calc.Installments[len(calc.Installments)-1].DueDate, Status: "active", Source: source, COACode: strings.TrimSpace(req.COACode), ApprovedBy: admin.ID}
 	if _, err := tx.Exec(`UPDATE loan_requests SET status='approved',current_approval_stage=NULL,reviewed_by=$1,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='pending'`, admin.ID, requestID); err != nil {
 		return LoanApprovalResult{}, err
 	}
-	if _, err := tx.Exec(`INSERT INTO loans (id,loan_request_id,member_id,loan_type,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_by,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10,$11,$12,$13,$14,$15,$16)`, loan.ID, loan.LoanRequestID, loan.MemberID, loan.LoanType, loan.ApprovedAmount, loan.DurationMonths, loan.MonthlyInstallment, loan.RemainingBalance, loan.ApprovedBy, loan.StartDate, loan.AdminFeePolicy, loan.MonthlyAdminFee, loan.TotalAdminFee, loan.TotalObligation, loan.NextDueDate, loan.FinalDueDate); err != nil {
+	if _, err := tx.Exec(`INSERT INTO loans (id,loan_request_id,member_id,loan_type,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_by,source,coa_code,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`, loan.ID, loan.LoanRequestID, loan.MemberID, loan.LoanType, loan.ApprovedAmount, loan.DurationMonths, loan.MonthlyInstallment, loan.RemainingBalance, loan.ApprovedBy, loan.Source, nullIfEmpty(loan.COACode), loan.StartDate, loan.AdminFeePolicy, loan.MonthlyAdminFee, loan.TotalAdminFee, loan.TotalObligation, loan.NextDueDate, loan.FinalDueDate); err != nil {
 		return LoanApprovalResult{}, err
 	}
 	for _, installment := range calc.Installments {
 		if _, err := tx.Exec(`INSERT INTO loan_installments (id,loan_id,installment_no,due_date,scheduled_amount,paid_amount) VALUES ($1,$2,$3,$4,$5,0)`, newID(), loan.ID, installment.Number, installment.DueDate, installment.ScheduledAmount); err != nil {
 			return LoanApprovalResult{}, err
 		}
+	}
+	if err := s.createFinancialJournalTx(tx, accountingJournalInput{ReferenceNo: requestID, TransactionID: loan.ID, TransactionType: "loan", TransactionDate: loan.StartDate, Source: loan.Source, Amount: loan.ApprovedAmount, Direction: accountingDirectionCredit, COACode: loan.COACode, Description: "Pencairan pinjaman", RecordedBy: admin.ID}); err != nil {
+		return LoanApprovalResult{}, err
 	}
 	if err := resolveRequestNotifications(tx, "loan", requestID); err != nil {
 		return LoanApprovalResult{}, err
@@ -432,6 +455,10 @@ func (s *Server) rejectLoanRequestBySuperAdmin(requestID string, admin User, req
 }
 
 func (s *Server) approveWithdrawalRequestBySuperAdmin(requestID string, admin User, req approveWithdrawalInput) (WithdrawalRequest, error) {
+	source := normalizeTransactionSource(req.Source)
+	if !validTransactionSource(source) {
+		return WithdrawalRequest{}, errInvalidTransactionSource
+	}
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 	tx, err := s.db.Begin()
@@ -478,7 +505,11 @@ func (s *Server) approveWithdrawalRequestBySuperAdmin(requestID string, admin Us
 	if strings.TrimSpace(req.Note) != "" {
 		note = strings.TrimSpace(req.Note)
 	}
-	if _, err := tx.Exec(`INSERT INTO saving_records (id,member_id,type,category,amount,record_date,reference_no,note,recorded_by) VALUES ($1,$2,'withdrawal','sukarela',$3,$4,'',$5,$6)`, recordID, request.MemberID, request.Amount, time.Now().In(jakartaLocation).Format("2006-01-02"), note, admin.ID); err != nil {
+	recordDate := time.Now().In(jakartaLocation).Format("2006-01-02")
+	if _, err := tx.Exec(`INSERT INTO saving_records (id,member_id,type,category,source,coa_code,amount,record_date,reference_no,note,recorded_by) VALUES ($1,$2,'withdrawal','sukarela',$3,$4,$5,$6,'',$7,$8)`, recordID, request.MemberID, source, nullIfEmpty(strings.TrimSpace(req.COACode)), request.Amount, recordDate, note, admin.ID); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if err := s.createFinancialJournalTx(tx, accountingJournalInput{TransactionID: recordID, TransactionType: "withdrawal", TransactionDate: recordDate, Source: source, Amount: request.Amount, Direction: accountingDirectionCredit, COACode: strings.TrimSpace(req.COACode), Description: "Penarikan sukarela", RecordedBy: admin.ID}); err != nil {
 		return WithdrawalRequest{}, err
 	}
 	if _, err := tx.Exec(`UPDATE withdrawal_requests SET status='approved',current_approval_stage=NULL,reviewed_by=$1,reviewed_at=CURRENT_TIMESTAMP,saving_record_id=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$3 AND status='pending'`, admin.ID, recordID, requestID); err != nil {

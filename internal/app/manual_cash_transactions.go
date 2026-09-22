@@ -33,6 +33,8 @@ type CashTransactionCategory struct {
 
 type manualCashTransactionRequest struct {
 	Direction   string `json:"direction" form:"direction"`
+	Source      string `json:"source" form:"source"`
+	COACode     string `json:"coa_code" form:"coa_code"`
 	CategoryID  string `json:"category_id" form:"category_id"`
 	Description string `json:"description" form:"description"`
 	Amount      int64  `json:"amount" form:"amount"`
@@ -105,8 +107,11 @@ func validCashTransactionNormalBalance(value string) bool {
 }
 
 func validateManualCashTransactionRequest(req manualCashTransactionRequest) error {
-	if !validCashTransactionDirection(strings.TrimSpace(req.Direction)) ||
-		strings.TrimSpace(req.CategoryID) == "" ||
+	direction := strings.ToLower(strings.TrimSpace(req.Direction))
+	legacyRequest := validCashTransactionDirection(direction)
+	if (!legacyRequest && !validAccountingDirection(direction)) ||
+		(legacyRequest && strings.TrimSpace(req.CategoryID) == "") ||
+		(!legacyRequest && (strings.TrimSpace(req.COACode) == "" || !validTransactionSource(normalizeTransactionSource(req.Source)))) ||
 		normalizeCashTransactionCategoryName(req.Description) == "" ||
 		req.Amount <= 0 || strings.TrimSpace(req.RecordDate) == "" {
 		return errInvalidManualCashTransaction
@@ -151,6 +156,10 @@ func (s *Server) recordManualCashTransaction(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_cash_transaction_category_group"))
 	case errors.Is(err, errCashTransactionCategoryDirection):
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_cash_transaction_category_direction"))
+	case errors.Is(err, errInvalidTransactionSource):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_transaction_source"))
+	case errors.Is(err, errCOAAccountNotFound), errors.Is(err, errCOAAccountInactive), errors.Is(err, errCOAAccountGroup), errors.Is(err, errJournalAccountConflict):
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_invalid_transaction_coa"))
 	case isUniqueViolation(err):
 		respondError(c, http.StatusConflict, "DUPLICATE_DATA", translate(languageFromRequest(c), "error_cash_transaction_reference_exists"))
 	case err != nil:
@@ -162,6 +171,9 @@ func (s *Server) recordManualCashTransaction(c *gin.Context) {
 
 func (s *Server) insertManualCashTransaction(req manualCashTransactionRequest, recordedBy string) (gin.H, error) {
 	req.Direction = strings.TrimSpace(req.Direction)
+	req.Direction = strings.ToLower(req.Direction)
+	req.Source = normalizeTransactionSource(req.Source)
+	req.COACode = strings.TrimSpace(req.COACode)
 	req.CategoryID = strings.TrimSpace(req.CategoryID)
 	req.Description = normalizeCashTransactionCategoryName(req.Description)
 	req.RecordDate = strings.TrimSpace(req.RecordDate)
@@ -180,23 +192,32 @@ func (s *Server) insertManualCashTransaction(req manualCashTransactionRequest, r
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	legacyDirection := req.Direction
+	if validAccountingDirection(req.Direction) {
+		legacyDirection = legacyDirectionForAccountingDirection(req.Direction)
+	}
+	accountingDirection := accountingDirectionForLegacyDirection(legacyDirection)
 	var categoryDirection, categoryName string
 	var categoryActive, categoryIsGroup bool
-	err = tx.QueryRow(`SELECT direction,name,active,is_group FROM cash_transaction_categories WHERE id=$1`, req.CategoryID).Scan(&categoryDirection, &categoryName, &categoryActive, &categoryIsGroup)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errCashTransactionCategoryNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if !categoryActive {
-		return nil, errCashTransactionCategoryInactive
-	}
-	if categoryIsGroup {
-		return nil, errCashTransactionCategoryGroup
-	}
-	if categoryDirection != req.Direction {
-		return nil, errCashTransactionCategoryDirection
+	if req.CategoryID != "" {
+		err = tx.QueryRow(`SELECT direction,name,active,is_group FROM cash_transaction_categories WHERE id=$1`, req.CategoryID).Scan(&categoryDirection, &categoryName, &categoryActive, &categoryIsGroup)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errCashTransactionCategoryNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !categoryActive {
+			return nil, errCashTransactionCategoryInactive
+		}
+		if categoryIsGroup {
+			return nil, errCashTransactionCategoryGroup
+		}
+		if categoryDirection != legacyDirection {
+			return nil, errCashTransactionCategoryDirection
+		}
+	} else {
+		categoryName = req.COACode
 	}
 	if req.ReferenceNo == "" {
 		req.ReferenceNo, err = s.nextManualCashReference(tx, req.RecordDate)
@@ -206,13 +227,20 @@ func (s *Server) insertManualCashTransaction(req manualCashTransactionRequest, r
 	}
 
 	id := newID()
-	if _, err := tx.Exec(`INSERT INTO manual_cash_transactions (id,transaction_date,direction,category_id,description,amount,reference_no,note,recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, req.RecordDate, req.Direction, req.CategoryID, req.Description, req.Amount, req.ReferenceNo, req.Note, recordedBy); err != nil {
+	if _, err := tx.Exec(`INSERT INTO manual_cash_transactions (id,transaction_date,direction,source,coa_code,accounting_direction,category_id,description,amount,reference_no,note,recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, id, req.RecordDate, legacyDirection, req.Source, nullIfEmpty(req.COACode), accountingDirection, req.CategoryID, req.Description, req.Amount, req.ReferenceNo, req.Note, recordedBy); err != nil {
+		return nil, err
+	}
+	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
+		ReferenceNo: req.ReferenceNo, TransactionID: id, TransactionType: "manual", TransactionDate: req.RecordDate,
+		Source: req.Source, Amount: req.Amount, Direction: accountingDirection, COACode: req.COACode,
+		Description: req.Description, RecordedBy: recordedBy,
+	}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return gin.H{"id": id, "transaction_date": req.RecordDate, "direction": req.Direction, "category_id": req.CategoryID, "category": categoryName, "description": req.Description, "amount": req.Amount, "reference_no": req.ReferenceNo, "note": req.Note, "recorded_by": recordedBy}, nil
+	return gin.H{"id": id, "transaction_date": req.RecordDate, "direction": accountingDirection, "source": req.Source, "coa_code": req.COACode, "category_id": req.CategoryID, "category": categoryName, "description": req.Description, "amount": req.Amount, "reference_no": req.ReferenceNo, "note": req.Note, "recorded_by": recordedBy}, nil
 }
 
 func (s *Server) nextManualCashReference(tx *sql.Tx, transactionDate string) (string, error) {

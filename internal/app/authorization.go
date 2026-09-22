@@ -24,7 +24,9 @@ const (
 	PermissionRepaymentsRecord            Permission = "repayments.record"
 	PermissionTransactionsView            Permission = "transactions.view"
 	PermissionTransactionsRecord          Permission = "transactions.record"
+	PermissionTransactionSourceEdit       Permission = "transaction_source.edit"
 	PermissionTransactionCategoriesManage Permission = "transaction_categories.manage"
+	PermissionCOAManage                   Permission = "coa.manage"
 	PermissionOfficersManage              Permission = "officers.manage"
 	PermissionNotificationsView           Permission = "notifications.view"
 )
@@ -37,6 +39,8 @@ var officerPermissions = map[string]map[Permission]bool{
 		PermissionRequestsView: true, PermissionRequestsDecide: true,
 		PermissionLoansView: true, PermissionRepaymentsView: true,
 		PermissionRepaymentsRecord: true, PermissionOfficersManage: true,
+		PermissionTransactionsView: true, PermissionTransactionSourceEdit: true,
+		PermissionCOAManage:         true,
 		PermissionNotificationsView: true,
 	},
 	"manager": {
@@ -51,6 +55,7 @@ var officerPermissions = map[string]map[Permission]bool{
 	},
 	"bendahara": {
 		PermissionTransactionsView: true, PermissionTransactionsRecord: true,
+		PermissionTransactionSourceEdit:       true,
 		PermissionTransactionCategoriesManage: true,
 	},
 	"ketua_i":  officerOversightPermissions(),
@@ -79,7 +84,9 @@ var allPermissions = []Permission{
 	PermissionRepaymentsRecord,
 	PermissionTransactionsView,
 	PermissionTransactionsRecord,
+	PermissionTransactionSourceEdit,
 	PermissionTransactionCategoriesManage,
+	PermissionCOAManage,
 	PermissionOfficersManage,
 	PermissionNotificationsView,
 }

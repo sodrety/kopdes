@@ -11,12 +11,15 @@ type CashTransactionFilters struct {
 	Category            string `form:"category"`
 	Type                string `form:"type"`
 	TransactionCategory string `form:"transaction_category"`
+	Source              string `form:"source"`
 }
 
 type CashTransactionSummary struct {
 	TotalIncome   int64
 	TotalExpense  int64
 	EndingBalance int64
+	CashBalance   int64
+	BankBalance   int64
 }
 
 type CashTransactionRow struct {
@@ -25,6 +28,8 @@ type CashTransactionRow struct {
 	MemberNo        string `json:"member_no"`
 	FullName        string `json:"full_name"`
 	Direction       string `json:"direction"`
+	Source          string `json:"source"`
+	COACode         string `json:"coa_code,omitempty"`
 	Type            string `json:"type"`
 	Description     string `json:"description"`
 	Category        string `json:"category"`
@@ -48,11 +53,16 @@ func cashTransactionFiltersFromQuery(query interface{ Query(string) string }) Ca
 		Category:            strings.TrimSpace(query.Query("category")),
 		Type:                strings.TrimSpace(query.Query("type")),
 		TransactionCategory: strings.TrimSpace(query.Query("transaction_category")),
+		Source:              strings.TrimSpace(query.Query("source")),
 	}
 }
 
 func validCashTransactionDirection(value string) bool {
 	return value == "cash_in" || value == "cash_out"
+}
+
+func validAccountingTransactionDirection(value string) bool {
+	return validAccountingDirection(value)
 }
 
 func validCashTransactionType(value string) bool {
@@ -69,18 +79,20 @@ func validCashTransactionType(value string) bool {
 func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashTransactionPage, error) {
 	query := strings.Builder{}
 	query.WriteString(`
-		SELECT id, transaction_date, member_no, full_name, direction, transaction_type, category_id, description, category_name, income, expense, amount, reference_no, recorded_by, created_at
+		SELECT id, transaction_date, member_no, full_name, direction, transaction_type, category_id, description, category_name, source, coa_code, income, expense, amount, reference_no, recorded_by, created_at
 		FROM (
 			SELECT
 				'saving:' || sr.id AS id,
 				sr.record_date AS transaction_date,
 				m.member_no AS member_no,
 				m.full_name AS full_name,
-				'cash_in' AS direction,
+				'debit' AS direction,
 				'savings' AS transaction_type,
 				'' AS category_id,
 				'Simpanan ' || sr.category || ' dari ' || m.full_name AS description,
 				'' AS category_name,
+				COALESCE(sr.source,'bank') AS source,
+				COALESCE(sr.coa_code,'') AS coa_code,
 				sr.amount AS income,
 				0 AS expense,
 				sr.amount AS amount,
@@ -96,11 +108,13 @@ func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashT
 				sr.record_date AS transaction_date,
 				m.member_no AS member_no,
 				m.full_name AS full_name,
-				'cash_out' AS direction,
+				'credit' AS direction,
 				'withdrawal' AS transaction_type,
 				'' AS category_id,
 				'Penarikan sukarela oleh ' || m.full_name AS description,
 				'' AS category_name,
+				COALESCE(sr.source,'bank') AS source,
+				COALESCE(sr.coa_code,'') AS coa_code,
 				0 AS income,
 				sr.amount AS expense,
 				sr.amount AS amount,
@@ -116,11 +130,13 @@ func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashT
 				COALESCE(NULLIF(l.start_date, ''), SUBSTR(CAST(l.approved_at AS TEXT), 1, 10), SUBSTR(CAST(l.created_at AS TEXT), 1, 10)) AS transaction_date,
 				m.member_no AS member_no,
 				m.full_name AS full_name,
-				'cash_out' AS direction,
+				'credit' AS direction,
 				'loan' AS transaction_type,
 				'' AS category_id,
 				'Pencairan pinjaman untuk ' || m.full_name AS description,
 				'' AS category_name,
+				COALESCE(l.source,'bank') AS source,
+				COALESCE(l.coa_code,'') AS coa_code,
 				0 AS income,
 				l.approved_amount AS expense,
 				l.approved_amount AS amount,
@@ -136,11 +152,13 @@ func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashT
 				lr.record_date AS transaction_date,
 				m.member_no AS member_no,
 				m.full_name AS full_name,
-				'cash_in' AS direction,
+				'debit' AS direction,
 				'repayment' AS transaction_type,
 				'' AS category_id,
 				'Angsuran pinjaman dari ' || m.full_name AS description,
 				'' AS category_name,
+				COALESCE(lr.source,'bank') AS source,
+				COALESCE(lr.coa_code,'') AS coa_code,
 				lr.amount AS income,
 				0 AS expense,
 				lr.amount AS amount,
@@ -155,11 +173,13 @@ func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashT
 				mt.transaction_date AS transaction_date,
 				'' AS member_no,
 				'' AS full_name,
-				mt.direction AS direction,
+				COALESCE(mt.accounting_direction, CASE WHEN mt.direction='cash_in' THEN 'debit' ELSE 'credit' END) AS direction,
 				'manual' AS transaction_type,
 				mt.category_id AS category_id,
 				mt.description AS description,
-				c.name AS category_name,
+				COALESCE(NULLIF(c.name,''), mt.coa_code, '') AS category_name,
+				COALESCE(mt.source,'bank') AS source,
+				COALESCE(mt.coa_code, c.account_code, '') AS coa_code,
 				CASE WHEN mt.direction = 'cash_in' THEN mt.amount ELSE 0 END AS income,
 				CASE WHEN mt.direction = 'cash_out' THEN mt.amount ELSE 0 END AS expense,
 				mt.amount AS amount,
@@ -167,7 +187,7 @@ func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashT
 				COALESCE(NULLIF(u.full_name, ''), u.email) AS recorded_by,
 				CAST(mt.created_at AS TEXT) AS created_at
 			FROM manual_cash_transactions mt
-			JOIN cash_transaction_categories c ON c.id = mt.category_id
+			LEFT JOIN cash_transaction_categories c ON c.id = mt.category_id
 			JOIN users u ON u.id = mt.recorded_by
 		) cash_transactions
 		WHERE 1 = 1`)
@@ -184,13 +204,20 @@ func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashT
 		addFilter("transaction_date <=", filters.DateTo)
 	}
 	if filters.Category != "" && validCashTransactionDirection(filters.Category) {
+		direction := accountingDirectionForLegacyDirection(filters.Category)
+		addFilter("direction =", direction)
+	} else if filters.Category != "" && validAccountingTransactionDirection(filters.Category) {
 		addFilter("direction =", filters.Category)
 	}
 	if filters.Type != "" && validCashTransactionType(filters.Type) {
 		addFilter("transaction_type =", filters.Type)
 	}
 	if filters.TransactionCategory != "" {
-		addFilter("category_id =", filters.TransactionCategory)
+		addFilter("(category_id =", filters.TransactionCategory)
+		query.WriteString(fmt.Sprintf(" OR coa_code = $%d)", len(args)))
+	}
+	if filters.Source != "" && validTransactionSource(filters.Source) {
+		addFilter("source =", filters.Source)
 	}
 	query.WriteString(" ORDER BY transaction_date DESC, created_at DESC")
 
@@ -204,12 +231,25 @@ func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashT
 	for rows.Next() {
 		var row CashTransactionRow
 		var categoryID string
-		if err := rows.Scan(&row.ID, &row.TransactionDate, &row.MemberNo, &row.FullName, &row.Direction, &row.Type, &categoryID, &row.Description, &row.Category, &row.Income, &row.Expense, &row.Amount, &row.ReferenceNo, &row.RecordedBy, &row.CreatedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.TransactionDate, &row.MemberNo, &row.FullName, &row.Direction, &row.Type, &categoryID, &row.Description, &row.Category, &row.Source, &row.COACode, &row.Income, &row.Expense, &row.Amount, &row.ReferenceNo, &row.RecordedBy, &row.CreatedAt); err != nil {
 			return CashTransactionPage{}, err
 		}
 		page.Rows = append(page.Rows, row)
 		page.Summary.TotalIncome += row.Income
 		page.Summary.TotalExpense += row.Expense
+		if row.Source == transactionSourceCash {
+			if row.Direction == accountingDirectionDebit {
+				page.Summary.CashBalance += row.Amount
+			} else {
+				page.Summary.CashBalance -= row.Amount
+			}
+		} else {
+			if row.Direction == accountingDirectionDebit {
+				page.Summary.BankBalance += row.Amount
+			} else {
+				page.Summary.BankBalance -= row.Amount
+			}
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return CashTransactionPage{}, err

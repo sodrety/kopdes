@@ -207,16 +207,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 30 {
-		t.Fatalf("expected thirty tracked migrations, got %d", migrationCount)
+	if migrationCount != 31 {
+		t.Fatalf("expected thirty-one tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 30`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 31`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "add_admin_loan_request_intake_audit" {
-		t.Fatalf("expected latest admin loan intake migration, got %q", latestName)
+	if latestName != "add_accounting_transaction_hierarchy" {
+		t.Fatalf("expected latest accounting hierarchy migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -2204,6 +2204,19 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	if _, err := fixture.db.Exec(`UPDATE member_tagihan_configs SET simpanan_wajib=$1,simpanan_manasuka=$2 WHERE member_id=$3`, 100_000, 50_000, member.ID); err != nil {
 		t.Fatalf("configure member Tagihan amounts: %v", err)
 	}
+	for _, mapping := range []struct {
+		id, key, transactionType, component, loanType string
+	}{
+		{"test-tagihan-map-wajib", "test-tagihan-map-wajib", "savings", "wajib", ""},
+		{"test-tagihan-map-sukarela", "test-tagihan-map-sukarela", "savings", "sukarela", ""},
+		{"test-tagihan-map-regular", "test-tagihan-map-regular", "repayment", "principal", "regular"},
+		{"test-tagihan-map-secondary", "test-tagihan-map-secondary", "repayment", "principal", "secondary_goods"},
+		{"test-tagihan-map-purchase", "test-tagihan-map-purchase", "repayment", "principal", "goods_purchase_paylater"},
+	} {
+		if _, err := fixture.db.Exec(`INSERT INTO accounting_mappings (id,mapping_key,transaction_type,component,loan_type,coa_code,active) VALUES ($1,$2,$3,$4,$5,$6,TRUE)`, mapping.id, mapping.key, mapping.transactionType, mapping.component, mapping.loanType, "CASH"); err != nil {
+			t.Fatalf("configure Tagihan COA mapping %s: %v", mapping.key, err)
+		}
+	}
 
 	exportReq := httptest.NewRequest(http.MethodGet, "/api/admin/tagihan/export.xlsx?month="+statementMonth, nil)
 	exportReq.Header.Set("Authorization", "Bearer "+adminToken)
@@ -2233,14 +2246,21 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	if tagihanExcelRow == 0 {
 		t.Fatalf("expected Tagihan row for member %s, got %#v", member.ID, rows)
 	}
-	expectedHeaders := "Member ID|NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Status"
+	expectedHeaders := "Member ID|NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Source|Status"
 	if strings.Join(rows[0], "|") != expectedHeaders {
 		t.Fatalf("unexpected Tagihan headers: %#v", rows[0])
+	}
+	sourceCell, err := excelize.CoordinatesToCellName(10, tagihanExcelRow)
+	if err != nil {
+		t.Fatalf("find source cell: %v", err)
+	}
+	if err := workbook.SetCellValue(sheet, sourceCell, "bank"); err != nil {
+		t.Fatalf("set Tagihan source: %v", err)
 	}
 	if tagihanRow[1] != "K-TAG-001" || tagihanRow[3] != "100000" || tagihanRow[4] != "50000" || tagihanRow[5] != "210000" || tagihanRow[6] != "120000" || tagihanRow[7] != "210000" || tagihanRow[8] != "690000" {
 		t.Fatalf("unexpected Tagihan row: %#v, loan=%+v", tagihanRow, loan)
 	}
-	statusCell, err := excelize.CoordinatesToCellName(10, tagihanExcelRow)
+	statusCell, err := excelize.CoordinatesToCellName(11, tagihanExcelRow)
 	if err != nil {
 		t.Fatalf("find status cell: %v", err)
 	}
@@ -4119,7 +4139,7 @@ func TestAdminTransactionsPageShowsAggregateCashLedgerAndManualEntryForm(t *test
 			t.Fatalf("expected transactions page to include %q, got %s", text, body)
 		}
 	}
-	for _, text := range []string{"Catat transaksi kas manual", `name="direction"`, `name="category_id"`, `name="transaction_date"`, `name="reference_no"`, "Kelola kategori kas"} {
+	for _, text := range []string{"Catat transaksi kas manual", `name="direction"`, `name="source"`, `name="coa_code"`, `name="transaction_date"`, `name="reference_no"`, "Kelola kategori kas"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected transactions page to include %q, got %s", text, body)
 		}
@@ -4136,7 +4156,7 @@ func TestAdminTransactionsPageShowsAggregateCashLedgerAndManualEntryForm(t *test
 		t.Fatalf("expected filtered admin transactions page status 200, got %d: %s", filterRec.Code, filterRec.Body.String())
 	}
 	filterBody := filterRec.Body.String()
-	for _, text := range []string{`value="cash_in" selected`, `value="repayment" selected`, "Total Pemasukan", "100.000", "Total Pengeluaran", "0", "Saldo Akhir", "100.000", "Angsuran pinjaman dari Cash Ledger Member"} {
+	for _, text := range []string{`value="debit" selected`, `value="repayment" selected`, "Total Pemasukan", "100.000", "Total Pengeluaran", "0", "Saldo Akhir", "100.000", "Angsuran pinjaman dari Cash Ledger Member"} {
 		if !strings.Contains(filterBody, text) {
 			t.Fatalf("expected filtered transactions page to include %q, got %s", text, filterBody)
 		}

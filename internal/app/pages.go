@@ -229,8 +229,14 @@ func (s *Server) adminSavingNewPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	coaAccounts, err := s.coaPostingAccountsForAdmin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
 	renderPage(c, "admin-saving-new", pageData(c, "Record saving - KKSUK PD Dharma Jaya", "savings", "record_saving", "record_saving_deposits", gin.H{
 		"Members":     members,
+		"COAAccounts": coaAccounts,
 		"CurrentDate": time.Now().Format("2006-01-02"),
 	}))
 }
@@ -241,8 +247,14 @@ func (s *Server) adminWithdrawalRequestsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	coaAccounts, err := s.coaPostingAccountsForAdmin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
 	renderPage(c, "admin-withdrawal-requests", pageData(c, "Penarikan review - KKSUK PD Dharma Jaya", "withdrawal-requests", "withdrawal_request_review", "inspect_pending_withdrawal_requests", gin.H{
 		"WithdrawalRequests": requests,
+		"COAAccounts":        coaAccounts,
 	}))
 }
 
@@ -312,6 +324,11 @@ func (s *Server) adminLoanRequestsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	coaAccounts, err := s.coaPostingAccountsForAdmin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
 	activeMembers := members[:0]
 	for _, member := range members {
 		if member.Status == "active" {
@@ -328,6 +345,7 @@ func (s *Server) adminLoanRequestsPage(c *gin.Context) {
 		"LoanRequestSource":    c.Query("source"),
 		"LoanRequestBatchID":   c.Query("batch_id"),
 		"CurrentDate":          time.Now().In(jakartaLocation).Format("2006-01-02"),
+		"COAAccounts":          coaAccounts,
 	}))
 }
 
@@ -378,6 +396,11 @@ func (s *Server) adminTransactionsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
+	coaAccounts, err := s.coaPostingAccountsForAdmin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
 	currentDate := time.Now().In(jakartaLocation).Format("2006-01-02")
 	nextReference, err := s.nextManualCashReferencePreview(currentDate)
 	if err != nil {
@@ -390,8 +413,26 @@ func (s *Server) adminTransactionsPage(c *gin.Context) {
 		"Filters":       filters,
 		"Categories":    cashTransactionCategoryLeaves(categories),
 		"AllCategories": allCategories,
+		"COAAccounts":   coaAccounts,
 		"CurrentDate":   currentDate,
 		"NextReference": nextReference,
+	}))
+}
+
+func (s *Server) adminCOAPage(c *gin.Context) {
+	accounts, err := s.coaAccountsForAdmin(true)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	mappings, err := s.accountingMappingsForAdmin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	renderPage(c, "admin-coa", pageData(c, translate(languageFromRequest(c), "coa_management"), "coa", "coa_management", "coa_management_description", gin.H{
+		"COAAccounts": accounts,
+		"Mappings":    mappings,
 	}))
 }
 

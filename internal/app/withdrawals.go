@@ -45,7 +45,9 @@ type rejectWithdrawalInput struct {
 }
 
 type approveWithdrawalInput struct {
-	Note string `json:"note" form:"note"`
+	Source  string `json:"source" form:"source"`
+	COACode string `json:"coa_code" form:"coa_code"`
+	Note    string `json:"note" form:"note"`
 }
 
 var (
@@ -156,6 +158,14 @@ func (s *Server) approveWithdrawalRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errWithdrawalRequestNotFound) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", "Withdrawal request not found")
+		return
+	}
+	if errors.Is(err, errInvalidTransactionSource) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_transaction_source"))
+		return
+	}
+	if errors.Is(err, errCOAAccountNotFound) || errors.Is(err, errCOAAccountInactive) || errors.Is(err, errCOAAccountGroup) || errors.Is(err, errJournalAccountConflict) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_transaction_coa"))
 		return
 	}
 	if isMonetaryAggregateCapacityError(err) {
@@ -345,6 +355,10 @@ func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalReq
 }
 
 func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, req approveWithdrawalInput) (WithdrawalRequest, error) {
+	source := normalizeTransactionSource(req.Source)
+	if !validTransactionSource(source) {
+		return WithdrawalRequest{}, errInvalidTransactionSource
+	}
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 
@@ -423,15 +437,24 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 
 	recordID := newID()
 	if _, err := tx.Exec(
-		`INSERT INTO saving_records (id, member_id, type, category, amount, record_date, reference_no, note, recorded_by)
-		VALUES ($1, $2, 'withdrawal', 'sukarela', $3, $4, '', $5, $6)`,
+		`INSERT INTO saving_records (id, member_id, type, category, source, coa_code, amount, record_date, reference_no, note, recorded_by)
+		VALUES ($1, $2, 'withdrawal', 'sukarela', $3, $4, $5, $6, '', $7, $8)`,
 		recordID,
 		request.MemberID,
+		source,
+		nullIfEmpty(strings.TrimSpace(req.COACode)),
 		request.Amount,
 		time.Now().In(jakartaLocation).Format("2006-01-02"),
 		request.Note,
 		officer.ID,
 	); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
+		ReferenceNo: "", TransactionID: recordID, TransactionType: "withdrawal", TransactionDate: time.Now().In(jakartaLocation).Format("2006-01-02"),
+		Source: source, Amount: request.Amount, Direction: accountingDirectionCredit, COACode: strings.TrimSpace(req.COACode),
+		Description: "Penarikan sukarela", RecordedBy: officer.ID,
+	}); err != nil {
 		return WithdrawalRequest{}, err
 	}
 

@@ -15,6 +15,8 @@ type SavingRecord struct {
 	MemberID    string `json:"member_id"`
 	Type        string `json:"type"`
 	Category    string `json:"category"`
+	Source      string `json:"source"`
+	COACode     string `json:"coa_code,omitempty"`
 	Amount      int64  `json:"amount"`
 	RecordDate  string `json:"record_date"`
 	ReferenceNo string `json:"reference_no"`
@@ -27,6 +29,8 @@ type savingRequest struct {
 	MemberID    string `json:"member_id" form:"member_id"`
 	Type        string `json:"type" form:"type"`
 	Category    string `json:"category" form:"category"`
+	Source      string `json:"source" form:"source"`
+	COACode     string `json:"coa_code" form:"coa_code"`
 	Amount      int64  `json:"amount" form:"amount"`
 	RecordDate  string `json:"record_date" form:"record_date"`
 	ReferenceNo string `json:"reference_no" form:"reference_no"`
@@ -152,13 +156,14 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 	recordType := strings.TrimSpace(req.Type)
 	category := strings.TrimSpace(req.Category)
 	recordDate := strings.TrimSpace(req.RecordDate)
+	source := normalizeTransactionSource(req.Source)
 	if recordType == "" {
 		recordType = "deposit"
 	}
 	if recordType == "withdrawal" {
 		return SavingRecord{}, errDirectWithdrawalNotAllowed
 	}
-	if memberID == "" || !validSavingType(recordType) || !validSavingCategory(category) || req.Amount <= 0 || recordDate == "" {
+	if memberID == "" || !validSavingType(recordType) || !validSavingCategory(category) || req.Amount <= 0 || recordDate == "" || !validTransactionSource(source) {
 		return SavingRecord{}, errInvalidSaving
 	}
 
@@ -212,6 +217,8 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 		MemberID:    member.ID,
 		Type:        recordType,
 		Category:    category,
+		Source:      source,
+		COACode:     strings.TrimSpace(req.COACode),
 		Amount:      req.Amount,
 		RecordDate:  recordDate,
 		ReferenceNo: strings.TrimSpace(req.ReferenceNo),
@@ -219,11 +226,13 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 		RecordedBy:  recordedBy,
 	}
 	_, err = tx.Exec(
-		`INSERT INTO saving_records (id, member_id, type, category, amount, record_date, reference_no, note, recorded_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		`INSERT INTO saving_records (id, member_id, type, category, source, coa_code, amount, record_date, reference_no, note, recorded_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 		record.ID,
 		record.MemberID,
 		record.Type,
 		record.Category,
+		record.Source,
+		nullIfEmpty(record.COACode),
 		record.Amount,
 		record.RecordDate,
 		record.ReferenceNo,
@@ -231,6 +240,13 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 		record.RecordedBy,
 	)
 	if err != nil {
+		return SavingRecord{}, err
+	}
+	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
+		ReferenceNo: record.ReferenceNo, TransactionID: record.ID, TransactionType: "savings", TransactionDate: record.RecordDate,
+		Source: record.Source, Amount: record.Amount, Direction: accountingDirectionDebit, COACode: record.COACode,
+		Description: "Simpanan " + record.Category, RecordedBy: recordedBy,
+	}); err != nil {
 		return SavingRecord{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -259,7 +275,7 @@ func savingFiltersFromQuery(c *gin.Context) SavingFilters {
 
 func (s *Server) savingsForAdmin(filters SavingFilters) ([]AdminSavingRecord, error) {
 	query := strings.Builder{}
-	query.WriteString(`SELECT sr.id, sr.member_id, sr.type, sr.category, sr.amount, sr.record_date, sr.reference_no, sr.note, sr.recorded_by, sr.created_at, m.member_no, m.full_name, m.member_type
+	query.WriteString(`SELECT sr.id, sr.member_id, sr.type, sr.category, sr.source, COALESCE(sr.coa_code,''), sr.amount, sr.record_date, sr.reference_no, sr.note, sr.recorded_by, sr.created_at, m.member_no, m.full_name, m.member_type
 		FROM saving_records sr
 		JOIN members m ON m.id = sr.member_id
 		WHERE 1 = 1`)
@@ -295,7 +311,7 @@ func (s *Server) savingsForAdmin(filters SavingFilters) ([]AdminSavingRecord, er
 	var records []AdminSavingRecord
 	for rows.Next() {
 		var record AdminSavingRecord
-		if err := rows.Scan(&record.ID, &record.MemberID, &record.Type, &record.Category, &record.Amount, &record.RecordDate, &record.ReferenceNo, &record.Note, &record.RecordedBy, &record.CreatedAt, &record.MemberNo, &record.FullName, &record.MemberType); err != nil {
+		if err := rows.Scan(&record.ID, &record.MemberID, &record.Type, &record.Category, &record.Source, &record.COACode, &record.Amount, &record.RecordDate, &record.ReferenceNo, &record.Note, &record.RecordedBy, &record.CreatedAt, &record.MemberNo, &record.FullName, &record.MemberType); err != nil {
 			return nil, err
 		}
 		record.MemberTypeLabel = memberTypeLabel(record.MemberType)
@@ -306,7 +322,7 @@ func (s *Server) savingsForAdmin(filters SavingFilters) ([]AdminSavingRecord, er
 
 func (s *Server) savingsByMember(memberID string) ([]SavingRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT id, member_id, type, category, amount, record_date, reference_no, note, recorded_by, created_at FROM saving_records WHERE member_id = $1 ORDER BY record_date DESC, created_at DESC`,
+		`SELECT id, member_id, type, category, source, COALESCE(coa_code,''), amount, record_date, reference_no, note, recorded_by, created_at FROM saving_records WHERE member_id = $1 ORDER BY record_date DESC, created_at DESC`,
 		memberID,
 	)
 	if err != nil {
@@ -317,7 +333,7 @@ func (s *Server) savingsByMember(memberID string) ([]SavingRecord, error) {
 	var records []SavingRecord
 	for rows.Next() {
 		var record SavingRecord
-		if err := rows.Scan(&record.ID, &record.MemberID, &record.Type, &record.Category, &record.Amount, &record.RecordDate, &record.ReferenceNo, &record.Note, &record.RecordedBy, &record.CreatedAt); err != nil {
+		if err := rows.Scan(&record.ID, &record.MemberID, &record.Type, &record.Category, &record.Source, &record.COACode, &record.Amount, &record.RecordDate, &record.ReferenceNo, &record.Note, &record.RecordedBy, &record.CreatedAt); err != nil {
 			return nil, err
 		}
 		records = append(records, record)
@@ -327,7 +343,7 @@ func (s *Server) savingsByMember(memberID string) ([]SavingRecord, error) {
 
 func (s *Server) latestSavingsByMember(memberID string, limit int) ([]SavingRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT id, member_id, type, category, amount, record_date, reference_no, note, recorded_by, created_at
+		`SELECT id, member_id, type, category, source, COALESCE(coa_code,''), amount, record_date, reference_no, note, recorded_by, created_at
 		FROM saving_records
 		WHERE member_id = $1
 		ORDER BY record_date DESC, created_at DESC
@@ -343,7 +359,7 @@ func (s *Server) latestSavingsByMember(memberID string, limit int) ([]SavingReco
 	var records []SavingRecord
 	for rows.Next() {
 		var record SavingRecord
-		if err := rows.Scan(&record.ID, &record.MemberID, &record.Type, &record.Category, &record.Amount, &record.RecordDate, &record.ReferenceNo, &record.Note, &record.RecordedBy, &record.CreatedAt); err != nil {
+		if err := rows.Scan(&record.ID, &record.MemberID, &record.Type, &record.Category, &record.Source, &record.COACode, &record.Amount, &record.RecordDate, &record.ReferenceNo, &record.Note, &record.RecordedBy, &record.CreatedAt); err != nil {
 			return nil, err
 		}
 		records = append(records, record)

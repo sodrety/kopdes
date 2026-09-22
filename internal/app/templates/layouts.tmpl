@@ -228,6 +228,10 @@
           {{if index .Permissions "transactions.view"}}<a class="sidebar-link {{if eq .Active "transactions"}}active{{end}}" href="/admin/transactions" title="{{t .Lang "nav_transactions"}}"><i class="sidebar-icon" data-lucide="arrow-left-right"></i><span class="sidebar-label">{{t .Lang "nav_transactions"}}</span></a>{{end}}
           {{if index .Permissions "savings.record"}}<a class="sidebar-link {{if eq .Active "tagihan"}}active{{end}}" href="/admin/tagihan" title="{{t .Lang "tagihan"}}"><i class="sidebar-icon" data-lucide="file-spreadsheet"></i><span class="sidebar-label">{{t .Lang "tagihan"}}</span></a>{{end}}
         </div>
+        {{if index .Permissions "coa.manage"}}<div class="sidebar-nav-group">
+          <span class="sidebar-group-label">{{t .Lang "nav_group_settings"}}</span>
+          <a class="sidebar-link {{if eq .Active "coa"}}active{{end}}" href="/admin/coa" title="{{t .Lang "coa_management"}}"><i class="sidebar-icon" data-lucide="book-open-check"></i><span class="sidebar-label">{{t .Lang "coa_management"}}</span></a>
+        </div>{{end}}
         {{if index .Permissions "reports.view"}}<div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_reports"}}</span>
           <a class="sidebar-link {{if eq .Active "reports"}}active{{end}}" href="/admin/reports/balance" title="{{t .Lang "balance_report"}}"><i class="sidebar-icon" data-lucide="scale"></i><span class="sidebar-label">{{t .Lang "balance_report"}}</span></a>

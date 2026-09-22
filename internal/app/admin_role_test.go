@@ -27,16 +27,17 @@ func TestAdminRoleHasNoCashAccessAndMemberTagihanConfigIsAdminOnly(t *testing.T)
 		t.Fatalf("admin should view members: %d %s", response.Code, response.Body.String())
 	}
 	for _, route := range []struct {
-		method string
-		path   string
+		method       string
+		path         string
+		expectedCode int
 	}{
-		{http.MethodGet, "/admin/transactions"},
-		{http.MethodGet, "/admin/transactions/categories"},
-		{http.MethodGet, "/api/admin/exports/transactions.csv"},
-		{http.MethodPost, "/api/admin/transactions"},
+		{http.MethodGet, "/admin/transactions", http.StatusOK},
+		{http.MethodGet, "/admin/transactions/categories", http.StatusForbidden},
+		{http.MethodGet, "/api/admin/exports/transactions.csv", http.StatusOK},
+		{http.MethodPost, "/api/admin/transactions", http.StatusForbidden},
 	} {
-		if response := hierarchyRequest(fixture, route.method, route.path, adminToken, ""); response.Code != http.StatusForbidden {
-			t.Fatalf("admin should not access cash route %s: %d %s", route.path, response.Code, response.Body.String())
+		if response := hierarchyRequest(fixture, route.method, route.path, adminToken, ""); response.Code != route.expectedCode {
+			t.Fatalf("admin route %s: expected %d, got %d %s", route.path, route.expectedCode, response.Code, response.Body.String())
 		}
 	}
 
