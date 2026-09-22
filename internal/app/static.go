@@ -758,6 +758,11 @@ button:disabled {
   gap: 10px;
   margin-bottom: 14px;
 }
+.member-search-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  max-width: 560px;
+}
 .section-heading-row {
   display: flex;
   align-items: flex-start;

@@ -733,6 +733,12 @@
       </section>
       <section class="panel">
           <h2>{{t .Lang "member_list"}}</h2>
+          <form class="filter-form member-search-form" method="get" action="/admin/members" role="search">
+            <label for="admin-member-search">{{t .Lang "search_member"}}
+              <input id="admin-member-search" type="search" name="search" value="{{.Search}}" placeholder="{{t .Lang "search_members_placeholder"}}">
+            </label>
+            <button type="submit">{{t .Lang "search"}}</button>
+          </form>
           {{if .Members}}
 {{template "table-open" .}}
             <thead>
@@ -759,7 +765,11 @@
             </tbody>
 {{template "table-close" .}}
           {{else}}
+            {{if .Search}}
+{{template "empty-state" (t .Lang "no_matching_members")}}
+            {{else}}
 {{template "empty-state" (t .Lang "no_members")}}
+            {{end}}
           {{end}}
       </section>
 {{template "admin-shell-end" .}}

@@ -193,8 +193,21 @@ func (s *Server) adminMembersPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	search := strings.TrimSpace(c.Query("search"))
+	if search != "" {
+		needle := strings.ToLower(search)
+		filtered := members[:0]
+		for _, member := range members {
+			searchable := strings.ToLower(member.MemberNo + " " + member.FullName + " " + member.MemberTypeLabel)
+			if strings.Contains(searchable, needle) {
+				filtered = append(filtered, member)
+			}
+		}
+		members = filtered
+	}
 	renderPage(c, "admin-members", pageData(c, "Members - KKSUK PD Dharma Jaya", "members", "members", "member_list", gin.H{
 		"Members": members,
+		"Search":  search,
 	}))
 }
 
