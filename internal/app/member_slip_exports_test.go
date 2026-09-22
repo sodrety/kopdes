@@ -16,6 +16,7 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-SLIP-001","full_name":"Slip Member","join_date":"2026-01-01","status":"active","email":"slip-member@coop.test","password":"member-password"}`)
 	fixture.recordMemberSlipSavingInCategoryAtDate(t, adminToken, member.ID, "pokok", 5000, "2026-01-01", "SLIP-POKOK", "Pokok")
 	fixture.recordMemberSlipSavingInCategoryAtDate(t, adminToken, member.ID, "wajib", 100000, "2026-01-15", "SLIP-WAJIB", "Wajib")
+	fixture.recordMemberSlipSavingInCategoryAtDate(t, adminToken, member.ID, "wajib", 50000, "2026-02-15", "SLIP-WAJIB-2", "Wajib February")
 	fixture.recordMemberSlipSavingInCategoryAtDate(t, adminToken, member.ID, "sukarela", 250000, "2026-02-15", "SLIP-SUKARELA", "Sukarela")
 	memberToken := fixture.login(t, "slip-member@coop.test", "member-password")
 	fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 500000, 3), 500000, 3)
@@ -54,9 +55,14 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 	if got := savingsResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-001-`+savingsPeriod+`.pdf`) {
 		t.Fatalf("savings slip disposition=%q", got)
 	}
-	for _, text := range []string{"SLIP Simpanan", "SIMPANAN POKOK", "THROUGH MONTH", "FEBRUARY", "355.000"} {
+	for _, text := range []string{"SLIP Simpanan", "SIMPANAN POKOK", "THROUGH MONTH", "SAVED WAJIB", "TOTAL WAJIB", "SAVED MANASUKA", "TOTAL MANASUKA", "FEBRUARY", "50.000", "150.000", "405.000"} {
 		if !strings.Contains(savingsResponse.Body.String(), text) {
 			t.Fatalf("savings slip missing %q", text)
+		}
+	}
+	for _, header := range []string{"SAVED WAJIB", "TOTAL WAJIB", "SAVED MANASUKA", "TOTAL MANASUKA"} {
+		if strings.Index(savingsResponse.Body.String(), header) < 0 {
+			t.Fatalf("savings slip missing column header %q", header)
 		}
 	}
 
@@ -78,6 +84,37 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 		if !strings.Contains(loanResponse.Body.String(), text) {
 			t.Fatalf("loan slip missing %q", text)
 		}
+	}
+}
+
+func TestMemberLoanSlipUsesFinalDueMonthWhenLoanHasEnded(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	fixture.createMember(t, adminToken, `{"member_no":"M-SLIP-003","full_name":"Ended Loan","join_date":"2026-01-01","status":"active","email":"ended-loan@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "ended-loan@coop.test", "member-password")
+	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 500000, 3), 500000, 3)
+
+	previousPeriod := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).AddDate(0, -1, 0)
+	finalDueDate := previousPeriod.Format("2006-01-02")
+	if _, err := fixture.db.Exec(`UPDATE loans SET final_due_date = $1 WHERE id = $2`, finalDueDate, loan.ID); err != nil {
+		t.Fatalf("set ended loan final due date: %v", err)
+	}
+
+	cookie := fixture.browserLogin(t, "ended-loan@coop.test", "member-password")
+	request := httptest.NewRequest(http.MethodGet, "/member/exports/loans.pdf", nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	fixture.server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("ended loan slip status=%d body=%s", response.Code, response.Body.String())
+	}
+	expectedPeriod := previousPeriod.Format("2006-01")
+	if got := response.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-pinjaman-M-SLIP-003-`+expectedPeriod+`.pdf`) {
+		t.Fatalf("expected final-due-period loan slip filename, got %q", got)
+	}
+	expectedHeader := strings.ToUpper(previousPeriod.Month().String()) + " " + strconv.Itoa(previousPeriod.Year())
+	if !strings.Contains(response.Body.String(), expectedHeader) {
+		t.Fatalf("expected ended loan slip header %q, got %s", expectedHeader, response.Body.String())
 	}
 }
 
