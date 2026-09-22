@@ -100,6 +100,10 @@ func addSQLiteSuperAdminSupport(tx *sql.Tx) error {
 }
 
 func addPostgresSuperAdminSupport(tx *sql.Tx) error {
+	var qualifiedSchema string
+	if err := tx.QueryRow(`SELECT quote_ident(current_schema())`).Scan(&qualifiedSchema); err != nil {
+		return fmt.Errorf("read PostgreSQL migration schema: %w", err)
+	}
 	statements := []string{
 		`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`,
 		`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('member','manager','ketua_i','ketua_ii','ketua_utama','super_admin'))`,
@@ -128,12 +132,12 @@ func addPostgresSuperAdminSupport(tx *sql.Tx) error {
 		`CREATE INDEX idx_admin_audit_events_actor_created ON admin_audit_events(actor_id,created_at,id)`,
 		`ALTER TABLE super_admin_overrides ENABLE ROW LEVEL SECURITY`,
 		`ALTER TABLE admin_audit_events ENABLE ROW LEVEL SECURITY`,
-		`CREATE OR REPLACE FUNCTION protect_super_admin_audit_tables() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN IF TG_OP IN ('UPDATE','DELETE') THEN RAISE EXCEPTION 'super admin audit records are append-only'; END IF; IF NOT EXISTS (SELECT 1 FROM public.users WHERE id=NEW.actor_id AND role='super_admin' AND active=TRUE AND historical_identity=FALSE) THEN RAISE EXCEPTION 'super admin actor is required'; END IF; RETURN NEW; END $$`,
+		fmt.Sprintf(`CREATE OR REPLACE FUNCTION protect_super_admin_audit_tables() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN IF TG_OP IN ('UPDATE','DELETE') THEN RAISE EXCEPTION 'super admin audit records are append-only'; END IF; IF NOT EXISTS (SELECT 1 FROM %s.users WHERE id=NEW.actor_id AND role='super_admin' AND active=TRUE AND historical_identity=FALSE) THEN RAISE EXCEPTION 'super admin actor is required'; END IF; RETURN NEW; END $$`, qualifiedSchema),
 		`CREATE TRIGGER super_admin_overrides_append_only BEFORE INSERT OR UPDATE OR DELETE ON super_admin_overrides FOR EACH ROW EXECUTE FUNCTION protect_super_admin_audit_tables()`,
 		`CREATE TRIGGER admin_audit_events_append_only BEFORE INSERT OR UPDATE OR DELETE ON admin_audit_events FOR EACH ROW EXECUTE FUNCTION protect_super_admin_audit_tables()`,
 		`DROP TRIGGER IF EXISTS protect_proposed_loan_terms_identity ON loan_requests`,
 		`DROP FUNCTION IF EXISTS protect_proposed_loan_terms_identity()`,
-		`CREATE FUNCTION protect_proposed_loan_terms_identity() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN IF OLD.proposed_admin_fee_policy IS NOT NULL AND (OLD.loan_type IS DISTINCT FROM NEW.loan_type OR OLD.legacy_terms IS DISTINCT FROM NEW.legacy_terms) THEN RAISE EXCEPTION 'loan terms identity is immutable after snapshot'; END IF; IF OLD.proposed_admin_fee_policy IS NULL AND NEW.proposed_admin_fee_policy IS NOT NULL AND (OLD.status<>'pending' OR OLD.current_approval_stage<>'manager') AND NOT EXISTS (SELECT 1 FROM public.super_admin_overrides o WHERE o.request_type='loan' AND o.request_id=OLD.id AND o.decision='approved') THEN RAISE EXCEPTION 'proposed loan admin fee snapshot must be assigned at Manager stage'; END IF; RETURN NEW; END $$`,
+		fmt.Sprintf(`CREATE FUNCTION protect_proposed_loan_terms_identity() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN IF OLD.proposed_admin_fee_policy IS NOT NULL AND (OLD.loan_type IS DISTINCT FROM NEW.loan_type OR OLD.legacy_terms IS DISTINCT FROM NEW.legacy_terms) THEN RAISE EXCEPTION 'loan terms identity is immutable after snapshot'; END IF; IF OLD.proposed_admin_fee_policy IS NULL AND NEW.proposed_admin_fee_policy IS NOT NULL AND (OLD.status<>'pending' OR OLD.current_approval_stage<>'manager') AND NOT EXISTS (SELECT 1 FROM %s.super_admin_overrides o WHERE o.request_type='loan' AND o.request_id=OLD.id AND o.decision='approved') THEN RAISE EXCEPTION 'proposed loan admin fee snapshot must be assigned at Manager stage'; END IF; RETURN NEW; END $$`, qualifiedSchema),
 		`CREATE TRIGGER protect_proposed_loan_terms_identity BEFORE UPDATE OF loan_type,legacy_terms,proposed_admin_fee_policy ON loan_requests FOR EACH ROW EXECUTE FUNCTION protect_proposed_loan_terms_identity()`,
 		`DROP TRIGGER IF EXISTS validate_loan_request_state_integrity ON loan_requests`,
 		`DROP FUNCTION IF EXISTS validate_loan_request_state_integrity()`,
