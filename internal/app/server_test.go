@@ -2538,6 +2538,41 @@ func TestAdminBalanceReportRendersOperationalBalance(t *testing.T) {
 	}
 }
 
+func TestAdminBalanceReportIncludesDetailedSavingsLoansAndOperationalIndicators(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, adminToken, `{"member_no":"M-BAL-DETAIL","full_name":"Detailed Balance Member","join_date":"2026-06-16","status":"active","email":"balance-detail-member@coop.test","password":"member-password"}`)
+	memberToken := fixture.login(t, "balance-detail-member@coop.test", "member-password")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "shu", 50000, "BAL-SHU", "SHU")
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "khusus", 25000, "BAL-KHUSUS", "Khusus")
+	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 300000, 6), 300000, 6)
+	fixture.recordRepayment(t, adminToken, loan.ID, 50000)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/reports/balance", nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected detailed balance report status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, text := range []string{
+		"Simpanan SHU Tertahan",
+		"Special savings",
+		"Loan receivable by type",
+		"Loan accounts with an outstanding balance",
+		"Total loan obligation",
+		"Repayment progress",
+		"Rp 75.000",
+	} {
+		if !strings.Contains(body, text) {
+			t.Fatalf("expected detailed balance report to include %q, got %s", text, body)
+		}
+	}
+}
+
 func TestAdminProfitLossReportMimicsKopkarlytaReport(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")

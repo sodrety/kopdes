@@ -66,26 +66,46 @@ type AdminOperationalReports struct {
 }
 
 type BalanceReport struct {
-	TotalSavings         int64
-	TotalOutstandingLoan int64
-	PendingWithdrawals   int64
-	OperationalBalance   int64
-	TotalAssets          int64
-	TotalLiabilities     int64
-	TotalEquity          int64
-	LiabilityRatio       int
-	HealthStatus         string
-	CashAsset            int64
-	LoanReceivable       int64
-	PrintedAt            string
-	Rows                 []BalanceReportRow
+	TotalSavings           int64
+	TotalOutstandingLoan   int64
+	PendingWithdrawals     int64
+	PendingWithdrawalCount int64
+	OperationalBalance     int64
+	CashBeforeWithdrawals  int64
+	ManualCashNet          int64
+	TotalAssets            int64
+	TotalLiabilities       int64
+	TotalEquity            int64
+	LiabilityRatio         int
+	HealthStatus           string
+	CashAsset              int64
+	LoanReceivable         int64
+	ActiveLoanCount        int64
+	TotalApprovedLoan      int64
+	TotalLoanObligation    int64
+	TotalLoanRepayment     int64
+	RepaymentRatio         int
+	PrintedAt              string
+	Rows                   []BalanceReportRow
+	SavingsBreakdown       []BalanceReportRow
+	LoanBreakdown          []BalanceReportLoanRow
 }
 
 type BalanceReportRow struct {
-	GroupKey string
-	LabelKey string
-	Amount   int64
-	Class    string
+	GroupKey    string
+	LabelKey    string
+	Amount      int64
+	MemberCount int64
+	Class       string
+}
+
+type BalanceReportLoanRow struct {
+	LabelKey         string
+	LoanCount        int64
+	ActiveLoanCount  int64
+	ApprovedAmount   int64
+	TotalObligation  int64
+	RemainingBalance int64
 }
 
 type ProfitLossReport struct {
@@ -175,6 +195,12 @@ func (s *Server) adminBalanceReportPage(c *gin.Context) {
 			fmt.Sprintf("%s: Rp %d", translate(lang, "cash_asset"), report.CashAsset),
 			fmt.Sprintf("%s: Rp %d", translate(lang, "loan_receivable"), report.LoanReceivable),
 			fmt.Sprintf("%s: Rp %d", translate(lang, "pending_withdrawals"), report.PendingWithdrawals),
+			fmt.Sprintf("%s: %d", translate(lang, "pending_withdrawal_count"), report.PendingWithdrawalCount),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "manual_cash_net"), report.ManualCashNet),
+			fmt.Sprintf("%s: %d", translate(lang, "active_loans"), report.ActiveLoanCount),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "total_loan_obligation"), report.TotalLoanObligation),
+			fmt.Sprintf("%s: Rp %d", translate(lang, "total_loan_repayment"), report.TotalLoanRepayment),
+			fmt.Sprintf("%s: %d%%", translate(lang, "repayment_progress"), report.RepaymentRatio),
 			fmt.Sprintf("%s %d%%", translate(lang, "liability_asset_ratio"), report.LiabilityRatio),
 			fmt.Sprintf("%s: %s", translate(lang, "health_status"), translate(lang, fmt.Sprintf("health_%s", report.HealthStatus))),
 		})
@@ -234,6 +260,19 @@ func writeBalanceReportCSV(c *gin.Context, report BalanceReport) {
 	_ = writer.Write([]string{"cash_asset", strconv.FormatInt(report.CashAsset, 10)})
 	_ = writer.Write([]string{"loan_receivable", strconv.FormatInt(report.LoanReceivable, 10)})
 	_ = writer.Write([]string{"pending_withdrawals", strconv.FormatInt(report.PendingWithdrawals, 10)})
+	_ = writer.Write([]string{"pending_withdrawal_count", strconv.FormatInt(report.PendingWithdrawalCount, 10)})
+	_ = writer.Write([]string{"manual_cash_net", strconv.FormatInt(report.ManualCashNet, 10)})
+	_ = writer.Write([]string{"active_loan_count", strconv.FormatInt(report.ActiveLoanCount, 10)})
+	_ = writer.Write([]string{"total_approved_loan", strconv.FormatInt(report.TotalApprovedLoan, 10)})
+	_ = writer.Write([]string{"total_loan_obligation", strconv.FormatInt(report.TotalLoanObligation, 10)})
+	_ = writer.Write([]string{"total_loan_repayment", strconv.FormatInt(report.TotalLoanRepayment, 10)})
+	_ = writer.Write([]string{"repayment_ratio_percent", strconv.Itoa(report.RepaymentRatio)})
+	for _, row := range report.SavingsBreakdown {
+		_ = writer.Write([]string{"savings_" + strings.TrimPrefix(row.LabelKey, "simpanan_"), strconv.FormatInt(row.Amount, 10)})
+	}
+	for _, row := range report.LoanBreakdown {
+		_ = writer.Write([]string{"loan_" + strings.TrimPrefix(row.LabelKey, "loan_type_"), strconv.FormatInt(row.RemainingBalance, 10)})
+	}
 	writer.Flush()
 }
 
@@ -371,11 +410,11 @@ func (s *Server) adminOperationalReports() (AdminOperationalReports, error) {
 }
 
 func (s *Server) balanceReport() (BalanceReport, error) {
-	savings, err := s.savingsCategoryChart()
+	savingsBreakdown, totalSavings, err := s.balanceSavingsBreakdown()
 	if err != nil {
 		return BalanceReport{}, err
 	}
-	loanExposure, err := s.loanExposureChart()
+	loanBreakdown, err := s.balanceLoanBreakdown()
 	if err != nil {
 		return BalanceReport{}, err
 	}
@@ -383,17 +422,20 @@ func (s *Server) balanceReport() (BalanceReport, error) {
 	if err != nil {
 		return BalanceReport{}, err
 	}
-	totalSavings := sumChartValues(savings)
-	totalOutstandingLoan := chartValueByLabel(loanExposure, "remaining_balance")
+	pendingWithdrawalCount, err := s.pendingWithdrawalCount()
+	if err != nil {
+		return BalanceReport{}, err
+	}
 	manualNet, err := s.manualCashNet()
 	if err != nil {
 		return BalanceReport{}, err
 	}
-	cashAsset, err := checkedReportAdd(totalSavings, manualNet)
+	totalOutstandingLoan := loanBreakdown.RemainingBalance
+	cashBeforeWithdrawals, err := checkedReportAdd(totalSavings, manualNet)
 	if err != nil {
 		return BalanceReport{}, err
 	}
-	cashAsset, err = checkedReportSub(cashAsset, pendingWithdrawals)
+	cashAsset, err := checkedReportSub(cashBeforeWithdrawals, pendingWithdrawals)
 	if err != nil {
 		return BalanceReport{}, err
 	}
@@ -414,6 +456,7 @@ func (s *Server) balanceReport() (BalanceReport, error) {
 	if totalAssets > 0 {
 		liabilityRatio = ratioPercent(totalLiabilities, totalAssets)
 	}
+	repaymentRatio := ratioPercent(loanBreakdown.RepaymentAmount, loanBreakdown.TotalObligation)
 	healthStatus := "Baik"
 	if liabilityRatio >= 80 {
 		healthStatus = "Perlu Perhatian"
@@ -421,27 +464,186 @@ func (s *Server) balanceReport() (BalanceReport, error) {
 		healthStatus = "Cukup"
 	}
 	report := BalanceReport{
-		TotalSavings:         totalSavings,
-		TotalOutstandingLoan: totalOutstandingLoan,
-		PendingWithdrawals:   pendingWithdrawals,
-		OperationalBalance:   operationalBalance,
-		TotalAssets:          totalAssets,
-		TotalLiabilities:     totalLiabilities,
-		TotalEquity:          totalEquity,
-		LiabilityRatio:       liabilityRatio,
-		HealthStatus:         healthStatus,
-		CashAsset:            cashAsset,
-		LoanReceivable:       totalOutstandingLoan,
-		PrintedAt:            time.Now().Format("02 January 2006 15:04:05"),
+		TotalSavings:           totalSavings,
+		TotalOutstandingLoan:   totalOutstandingLoan,
+		PendingWithdrawals:     pendingWithdrawals,
+		PendingWithdrawalCount: pendingWithdrawalCount,
+		OperationalBalance:     operationalBalance,
+		CashBeforeWithdrawals:  cashBeforeWithdrawals,
+		ManualCashNet:          manualNet,
+		TotalAssets:            totalAssets,
+		TotalLiabilities:       totalLiabilities,
+		TotalEquity:            totalEquity,
+		LiabilityRatio:         liabilityRatio,
+		HealthStatus:           healthStatus,
+		CashAsset:              cashAsset,
+		LoanReceivable:         totalOutstandingLoan,
+		ActiveLoanCount:        loanBreakdown.ActiveLoanCount,
+		TotalApprovedLoan:      loanBreakdown.ApprovedAmount,
+		TotalLoanObligation:    loanBreakdown.TotalObligation,
+		TotalLoanRepayment:     loanBreakdown.RepaymentAmount,
+		RepaymentRatio:         repaymentRatio,
+		PrintedAt:              time.Now().Format("02 January 2006 15:04:05"),
 		Rows: []BalanceReportRow{
-			{GroupKey: "balance_group_savings", LabelKey: "simpanan_pokok", Amount: chartValueByLabel(savings, "simpanan_pokok"), Class: "balance-positive"},
-			{GroupKey: "balance_group_savings", LabelKey: "simpanan_wajib", Amount: chartValueByLabel(savings, "simpanan_wajib"), Class: "balance-positive"},
-			{GroupKey: "balance_group_savings", LabelKey: "simpanan_sukarela", Amount: chartValueByLabel(savings, "simpanan_sukarela"), Class: "balance-positive"},
+			{GroupKey: "balance_group_savings", LabelKey: "simpanan_pokok", Amount: balanceValueByLabel(savingsBreakdown, "simpanan_pokok"), Class: "balance-positive"},
+			{GroupKey: "balance_group_savings", LabelKey: "simpanan_wajib", Amount: balanceValueByLabel(savingsBreakdown, "simpanan_wajib"), Class: "balance-positive"},
+			{GroupKey: "balance_group_savings", LabelKey: "simpanan_sukarela", Amount: balanceValueByLabel(savingsBreakdown, "simpanan_sukarela"), Class: "balance-positive"},
+			{GroupKey: "balance_group_savings", LabelKey: "simpanan_shu_tertahan", Amount: balanceValueByLabel(savingsBreakdown, "simpanan_shu_tertahan"), Class: "balance-positive"},
+			{GroupKey: "balance_group_savings", LabelKey: "simpanan_khusus", Amount: balanceValueByLabel(savingsBreakdown, "simpanan_khusus"), Class: "balance-positive"},
 			{GroupKey: "balance_group_loans", LabelKey: "remaining_loan", Amount: -totalOutstandingLoan, Class: "balance-negative"},
 			{GroupKey: "balance_group_withdrawals", LabelKey: "pending_withdrawals", Amount: -pendingWithdrawals, Class: "balance-warning"},
 		},
+		SavingsBreakdown: savingsBreakdown,
+		LoanBreakdown:    loanBreakdown.Rows,
 	}
 	return report, nil
+}
+
+func balanceValueByLabel(rows []BalanceReportRow, label string) int64 {
+	for _, row := range rows {
+		if row.LabelKey == label {
+			return row.Amount
+		}
+	}
+	return 0
+}
+
+type balanceLoanBreakdown struct {
+	Rows             []BalanceReportLoanRow
+	ApprovedAmount   int64
+	TotalObligation  int64
+	RemainingBalance int64
+	ActiveLoanCount  int64
+	RepaymentAmount  int64
+}
+
+func (s *Server) balanceSavingsBreakdown() ([]BalanceReportRow, int64, error) {
+	type savingCategory struct {
+		value    int64
+		members  int64
+		labelKey string
+	}
+	categories := []struct {
+		name     string
+		labelKey string
+	}{
+		{name: "pokok", labelKey: "simpanan_pokok"},
+		{name: "wajib", labelKey: "simpanan_wajib"},
+		{name: "sukarela", labelKey: "simpanan_sukarela"},
+		{name: "shu", labelKey: "simpanan_shu_tertahan"},
+		{name: "khusus", labelKey: "simpanan_khusus"},
+	}
+	values := make(map[string]savingCategory, len(categories))
+	for _, category := range categories {
+		values[category.name] = savingCategory{labelKey: category.labelKey}
+	}
+	rows, err := s.db.Query(`
+		SELECT category,
+			COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount ELSE -amount END), 0),
+			COUNT(DISTINCT member_id)
+		FROM saving_records
+		GROUP BY category`)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var category string
+		var value, members int64
+		if err := rows.Scan(&category, &value, &members); err != nil {
+			return nil, 0, err
+		}
+		if current, ok := values[category]; ok {
+			current.value = value
+			current.members = members
+			values[category] = current
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	breakdown := make([]BalanceReportRow, 0, len(categories))
+	var total int64
+	for _, category := range categories {
+		value := values[category.name]
+		var err error
+		total, err = checkedReportAdd(total, value.value)
+		if err != nil {
+			return nil, 0, err
+		}
+		breakdown = append(breakdown, BalanceReportRow{
+			GroupKey:    "balance_group_savings",
+			LabelKey:    value.labelKey,
+			Amount:      value.value,
+			MemberCount: value.members,
+			Class:       "balance-positive",
+		})
+	}
+	return breakdown, total, nil
+}
+
+func (s *Server) balanceLoanBreakdown() (balanceLoanBreakdown, error) {
+	rows, err := s.db.Query(`
+		SELECT loan_type, legacy_terms,
+			COUNT(*),
+			SUM(CASE WHEN remaining_balance > 0 THEN 1 ELSE 0 END),
+			COALESCE(SUM(approved_amount), 0),
+			COALESCE(SUM(total_obligation), 0),
+			COALESCE(SUM(remaining_balance), 0)
+		FROM loans
+		WHERE status <> 'cancelled'
+		GROUP BY loan_type, legacy_terms
+		ORDER BY loan_type, legacy_terms`)
+	if err != nil {
+		return balanceLoanBreakdown{}, err
+	}
+	defer rows.Close()
+
+	breakdown := balanceLoanBreakdown{}
+	for rows.Next() {
+		var loanType string
+		var legacyTerms bool
+		var row BalanceReportLoanRow
+		if err := rows.Scan(&loanType, &legacyTerms, &row.LoanCount, &row.ActiveLoanCount, &row.ApprovedAmount, &row.TotalObligation, &row.RemainingBalance); err != nil {
+			return balanceLoanBreakdown{}, err
+		}
+		row.LabelKey = "loan_type_" + loanType
+		if loanType == "regular" && legacyTerms {
+			row.LabelKey = "loan_type_regular_legacy"
+		}
+		breakdown.Rows = append(breakdown.Rows, row)
+		var addErr error
+		breakdown.ApprovedAmount, addErr = checkedReportAdd(breakdown.ApprovedAmount, row.ApprovedAmount)
+		if addErr != nil {
+			return balanceLoanBreakdown{}, addErr
+		}
+		breakdown.TotalObligation, addErr = checkedReportAdd(breakdown.TotalObligation, row.TotalObligation)
+		if addErr != nil {
+			return balanceLoanBreakdown{}, addErr
+		}
+		breakdown.RemainingBalance, addErr = checkedReportAdd(breakdown.RemainingBalance, row.RemainingBalance)
+		if addErr != nil {
+			return balanceLoanBreakdown{}, addErr
+		}
+		breakdown.ActiveLoanCount, addErr = checkedReportAdd(breakdown.ActiveLoanCount, row.ActiveLoanCount)
+		if addErr != nil {
+			return balanceLoanBreakdown{}, addErr
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return balanceLoanBreakdown{}, err
+	}
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount), 0) FROM loan_repayments`).Scan(&breakdown.RepaymentAmount); err != nil {
+		return balanceLoanBreakdown{}, err
+	}
+	return breakdown, nil
+}
+
+func (s *Server) pendingWithdrawalCount() (int64, error) {
+	var count int64
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM withdrawal_requests WHERE status = 'pending'`).Scan(&count)
+	return count, err
 }
 
 func (s *Server) pendingWithdrawalAmount() (int64, error) {

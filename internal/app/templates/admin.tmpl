@@ -470,6 +470,86 @@
             </article>
           </section>
 
+          <section class="balance-stat-grid">
+            <article class="balance-stat-card">
+              <span>{{t .Lang "active_loans"}}</span>
+              <strong>{{.Report.ActiveLoanCount}}</strong>
+              <small>{{t .Lang "loan_accounts_with_balance"}}</small>
+            </article>
+            <article class="balance-stat-card">
+              <span>{{t .Lang "total_loan_obligation"}}</span>
+              <strong>Rp {{nominal .Report.TotalLoanObligation}}</strong>
+              <small>{{t .Lang "all_non_cancelled_loans"}}</small>
+            </article>
+            <article class="balance-stat-card">
+              <span>{{t .Lang "repayment_progress"}}</span>
+              <strong>{{.Report.RepaymentRatio}}%</strong>
+              <small>Rp {{nominal .Report.TotalLoanRepayment}} / Rp {{nominal .Report.TotalLoanObligation}}</small>
+            </article>
+            <article class="balance-stat-card">
+              <span>{{t .Lang "pending_withdrawal_count"}}</span>
+              <strong>{{.Report.PendingWithdrawalCount}}</strong>
+              <small>Rp {{nominal .Report.PendingWithdrawals}}</small>
+            </article>
+          </section>
+
+          <section class="balance-breakdown-grid">
+            <article class="balance-breakdown-card">
+              <h3><i data-lucide="piggy-bank"></i> {{t .Lang "savings_by_category"}}</h3>
+{{template "table-open" .}}
+              <thead>
+                <tr>
+                  <th>{{t $.Lang "category"}}</th>
+                  <th>{{t $.Lang "members"}}</th>
+                  <th>{{t $.Lang "amount_rp"}}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{range .Report.SavingsBreakdown}}
+                <tr>
+                  <td>{{t $.Lang .LabelKey}}</td>
+                  <td>{{.MemberCount}}</td>
+                  <td>Rp {{nominal .Amount}}</td>
+                </tr>
+                {{end}}
+                <tr class="balance-total-row">
+                  <td colspan="2">{{t $.Lang "total_savings"}}</td>
+                  <td>Rp {{nominal .Report.TotalSavings}}</td>
+                </tr>
+              </tbody>
+{{template "table-close" .}}
+            </article>
+            <article class="balance-breakdown-card">
+              <h3><i data-lucide="hand-coins"></i> {{t .Lang "loan_receivable_by_type"}}</h3>
+{{if .Report.LoanBreakdown}}
+{{template "table-open" .}}
+              <thead>
+                <tr>
+                  <th>{{t $.Lang "loan_type"}}</th>
+                  <th>{{t $.Lang "active_loans"}}</th>
+                  <th>{{t $.Lang "remaining_balance"}}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{range .Report.LoanBreakdown}}
+                <tr>
+                  <td>{{t $.Lang .LabelKey}}</td>
+                  <td>{{.ActiveLoanCount}}</td>
+                  <td>Rp {{nominal .RemainingBalance}}</td>
+                </tr>
+                {{end}}
+                <tr class="balance-total-row">
+                  <td colspan="2">{{t $.Lang "loan_receivable"}}</td>
+                  <td>Rp {{nominal .Report.LoanReceivable}}</td>
+                </tr>
+              </tbody>
+{{template "table-close" .}}
+{{else}}
+              <p class="balance-breakdown-empty">{{t .Lang "no_active_loans"}}</p>
+{{end}}
+            </article>
+          </section>
+
           <section class="balance-detail-card">
             <h3><i data-lucide="scale"></i> {{t .Lang "balance_detail"}}</h3>
 {{template "table-open" .}}
@@ -520,8 +600,12 @@
             </article>
             <article class="balance-meta-card balance-meta-secondary">
               <h3>{{t .Lang "composition"}}</h3>
-              <p>{{t .Lang "cash"}}: {{nominal .Report.CashAsset}}</p>
-              <p>{{t .Lang "receivables"}}: {{nominal .Report.LoanReceivable}}</p>
+              <p>{{t .Lang "member_savings"}}: Rp {{nominal .Report.TotalSavings}}</p>
+              <p>{{t .Lang "manual_cash_net"}}: Rp {{nominal .Report.ManualCashNet}}</p>
+              <p>{{t .Lang "cash_before_withdrawals"}}: Rp {{nominal .Report.CashBeforeWithdrawals}}</p>
+              <p>{{t .Lang "pending_withdrawals"}}: - Rp {{nominal .Report.PendingWithdrawals}}</p>
+              <p><strong>{{t .Lang "cash_asset"}}: Rp {{nominal .Report.CashAsset}}</strong></p>
+              <p>{{t .Lang "loan_receivable"}}: Rp {{nominal .Report.LoanReceivable}}</p>
             </article>
           </section>
         </div>

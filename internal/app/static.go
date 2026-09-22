@@ -2027,6 +2027,39 @@ td:nth-child(n+2):not(.review-cell) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 24px;
 }
+.balance-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.balance-stat-card {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-height: 104px;
+  border: 1px solid #e3e6f0;
+  border-top: 3px solid #36b9cc;
+  border-radius: 6px;
+  padding: 16px;
+  background: #fff;
+}
+.balance-stat-card span {
+  color: #36b9cc;
+  font-size: 11px;
+  line-height: 15px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.balance-stat-card strong {
+  color: #2d3748;
+  font-size: 18px;
+  line-height: 24px;
+}
+.balance-stat-card small {
+  color: #718096;
+  font-size: 12px;
+  line-height: 17px;
+}
 .balance-kpi-card,
 .balance-meta-card {
   position: relative;
@@ -2142,6 +2175,40 @@ td:nth-child(n+2):not(.review-cell) {
 }
 .balance-warning-dot {
   background: #f6c23e;
+}
+.balance-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.balance-breakdown-card {
+  overflow: hidden;
+  border: 1px solid #e3e6f0;
+  border-radius: 6px;
+  background: #fff;
+}
+.balance-breakdown-card h3 {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid #e3e6f0;
+  color: #4e73df;
+  font-size: 14px;
+  line-height: 20px;
+}
+.balance-breakdown-card .table-scroll {
+  margin: 20px;
+}
+.balance-breakdown-card td:last-child,
+.balance-breakdown-card th:last-child {
+  text-align: right;
+}
+.balance-breakdown-empty {
+  margin: 20px;
+  color: #718096;
 }
 .balance-meta-grid {
   display: grid;
@@ -2512,6 +2579,8 @@ td:nth-child(n+2):not(.review-cell) {
   }
   .balance-filter-form,
   .balance-kpi-grid,
+  .balance-stat-grid,
+  .balance-breakdown-grid,
   .balance-meta-grid,
   .profit-kpi-grid,
   .profit-filter-form,
