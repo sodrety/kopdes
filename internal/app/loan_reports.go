@@ -22,6 +22,7 @@ var loanReportTemplates embed.FS
 
 type loanReportData struct {
 	Loan            Loan
+	Language        string
 	MemberNo        string
 	MemberName      string
 	MemberType      string
@@ -53,6 +54,12 @@ type loanPDFObject struct {
 	body   string
 	stream []byte
 }
+
+// Loan form field positions are measured on an A4 preview rendered at 990x1400.
+const (
+	loanFormReferenceWidth  = 990.0
+	loanFormReferenceHeight = 1400.0
+)
 
 func (s *Server) exportLoanApplicationFormPDF(c *gin.Context) {
 	report, ok := s.loanReportData(c)
@@ -107,7 +114,7 @@ func (s *Server) loanReportData(c *gin.Context) (loanReportData, bool) {
 		return loanReportData{}, false
 	}
 
-	report := loanReportData{Loan: loan}
+	report := loanReportData{Loan: loan, Language: lang}
 	var requestDate any
 	err = s.db.QueryRow(
 		`SELECT m.member_no, m.full_name, COALESCE(m.member_type,'employee'), COALESCE(m.status,'active'),
@@ -189,26 +196,26 @@ func loanApplicationFormText(report loanReportData) []loanPDFText {
 		requestMonths = report.Loan.DurationMonths
 	}
 	texts := []loanPDFText{
-		{220, 281, 8, report.MemberName, 62},
-		{220, 311, 8, report.MemberNo, 45},
-		{220, 340, 8, "", 0}, // Workplace is not recorded in the member profile.
-		{220, 370, 8, loanMemberStatusLabel(report.MemberType, report.MemberStatus), 52},
-		{220, 399, 8, "Rp " + formatLoanReportAmount(requestAmount), 48},
-		{220, 429, 8, "" + indonesianRupiahWords(requestAmount), 100},
-		{220, 527, 8, report.Purpose, 115},
-		{390, 567, 8, strconv.Itoa(requestMonths) + " Bulan", 24},
-		{139, 632, 8, loanReportDateLong(report.RequestDate), 45},
-		{410, 895, 8, "Rp " + formatLoanReportAmount(report.Savings.WajibBalance), 32},
-		{410, 925, 8, "Rp " + formatLoanReportAmount(report.Savings.SukarelaBalance), 32},
-		{410, 967, 8, "Rp " + formatLoanReportAmount(report.Savings.WajibBalance+report.Savings.SukarelaBalance), 32},
+		{220, 259.1, 8, report.MemberName, 62},
+		{220, 285.7, 8, report.MemberNo, 45},
+		{220, 312.3, 8, "", 0}, // Workplace is not recorded in the member profile.
+		{220, 338.9, 8, loanMemberStatusLabel(report.MemberType, report.MemberStatus), 52},
+		{242, 365.6, 8, formatLoanReportAmount(requestAmount), 48},
+		{220, 392.2, 8, indonesianRupiahWords(requestAmount), 100},
+		{129, 496.5, 7, translate(report.Language, "purpose") + ": " + report.Purpose, 115},
+		{390, 525.2, 8, strconv.Itoa(requestMonths), 24},
+		{139, 589.1, 8, loanReportDateLong(report.RequestDate), 45},
+		{410, 830.2, 8, formatLoanReportAmount(report.Savings.WajibBalance), 32},
+		{410, 856.8, 8, formatLoanReportAmount(report.Savings.SukarelaBalance), 32},
+		{410, 892.8, 8, formatLoanReportAmount(report.Savings.WajibBalance + report.Savings.SukarelaBalance), 32},
 	}
 	texts = append(texts, priorLoanFormText(report.PriorCashLoan, 410)...)
 	texts = append(texts, priorLoanFormText(report.PriorGoodsLoan, 708)...)
 	texts = append(texts,
-		loanApprovalFormText(report, approvalStageManager, 1277),
-		loanApprovalFormText(report, approvalStageKetuaI, 1320),
-		loanApprovalFormText(report, approvalStageKetuaII, 1365),
-		loanPDFText{376, 1408, 7, fmt.Sprintf("Disetujui: Rp %s, %d bulan", formatLoanReportAmount(report.Loan.ApprovedAmount), report.Loan.DurationMonths), 95},
+		loanApprovalFormText(report, approvalStageManager, 1164.5),
+		loanApprovalFormText(report, approvalStageKetuaI, 1217.7),
+		loanApprovalFormText(report, approvalStageKetuaII, 1270.9),
+		loanPDFText{376, 1324.2, 7, fmt.Sprintf("Disetujui: Rp %s, %d bulan", formatLoanReportAmount(report.Loan.ApprovedAmount), report.Loan.DurationMonths), 95},
 	)
 	return texts
 }
@@ -218,10 +225,10 @@ func priorLoanFormText(line priorLoanReportLine, x float64) []loanPDFText {
 		return nil
 	}
 	return []loanPDFText{
-		{x, 1083, 7, "Rp " + formatLoanReportAmount(line.MonthlyInstallment), 30},
-		{x, 1115, 7, strconv.FormatInt(line.PaidInstallments, 10) + " Kali", 24},
-		{x, 1148, 7, "Rp " + formatLoanReportAmount(line.RemainingBalance), 30},
-		{x, 1180, 7, "Aktif", 18},
+		{x, 1000.9, 7, formatLoanReportAmount(line.MonthlyInstallment), 30},
+		{x, 1028.1, 7, strconv.FormatInt(line.PaidInstallments, 10) + " Kali", 24},
+		{x, 1055.7, 7, formatLoanReportAmount(line.RemainingBalance), 30},
+		{x, 1083, 7, "Aktif", 18},
 	}
 }
 
@@ -252,21 +259,43 @@ func loanAcceptanceFormText(report loanReportData) []loanPDFText {
 	if date == "" {
 		date = loanReportDateLong(time.Now().In(jakartaLocation).Format("2006-01-02"))
 	}
-	return []loanPDFText{
-		{332, 338, 8, date, 42},
-		{402, 456, 8, report.MemberName + " (" + report.MemberNo + ")", 65},
-		{402, 485, 8, loanMemberStatusLabel(report.MemberType, report.MemberStatus), 42},
-		{402, 515, 8, "", 0}, // Workplace is not recorded in the member profile.
-		{140, 660, 8, "Rp " + formatLoanReportAmount(report.Loan.ApprovedAmount) + " (" + indonesianRupiahWords(report.Loan.ApprovedAmount) + ")", 112},
-		{580, 708, 8, date, 32},
-		{301, 739, 8, strconv.Itoa(report.Loan.DurationMonths), 16},
-		{702, 739, 8, "Rp " + formatLoanReportAmount(report.Loan.MonthlyInstallment), 28},
-		{527, 904, 8, date, 42},
-		{337, 1189, 8, "Rp " + formatLoanReportAmount(report.Loan.ApprovedAmount), 32},
-		{337, 1223, 8, "Rp " + formatLoanReportAmount(report.Loan.TotalAdminFee), 32},
-		{337, 1257, 8, "Rp " + formatLoanReportAmount(report.Loan.TotalObligation), 32},
-		{73, 1348, 8, report.Purpose, 122},
+	amountWords, remainingAmountWords := splitLoanPDFText(indonesianRupiahWords(report.Loan.ApprovedAmount), 58)
+	texts := []loanPDFText{
+		{275, 312.5, 8, date, 42},
+		{366, 396.5, 8, report.MemberName + " (" + report.MemberNo + ")", 65},
+		// The membership choices are printed on the source form; the loan profile does not
+		// identify which of those choices to mark.
+		{316, 452.5, 8, "", 0}, // Workplace is not recorded in the member profile.
+		{230, 536.5, 8, formatLoanReportAmount(report.Loan.ApprovedAmount), 32},
+		{508, 536.5, 8, amountWords, 58},
+		{632, 592.4, 8, date, 32},
+		{301, 620.5, 8, strconv.Itoa(report.Loan.DurationMonths), 16},
+		{642, 620.5, 8, formatLoanReportAmount(report.Loan.MonthlyInstallment), 28},
+		{553, 833.2, 8, date, 42},
+		{337, 1098.2, 8, formatLoanReportAmount(report.Loan.ApprovedAmount), 32},
+		{337, 1140.5, 8, formatLoanReportAmount(report.Loan.TotalAdminFee), 32},
+		{337, 1182.7, 8, formatLoanReportAmount(report.Loan.TotalObligation), 32},
+		{66, 1272, 7, translate(report.Language, "purpose") + ": " + report.Purpose, 122},
 	}
+	if remainingAmountWords != "" {
+		texts = append(texts, loanPDFText{126, 564.5, 8, remainingAmountWords, 100})
+	}
+	return texts
+}
+
+func splitLoanPDFText(value string, maxRunes int) (string, string) {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= maxRunes {
+		return string(runes), ""
+	}
+	splitAt := maxRunes
+	for splitAt > 0 && runes[splitAt] != ' ' {
+		splitAt--
+	}
+	if splitAt == 0 {
+		splitAt = maxRunes
+	}
+	return strings.TrimSpace(string(runes[:splitAt])), strings.TrimSpace(string(runes[splitAt:]))
 }
 
 func buildLoanFormPDF(background []byte, texts []loanPDFText) ([]byte, error) {
@@ -283,8 +312,8 @@ func buildLoanFormPDF(background []byte, texts []loanPDFText) ([]byte, error) {
 			continue
 		}
 		value = truncateLoanPDFText(value, item.maxRunes)
-		x := item.x * pageWidth / float64(config.Width)
-		y := pageHeight - item.y*pageHeight/float64(config.Height)
+		x := item.x * pageWidth / loanFormReferenceWidth
+		y := pageHeight - item.y*pageHeight/loanFormReferenceHeight
 		fmt.Fprintf(&content, "BT /F1 %.2f Tf 1 0 0 1 %.2f %.2f Tm (%s) Tj ET\n", item.size, x, y, escapePDFText(loanPDFASCII(value)))
 	}
 	contentBytes := []byte(content.String())
