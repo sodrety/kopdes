@@ -3654,7 +3654,7 @@ func TestLoanApprovalPagesRenderReviewAndActiveLoanViews(t *testing.T) {
 		t.Fatalf("expected admin loans page status 200, got %d: %s", adminLoansRec.Code, adminLoansRec.Body.String())
 	}
 	adminLoansBody := adminLoansRec.Body.String()
-	for _, text := range []string{"Active loans", "table-scroll", member.FullName, member.MemberNo, "900.000", "109.000", "Aktif"} {
+	for _, text := range []string{"Loans", "table-scroll", member.FullName, member.MemberNo, "900.000", "109.000", "Aktif"} {
 		if !strings.Contains(adminLoansBody, text) {
 			t.Fatalf("expected admin loans page to include %q, got %s", text, adminLoansBody)
 		}

@@ -368,15 +368,35 @@ func (s *Server) adminLoansPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	outstanding := loans[:0]
-	for _, loan := range loans {
-		if loan.RemainingBalance > 0 && loan.Status != "cancelled" {
-			outstanding = append(outstanding, loan)
-		}
-	}
-	renderPage(c, "admin-loans", pageData(c, "Active loans - KKSUK PD Dharma Jaya", "loans", "active_loans", "monitor_loans", gin.H{
-		"Loans": outstanding,
+	search := strings.TrimSpace(c.Query("search"))
+	loanType := strings.TrimSpace(c.Query("loan_type"))
+	status := strings.TrimSpace(c.Query("status"))
+	loans = filterAdminLoans(loans, loanType, status, search)
+	lang := languageFromRequest(c)
+	renderPage(c, "admin-loans", pageData(c, translate(lang, "loan_portfolio_page_title"), "loans", "loan_portfolio", "loan_portfolio_description", gin.H{
+		"Loans":            loans,
+		"LoanSearch":       search,
+		"LoanTypeFilter":   loanType,
+		"LoanStatusFilter": status,
 	}))
+}
+
+func filterAdminLoans(loans []AdminLoan, loanType, status, search string) []AdminLoan {
+	needle := strings.ToLower(strings.TrimSpace(search))
+	filtered := make([]AdminLoan, 0, len(loans))
+	for _, loan := range loans {
+		if loanType != "" && loan.LoanType != loanType {
+			continue
+		}
+		if status != "" && loan.Status != status {
+			continue
+		}
+		if needle != "" && !strings.Contains(strings.ToLower(loan.FullName), needle) && !strings.Contains(strings.ToLower(loan.MemberNo), needle) {
+			continue
+		}
+		filtered = append(filtered, loan)
+	}
+	return filtered
 }
 
 func (s *Server) adminRepaymentsPage(c *gin.Context) {

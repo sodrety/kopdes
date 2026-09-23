@@ -1786,6 +1786,30 @@
         <a class="button-link button-link-secondary" href="/api/admin/exports/loans.csv">{{t .Lang "export_csv"}}</a>
       </section>
       <section class="panel">
+        <form class="filter-form member-search-form" method="get" action="/admin/loans" role="search">
+          <label for="admin-loan-search">{{t .Lang "search_loans"}}
+            <input id="admin-loan-search" type="search" name="search" value="{{.LoanSearch}}" placeholder="{{t .Lang "search_loans_placeholder"}}">
+          </label>
+          <label for="admin-loan-type">{{t .Lang "loan_type"}}
+            <select id="admin-loan-type" name="loan_type">
+              <option value="">{{t .Lang "all_loan_types"}}</option>
+              <option value="regular" {{if eq .LoanTypeFilter "regular"}}selected{{end}}>{{t .Lang "loan_type_regular"}}</option>
+              <option value="secondary_goods" {{if eq .LoanTypeFilter "secondary_goods"}}selected{{end}}>{{t .Lang "loan_type_secondary_goods"}}</option>
+              <option value="goods_purchase_paylater" {{if eq .LoanTypeFilter "goods_purchase_paylater"}}selected{{end}}>{{t .Lang "loan_type_goods_purchase_paylater"}}</option>
+            </select>
+          </label>
+          <label for="admin-loan-status">{{t .Lang "status"}}
+            <select id="admin-loan-status" name="status">
+              <option value="">{{t .Lang "all_statuses"}}</option>
+              <option value="active" {{if eq .LoanStatusFilter "active"}}selected{{end}}>{{t .Lang "status_active"}}</option>
+              <option value="adjustment_due" {{if eq .LoanStatusFilter "adjustment_due"}}selected{{end}}>{{t .Lang "status_adjustment_due"}}</option>
+              <option value="paid" {{if eq .LoanStatusFilter "paid"}}selected{{end}}>{{t .Lang "status_paid"}}</option>
+              <option value="cancelled" {{if eq .LoanStatusFilter "cancelled"}}selected{{end}}>{{t .Lang "status_cancelled"}}</option>
+            </select>
+          </label>
+          <button type="submit">{{t .Lang "search"}}</button>
+          <a class="button-link button-link-secondary" href="/admin/loans">{{t .Lang "reset"}}</a>
+        </form>
         {{if .Loans}}
 {{template "table-open" .}}
           <thead>
@@ -1833,7 +1857,7 @@
           </tbody>
 {{template "table-close" .}}
         {{else}}
-{{template "empty-state" (t .Lang "no_active_loans")}}
+{{template "empty-state" (t .Lang "no_matching_loans")}}
         {{end}}
 {{template "form-error" (dict "ID" "repayment-form-error")}}
       </section>

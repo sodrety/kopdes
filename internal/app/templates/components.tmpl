@@ -19,7 +19,7 @@
 {{end}}
 
 {{define "loan-type-label"}}
-{{if .LegacyTerms}}{{t .Lang "loan_type_regular_legacy"}}{{else}}{{t .Lang (printf "loan_type_%s" .LoanType)}}{{end}}
+{{t .Lang (printf "loan_type_%s" .LoanType)}}{{if .LegacyTerms}} — {{t .Lang "loan_type_legacy_terms"}}{{end}}
 {{end}}
 
 {{define "table-open"}}
