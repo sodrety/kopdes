@@ -16,8 +16,9 @@ func TestApprovedLoanReportPDFsAlignToFormFields(t *testing.T) {
 	loan := fixture.approveLoanRequest(t, adminToken, requestID, 500_000, 3)
 
 	reports := []struct {
-		path, filename string
-		fieldPositions []string
+		path, filename    string
+		fieldPositions    []string
+		minimumFieldMasks int
 	}{
 		{
 			path:     "/api/admin/loans/" + loan.ID + "/reports/application.pdf",
@@ -26,6 +27,7 @@ func TestApprovedLoanReportPDFsAlignToFormFields(t *testing.T) {
 				"1 0 0 1 132.28 686.08 Tm (Loan Report Layout Member) Tj ET",
 				"1 0 0 1 77.57 543.32 Tm (Purpose: Test loan) Tj ET",
 			},
+			minimumFieldMasks: 11,
 		},
 		{
 			path:     "/api/admin/loans/" + loan.ID + "/reports/acceptance.pdf",
@@ -33,9 +35,10 @@ func TestApprovedLoanReportPDFsAlignToFormFields(t *testing.T) {
 			fieldPositions: []string{
 				"1 0 0 1 220.07 603.45 Tm (Loan Report Layout Member \\(M-LOAN-REPORT\\)) Tj ET",
 				"1 0 0 1 138.30 519.27 Tm (500.000) Tj ET",
-				"1 0 0 1 305.46 519.27 Tm (lima ratus ribu rupiah) Tj ET",
+				"1 0 0 1 305.46 519.27 Tm (lima ratus ribu rupiah\\)) Tj ET",
 				"1 0 0 1 39.69 76.97 Tm (Purpose: Test loan) Tj ET",
 			},
+			minimumFieldMasks: 12,
 		},
 	}
 
@@ -60,6 +63,12 @@ func TestApprovedLoanReportPDFsAlignToFormFields(t *testing.T) {
 				if !strings.Contains(pdf, fieldPosition) {
 					t.Fatalf("form field is not placed on the matching row; expected PDF content %q", fieldPosition)
 				}
+			}
+			if maskCount := strings.Count(pdf, "1 1 1 rg "); maskCount < report.minimumFieldMasks {
+				t.Fatalf("PDF has %d white field masks; want at least %d to clear the printed placeholders", maskCount, report.minimumFieldMasks)
+			}
+			if strings.Index(pdf, "1 1 1 rg ") > strings.Index(pdf, "BT /F1") {
+				t.Fatal("white field masks must be painted before generated text")
 			}
 		})
 	}

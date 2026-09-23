@@ -50,6 +50,10 @@ type loanPDFText struct {
 	maxRunes   int
 }
 
+type loanPDFMask struct {
+	x, y, width, height float64
+}
+
 type loanPDFObject struct {
 	body   string
 	stream []byte
@@ -72,7 +76,7 @@ func (s *Server) exportLoanApplicationFormPDF(c *gin.Context) {
 		return
 	}
 	texts := loanApplicationFormText(report)
-	pdf, err := buildLoanFormPDF(background, texts)
+	pdf, err := buildLoanFormPDF(background, texts, loanApplicationFormMasks(report))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
@@ -92,7 +96,7 @@ func (s *Server) exportLoanAcceptancePDF(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
-	pdf, err := buildLoanFormPDF(background, loanAcceptanceFormText(report))
+	pdf, err := buildLoanFormPDF(background, loanAcceptanceFormText(report), loanAcceptanceFormMasks(report))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
@@ -220,6 +224,48 @@ func loanApplicationFormText(report loanReportData) []loanPDFText {
 	return texts
 }
 
+func loanApplicationFormMasks(report loanReportData) []loanPDFMask {
+	requestAmount := report.RequestAmount
+	if requestAmount <= 0 {
+		requestAmount = report.Loan.ApprovedAmount
+	}
+	requestMonths := report.RequestDuration
+	if requestMonths <= 0 {
+		requestMonths = report.Loan.DurationMonths
+	}
+	var masks []loanPDFMask
+	masks = appendLoanPDFFieldMask(masks, report.MemberName, 210, 259.1, 305)
+	masks = appendLoanPDFFieldMask(masks, report.MemberNo, 210, 285.7, 305)
+	masks = appendLoanPDFFieldMask(masks, loanMemberStatusLabel(report.MemberType, report.MemberStatus), 210, 338.9, 305)
+	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(requestAmount), 236, 365.6, 171)
+	masks = appendLoanPDFFieldMask(masks, indonesianRupiahWords(requestAmount), 212, 392.2, 718)
+	masks = appendLoanPDFFieldMask(masks, strconv.Itoa(requestMonths), 350, 525.2, 91)
+	masks = appendLoanPDFFieldMask(masks, loanReportDateLong(report.RequestDate), 130, 589.1, 157)
+	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Savings.WajibBalance), 391, 830.2, 218)
+	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Savings.SukarelaBalance), 399, 856.8, 210)
+	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Savings.WajibBalance+report.Savings.SukarelaBalance), 391, 892.8, 218)
+	for _, stage := range []struct {
+		name string
+		y    float64
+	}{
+		{approvalStageManager, 1164.5},
+		{approvalStageKetuaI, 1217.7},
+		{approvalStageKetuaII, 1270.9},
+	} {
+		approval := loanApprovalFormText(report, stage.name, stage.y)
+		masks = appendLoanPDFFieldMask(masks, approval.value, 352, stage.y, 550)
+	}
+	decision := fmt.Sprintf("Disetujui: Rp %s, %d bulan", formatLoanReportAmount(report.Loan.ApprovedAmount), report.Loan.DurationMonths)
+	return appendLoanPDFFieldMask(masks, decision, 352, 1324.2, 550)
+}
+
+func appendLoanPDFFieldMask(masks []loanPDFMask, value string, x, baselineY, width float64) []loanPDFMask {
+	if strings.TrimSpace(value) == "" {
+		return masks
+	}
+	return append(masks, loanPDFMask{x: x, y: baselineY - 11, width: width, height: 14})
+}
+
 func priorLoanFormText(line priorLoanReportLine, x float64) []loanPDFText {
 	if !line.HasLoan {
 		return nil
@@ -260,6 +306,9 @@ func loanAcceptanceFormText(report loanReportData) []loanPDFText {
 		date = loanReportDateLong(time.Now().In(jakartaLocation).Format("2006-01-02"))
 	}
 	amountWords, remainingAmountWords := splitLoanPDFText(indonesianRupiahWords(report.Loan.ApprovedAmount), 58)
+	if remainingAmountWords == "" {
+		amountWords += ")"
+	}
 	texts := []loanPDFText{
 		{275, 312.5, 8, date, 42},
 		{366, 396.5, 8, report.MemberName + " (" + report.MemberNo + ")", 65},
@@ -267,7 +316,7 @@ func loanAcceptanceFormText(report loanReportData) []loanPDFText {
 		// identify which of those choices to mark.
 		{316, 452.5, 8, "", 0}, // Workplace is not recorded in the member profile.
 		{230, 536.5, 8, formatLoanReportAmount(report.Loan.ApprovedAmount), 32},
-		{508, 536.5, 8, amountWords, 58},
+		{508, 536.5, 8, amountWords, 59},
 		{632, 592.4, 8, date, 32},
 		{301, 620.5, 8, strconv.Itoa(report.Loan.DurationMonths), 16},
 		{642, 620.5, 8, formatLoanReportAmount(report.Loan.MonthlyInstallment), 28},
@@ -281,6 +330,33 @@ func loanAcceptanceFormText(report loanReportData) []loanPDFText {
 		texts = append(texts, loanPDFText{126, 564.5, 8, remainingAmountWords, 100})
 	}
 	return texts
+}
+
+func loanAcceptanceFormMasks(report loanReportData) []loanPDFMask {
+	date := loanReportDateLong(report.Loan.StartDate)
+	if date == "" {
+		date = loanReportDateLong(time.Now().In(jakartaLocation).Format("2006-01-02"))
+	}
+	amountWords, remainingAmountWords := splitLoanPDFText(indonesianRupiahWords(report.Loan.ApprovedAmount), 58)
+	var masks []loanPDFMask
+	masks = appendLoanPDFFieldMask(masks, date, 171, 312.5, 235)
+	masks = appendLoanPDFFieldMask(masks, report.MemberName+" ("+report.MemberNo+")", 370, 396.5, 413)
+	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Loan.ApprovedAmount), 230, 536.5, 271)
+	masks = appendLoanPDFFieldMask(masks, amountWords, 507, 536.5, 342)
+	if remainingAmountWords == "" {
+		masks = append(masks, loanPDFMask{x: 126, y: 564.5 - 16, width: 730, height: 22})
+	} else {
+		masks = append(masks, loanPDFMask{x: 126, y: 564.5 - 11, width: 721, height: 14})
+	}
+	masks = appendLoanPDFFieldMask(masks, date, 631, 592.4, 278)
+	masks = appendLoanPDFFieldMask(masks, strconv.Itoa(report.Loan.DurationMonths), 259, 620.5, 80)
+	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Loan.MonthlyInstallment), 640, 620.5, 274)
+	if strings.TrimSpace(date) != "" {
+		masks = append(masks, loanPDFMask{x: 552, y: 833.2 - 16, width: 261, height: 22})
+	}
+	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Loan.ApprovedAmount), 334, 1098.2, 219)
+	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Loan.TotalAdminFee), 334, 1140.5, 219)
+	return appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Loan.TotalObligation), 334, 1182.7, 219)
 }
 
 func splitLoanPDFText(value string, maxRunes int) (string, string) {
@@ -298,7 +374,7 @@ func splitLoanPDFText(value string, maxRunes int) (string, string) {
 	return strings.TrimSpace(string(runes[:splitAt])), strings.TrimSpace(string(runes[splitAt:]))
 }
 
-func buildLoanFormPDF(background []byte, texts []loanPDFText) ([]byte, error) {
+func buildLoanFormPDF(background []byte, texts []loanPDFText, masks []loanPDFMask) ([]byte, error) {
 	config, err := jpeg.DecodeConfig(bytes.NewReader(background))
 	if err != nil {
 		return nil, err
@@ -306,6 +382,13 @@ func buildLoanFormPDF(background []byte, texts []loanPDFText) ([]byte, error) {
 	const pageWidth, pageHeight = 595.28, 841.89
 	var content strings.Builder
 	fmt.Fprintf(&content, "q %.2f 0 0 %.2f 0 0 cm /Im1 Do Q\n", pageWidth, pageHeight)
+	for _, mask := range masks {
+		x := mask.x * pageWidth / loanFormReferenceWidth
+		y := pageHeight - (mask.y+mask.height)*pageHeight/loanFormReferenceHeight
+		width := mask.width * pageWidth / loanFormReferenceWidth
+		height := mask.height * pageHeight / loanFormReferenceHeight
+		fmt.Fprintf(&content, "q 1 1 1 rg %.2f %.2f %.2f %.2f re f Q\n", x, y, width, height)
+	}
 	for _, item := range texts {
 		value := strings.TrimSpace(item.value)
 		if value == "" {
