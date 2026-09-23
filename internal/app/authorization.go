@@ -20,6 +20,7 @@ const (
 	PermissionRequestsDecide              Permission = "requests.decide"
 	PermissionRequestsOverride            Permission = "requests.override"
 	PermissionLoansView                   Permission = "loans.view"
+	PermissionLoanReportsGenerate         Permission = "loan_reports.generate"
 	PermissionRepaymentsView              Permission = "repayments.view"
 	PermissionRepaymentsRecord            Permission = "repayments.record"
 	PermissionTransactionsView            Permission = "transactions.view"
@@ -38,7 +39,8 @@ var officerPermissions = map[string]map[Permission]bool{
 		PermissionSavingsView: true, PermissionSavingsRecord: true,
 		PermissionRequestsView: true, PermissionRequestsDecide: true,
 		PermissionLoansView: true, PermissionRepaymentsView: true,
-		PermissionRepaymentsRecord: true, PermissionOfficersManage: true,
+		PermissionLoanReportsGenerate: true,
+		PermissionRepaymentsRecord:    true, PermissionOfficersManage: true,
 		PermissionTransactionsView: true, PermissionTransactionSourceEdit: true,
 		PermissionCOAManage:         true,
 		PermissionNotificationsView: true,
@@ -54,6 +56,7 @@ var officerPermissions = map[string]map[Permission]bool{
 		PermissionTransactionCategoriesManage: true,
 	},
 	"bendahara": {
+		PermissionLoansView: true, PermissionLoanReportsGenerate: true,
 		PermissionTransactionsView: true, PermissionTransactionsRecord: true,
 		PermissionTransactionSourceEdit:       true,
 		PermissionTransactionCategoriesManage: true,
@@ -80,6 +83,7 @@ var allPermissions = []Permission{
 	PermissionRequestsDecide,
 	PermissionRequestsOverride,
 	PermissionLoansView,
+	PermissionLoanReportsGenerate,
 	PermissionRepaymentsView,
 	PermissionRepaymentsRecord,
 	PermissionTransactionsView,

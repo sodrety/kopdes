@@ -1495,7 +1495,11 @@
 {{define "admin-loan-detail"}}
 {{template "admin-shell-start" .}}
       <section class="page-actions">
-        <a class="button-link button-link-secondary" href="/api/admin/loans/{{.Loan.ID}}/export.pdf">{{t .Lang "export_pdf"}}</a>
+        {{if index .Permissions "reports.view"}}<a class="button-link button-link-secondary" href="/api/admin/loans/{{.Loan.ID}}/export.pdf">{{t .Lang "export_pdf"}}</a>{{end}}
+        {{if index .Permissions "loan_reports.generate"}}
+        <a class="button-link button-link-secondary" href="/api/admin/loans/{{.Loan.ID}}/reports/application.pdf">{{t .Lang "loan_application_pdf"}}</a>
+        <a class="button-link button-link-secondary" href="/api/admin/loans/{{.Loan.ID}}/reports/acceptance.pdf">{{t .Lang "loan_acceptance_pdf"}}</a>
+        {{end}}
       </section>
       <section class="panel {{if .Loan.IsOverdue}}loan-warning{{end}}">
         <h2>{{t .Lang "loan_detail"}}</h2>
