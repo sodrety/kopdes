@@ -693,7 +693,7 @@ func (s *Server) profitLossReport(period ProfitLossPeriod) (ProfitLossReport, er
 	dateFrom := period.DateFrom
 	dateTo := period.DateTo
 	if dateTo == "" {
-		dateTo = time.Now().Format("2006-01-02")
+		dateTo = time.Now().In(jakartaLocation).Format("2006-01-02")
 	}
 	if dateFrom == "" {
 		var earliestActivity string
