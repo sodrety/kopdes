@@ -230,7 +230,7 @@ func tagihanNote(statementMonth tagihanStatementMonth, memberID string) string {
 }
 
 func (s *Server) tagihanRows(statementMonth tagihanStatementMonth) ([]TagihanRow, error) {
-	rows, err := s.db.Query(`SELECT id, member_no, full_name FROM members WHERE member_type='employee' AND status='active' ORDER BY member_no`)
+	rows, err := s.db.Query(`SELECT id, member_no, full_name FROM members WHERE status='active' ORDER BY member_no`)
 	if err != nil {
 		return nil, err
 	}
@@ -896,7 +896,7 @@ func parseTagihanStatus(value string) (string, bool) {
 
 func (s *Server) tagihanMember(memberID string) (Member, error) {
 	var member Member
-	err := s.db.QueryRow(`SELECT id, member_no, full_name, status, member_type FROM members WHERE id=$1 AND status='active' AND member_type='employee'`, memberID).Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Status, &member.MemberType)
+	err := s.db.QueryRow(`SELECT id, member_no, full_name, status, member_type FROM members WHERE id=$1 AND status='active'`, memberID).Scan(&member.ID, &member.MemberNo, &member.FullName, &member.Status, &member.MemberType)
 	member.MemberTypeLabel = memberTypeLabel(member.MemberType)
 	return member, err
 }
