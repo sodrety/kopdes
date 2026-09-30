@@ -15,6 +15,7 @@ type AccountingMapping struct {
 	MappingKey      string `json:"mapping_key"`
 	TransactionType string `json:"transaction_type"`
 	Component       string `json:"component"`
+	Category        string `json:"category,omitempty"`
 	LoanType        string `json:"loan_type,omitempty"`
 	COACode         string `json:"coa_code"`
 	EffectiveFrom   string `json:"effective_from,omitempty"`
@@ -31,6 +32,7 @@ var (
 type accountingMappingRequest struct {
 	TransactionType string `json:"transaction_type" form:"transaction_type"`
 	Component       string `json:"component" form:"component"`
+	Category        string `json:"category" form:"category"`
 	LoanType        string `json:"loan_type" form:"loan_type"`
 	COACode         string `json:"coa_code" form:"coa_code"`
 	EffectiveFrom   string `json:"effective_from" form:"effective_from"`
@@ -41,6 +43,7 @@ type accountingMappingRequest struct {
 func normalizeAccountingMappingRequest(req accountingMappingRequest) (accountingMappingRequest, error) {
 	req.TransactionType = strings.ToLower(strings.TrimSpace(req.TransactionType))
 	req.Component = strings.ToLower(strings.TrimSpace(req.Component))
+	req.Category = strings.ToLower(strings.TrimSpace(req.Category))
 	req.LoanType = strings.ToLower(strings.TrimSpace(req.LoanType))
 	req.COACode = strings.TrimSpace(req.COACode)
 	req.EffectiveFrom = strings.TrimSpace(req.EffectiveFrom)
@@ -67,7 +70,7 @@ func normalizeAccountingMappingRequest(req accountingMappingRequest) (accounting
 }
 
 func accountingMappingKey(req accountingMappingRequest) string {
-	return strings.Join([]string{req.TransactionType, req.Component, req.LoanType, req.EffectiveFrom, req.EffectiveTo}, "|")
+	return strings.Join([]string{req.TransactionType, req.Component, req.Category, req.LoanType, req.EffectiveFrom, req.EffectiveTo}, "|")
 }
 
 func (s *Server) accountingMappings(c *gin.Context) {
@@ -80,7 +83,7 @@ func (s *Server) accountingMappings(c *gin.Context) {
 }
 
 func (s *Server) accountingMappingsForAdmin() ([]AccountingMapping, error) {
-	rows, err := s.db.Query(`SELECT id,mapping_key,transaction_type,component,COALESCE(loan_type,''),COALESCE(coa_code,''),COALESCE(effective_from,''),COALESCE(effective_to,''),active FROM accounting_mappings ORDER BY transaction_type,component,loan_type,effective_from,id`)
+	rows, err := s.db.Query(`SELECT id,mapping_key,transaction_type,component,COALESCE(category,''),COALESCE(loan_type,''),COALESCE(coa_code,''),COALESCE(effective_from,''),COALESCE(effective_to,''),active FROM accounting_mappings ORDER BY transaction_type,component,category,loan_type,effective_from,id`)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +91,7 @@ func (s *Server) accountingMappingsForAdmin() ([]AccountingMapping, error) {
 	result := make([]AccountingMapping, 0)
 	for rows.Next() {
 		var item AccountingMapping
-		if err := rows.Scan(&item.ID, &item.MappingKey, &item.TransactionType, &item.Component, &item.LoanType, &item.COACode, &item.EffectiveFrom, &item.EffectiveTo, &item.Active); err != nil {
+		if err := rows.Scan(&item.ID, &item.MappingKey, &item.TransactionType, &item.Component, &item.Category, &item.LoanType, &item.COACode, &item.EffectiveFrom, &item.EffectiveTo, &item.Active); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -97,6 +100,27 @@ func (s *Server) accountingMappingsForAdmin() ([]AccountingMapping, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+func (s *Server) adminAccountingMappingsPage(c *gin.Context) {
+	if err := s.ensureFinancialJournalsBackfilled(); err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	accounts, err := s.coaPostingAccountsForAdmin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	mappings, err := s.accountingMappingsForAdmin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	renderPage(c, "admin-accounting-mappings", pageData(c, translate(languageFromRequest(c), "accounting_mappings"), "accounting-mappings", "accounting_mappings", "accounting_mapping_description", gin.H{
+		"COAAccounts": accounts,
+		"Mappings":    mappings,
+	}))
 }
 
 func (s *Server) saveAccountingMapping(c *gin.Context) {
@@ -115,6 +139,8 @@ func (s *Server) saveAccountingMapping(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_accounting_mapping"))
 		return
 	}
+	s.financialMu.Lock()
+	defer s.financialMu.Unlock()
 
 	mappingID := strings.TrimSpace(c.Param("id"))
 	created := mappingID == ""
@@ -145,11 +171,11 @@ func (s *Server) saveAccountingMapping(c *gin.Context) {
 	active := *req.Active
 	var conflictID string
 	err = tx.QueryRow(`SELECT id FROM accounting_mappings
-		WHERE transaction_type=$1 AND component=$2 AND loan_type=$3 AND active=TRUE AND $7=TRUE
-		  AND id<>$4
-		  AND (effective_from IS NULL OR $5='' OR effective_from <= $5)
-		  AND (effective_to IS NULL OR $6='' OR effective_to >= $6)
-		LIMIT 1`, req.TransactionType, req.Component, req.LoanType, mappingID, req.EffectiveTo, req.EffectiveFrom, active).Scan(&conflictID)
+		WHERE transaction_type=$1 AND component=$2 AND category=$3 AND loan_type=$4 AND active=TRUE AND $8=TRUE
+		  AND id<>$5
+		  AND (effective_from IS NULL OR $6='' OR effective_from <= $6)
+		  AND (effective_to IS NULL OR $7='' OR effective_to >= $7)
+		LIMIT 1`, req.TransactionType, req.Component, req.Category, req.LoanType, mappingID, req.EffectiveTo, req.EffectiveFrom, active).Scan(&conflictID)
 	if err == nil {
 		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_accounting_mapping_conflict"))
 		return
@@ -167,15 +193,23 @@ func (s *Server) saveAccountingMapping(c *gin.Context) {
 			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 			return
 		}
-		if _, err := tx.Exec(`UPDATE accounting_mappings SET mapping_key=$1,transaction_type=$2,component=$3,loan_type=$4,coa_code=$5,effective_from=$6,effective_to=$7,active=$8,updated_at=CURRENT_TIMESTAMP WHERE id=$9`, mappingKey, req.TransactionType, req.Component, req.LoanType, req.COACode, nullIfEmpty(req.EffectiveFrom), nullIfEmpty(req.EffectiveTo), active, mappingID); err != nil {
+		if _, err := tx.Exec(`UPDATE accounting_mappings SET mapping_key=$1,transaction_type=$2,component=$3,category=$4,loan_type=$5,coa_code=$6,effective_from=$7,effective_to=$8,active=$9,updated_at=CURRENT_TIMESTAMP WHERE id=$10`, mappingKey, req.TransactionType, req.Component, req.Category, req.LoanType, req.COACode, nullIfEmpty(req.EffectiveFrom), nullIfEmpty(req.EffectiveTo), active, mappingID); err != nil {
 			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 			return
 		}
-	} else if _, err := tx.Exec(`INSERT INTO accounting_mappings (id,mapping_key,transaction_type,component,loan_type,coa_code,effective_from,effective_to,active,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, mappingID, mappingKey, req.TransactionType, req.Component, req.LoanType, req.COACode, nullIfEmpty(req.EffectiveFrom), nullIfEmpty(req.EffectiveTo), active, user.ID); err != nil {
+	} else if _, err := tx.Exec(`INSERT INTO accounting_mappings (id,mapping_key,transaction_type,component,category,loan_type,coa_code,effective_from,effective_to,active,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, mappingID, mappingKey, req.TransactionType, req.Component, req.Category, req.LoanType, req.COACode, nullIfEmpty(req.EffectiveFrom), nullIfEmpty(req.EffectiveTo), active, user.ID); err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
 	if err := recordFinancialTransactionAuditTx(tx, mappingID, "accounting_mapping", user.ID, "coa_code", oldCOA, req.COACode, ""); err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	if err := s.backfillFinancialJournalsIfNeededTx(tx); err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	if err := s.resolvePendingFinancialJournalsTx(tx); err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}

@@ -31,10 +31,12 @@ type savingRequest struct {
 	Category    string `json:"category" form:"category"`
 	Source      string `json:"source" form:"source"`
 	COACode     string `json:"coa_code" form:"coa_code"`
+	CashCOACode string `json:"cash_coa_code" form:"cash_coa_code"`
 	Amount      int64  `json:"amount" form:"amount"`
 	RecordDate  string `json:"record_date" form:"record_date"`
 	ReferenceNo string `json:"reference_no" form:"reference_no"`
 	Note        string `json:"note" form:"note"`
+	Role        string `json:"-" form:"-"`
 }
 
 type SavingFilters struct {
@@ -68,6 +70,7 @@ func (s *Server) recordSaving(c *gin.Context) {
 		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication token is required")
 		return
 	}
+	req.Role = user.Role
 
 	record, err := s.insertSaving(req, user.ID)
 	if errors.Is(err, errInvalidSaving) {
@@ -88,6 +91,10 @@ func (s *Server) recordSaving(c *gin.Context) {
 	}
 	if errors.Is(err, errDirectWithdrawalNotAllowed) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Sukarela withdrawals must use the approval chain")
+		return
+	}
+	if errors.Is(err, errAccountingCOAOverrideForbidden) {
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(languageFromRequest(c), "error_accounting_coa_override_forbidden"))
 		return
 	}
 	if errors.Is(err, sql.ErrNoRows) {
@@ -156,14 +163,19 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 	recordType := strings.TrimSpace(req.Type)
 	category := strings.TrimSpace(req.Category)
 	recordDate := strings.TrimSpace(req.RecordDate)
-	source := normalizeTransactionSource(req.Source)
+	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
+	if strings.TrimSpace(req.COACode) != "" || strings.TrimSpace(req.CashCOACode) != "" {
+		if !hasPermission(req.Role, PermissionAccountingCOAOverride) {
+			return SavingRecord{}, errAccountingCOAOverrideForbidden
+		}
+	}
 	if recordType == "" {
 		recordType = "deposit"
 	}
 	if recordType == "withdrawal" {
 		return SavingRecord{}, errDirectWithdrawalNotAllowed
 	}
-	if memberID == "" || !validSavingType(recordType) || !validSavingCategory(category) || req.Amount <= 0 || recordDate == "" || !validTransactionSource(source) {
+	if memberID == "" || !validSavingType(recordType) || !validSavingCategory(category) || req.Amount <= 0 || recordDate == "" {
 		return SavingRecord{}, errInvalidSaving
 	}
 
@@ -244,7 +256,12 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 	}
 	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
 		ReferenceNo: record.ReferenceNo, TransactionID: record.ID, TransactionType: "savings", TransactionDate: record.RecordDate,
-		Source: record.Source, Amount: record.Amount, Direction: accountingDirectionDebit, COACode: record.COACode,
+		Source: record.Source, Amount: record.Amount, Category: record.Category,
+		Components: []accountingJournalComponent{
+			{Component: "cash_bank", Side: accountingDirectionDebit, Amount: record.Amount},
+			{Component: "savings_liability", Side: accountingDirectionCredit, Amount: record.Amount},
+		},
+		COAOverrides: map[string]string{"cash_bank": strings.TrimSpace(req.CashCOACode), "savings_liability": record.COACode},
 		Description: "Simpanan " + record.Category, RecordedBy: recordedBy,
 	}); err != nil {
 		return SavingRecord{}, err

@@ -51,9 +51,11 @@ type repaymentInput struct {
 	Amount      int64  `json:"amount" form:"amount"`
 	Source      string `json:"source" form:"source"`
 	COACode     string `json:"coa_code" form:"coa_code"`
+	CashCOACode string `json:"cash_coa_code" form:"cash_coa_code"`
 	RecordDate  string `json:"record_date" form:"record_date"`
 	ReferenceNo string `json:"reference_no" form:"reference_no"`
 	Note        string `json:"note" form:"note"`
+	Role        string `json:"-" form:"-"`
 }
 
 type RepaymentFilters struct {
@@ -92,6 +94,7 @@ func (s *Server) recordLoanRepayment(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_loan_repayment"))
 		return
 	}
+	req.Role = user.Role
 
 	repayment, err := s.recordRepayment(c.Param("id"), user.ID, req)
 	if errors.Is(err, errInvalidRepayment) {
@@ -112,6 +115,10 @@ func (s *Server) recordLoanRepayment(c *gin.Context) {
 	}
 	if errors.Is(err, errInvalidTransactionSource) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_transaction_source"))
+		return
+	}
+	if errors.Is(err, errAccountingCOAOverrideForbidden) {
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(lang, "error_accounting_coa_override_forbidden"))
 		return
 	}
 	if errors.Is(err, errCOAAccountNotFound) || errors.Is(err, errCOAAccountInactive) || errors.Is(err, errCOAAccountGroup) || errors.Is(err, errJournalAccountConflict) {
@@ -154,8 +161,11 @@ func (s *Server) memberRepayments(c *gin.Context) {
 
 func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (LoanRepayment, error) {
 	recordDate := strings.TrimSpace(req.RecordDate)
-	source := normalizeTransactionSource(req.Source)
-	if req.Amount <= 0 || recordDate == "" || !validTransactionSource(source) {
+	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
+	if (strings.TrimSpace(req.COACode) != "" || strings.TrimSpace(req.CashCOACode) != "") && !hasPermission(req.Role, PermissionAccountingCOAOverride) {
+		return LoanRepayment{}, errAccountingCOAOverrideForbidden
+	}
+	if req.Amount <= 0 || recordDate == "" {
 		return LoanRepayment{}, errInvalidRepayment
 	}
 
@@ -172,11 +182,12 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 		MemberID         string
 		RemainingBalance int64
 		Status           string
+		LoanType         string
 	}
 	err = tx.QueryRow(
-		`SELECT member_id, remaining_balance, status FROM loans WHERE id = $1`+rowLockClause(s.db),
+		`SELECT member_id, remaining_balance, status, loan_type FROM loans WHERE id = $1`+rowLockClause(s.db),
 		loanID,
-	).Scan(&loan.MemberID, &loan.RemainingBalance, &loan.Status)
+	).Scan(&loan.MemberID, &loan.RemainingBalance, &loan.Status, &loan.LoanType)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanRepayment{}, errLoanNotFound
 	}
@@ -288,7 +299,12 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 	}
 	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
 		ReferenceNo: repayment.ReferenceNo, TransactionID: repayment.ID, TransactionType: "repayment", TransactionDate: repayment.RecordDate,
-		Source: repayment.Source, Amount: repayment.Amount, Direction: accountingDirectionDebit, COACode: repayment.COACode,
+		Source: repayment.Source, Amount: repayment.Amount, LoanType: loan.LoanType,
+		Components: []accountingJournalComponent{
+			{Component: "cash_bank", Side: accountingDirectionDebit, Amount: repayment.Amount},
+			{Component: "loan_receivable", Side: accountingDirectionCredit, Amount: repayment.Amount},
+		},
+		COAOverrides: map[string]string{"cash_bank": strings.TrimSpace(req.CashCOACode), "loan_receivable": repayment.COACode},
 		Description: "Angsuran pinjaman", RecordedBy: repayment.RecordedBy,
 	}); err != nil {
 		return LoanRepayment{}, err

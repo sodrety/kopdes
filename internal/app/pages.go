@@ -368,6 +368,11 @@ func (s *Server) adminLoansPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	coaAccounts, err := s.coaPostingAccountsForAdmin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
 	search := strings.TrimSpace(c.Query("search"))
 	loanType := strings.TrimSpace(c.Query("loan_type"))
 	status := strings.TrimSpace(c.Query("status"))
@@ -375,6 +380,8 @@ func (s *Server) adminLoansPage(c *gin.Context) {
 	lang := languageFromRequest(c)
 	renderPage(c, "admin-loans", pageData(c, translate(lang, "loan_portfolio_page_title"), "loans", "loan_portfolio", "loan_portfolio_description", gin.H{
 		"Loans":            loans,
+		"COAAccounts":      coaAccounts,
+		"CurrentDate":      time.Now().In(jakartaLocation).Format("2006-01-02"),
 		"LoanSearch":       search,
 		"LoanTypeFilter":   loanType,
 		"LoanStatusFilter": status,
@@ -413,6 +420,10 @@ func (s *Server) adminRepaymentsPage(c *gin.Context) {
 }
 
 func (s *Server) adminTransactionsPage(c *gin.Context) {
+	if err := s.ensureFinancialJournalsBackfilled(); err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
 	filters := cashTransactionFiltersFromQuery(c)
 	pageNumber := cashTransactionPageFromQuery(c)
 	transactions, err := s.cashTransactionsPageForAdmin(filters, pageNumber, adminCashTransactionPageSize)
@@ -420,23 +431,7 @@ func (s *Server) adminTransactionsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
-	categories, err := s.cashTransactionCategoriesForAdmin(false)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
-		return
-	}
-	allCategories, err := s.cashTransactionCategoriesForAdmin(true)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
-		return
-	}
-	coaAccounts, err := s.coaPostingAccountsForAdmin()
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
-		return
-	}
-	currentDate := time.Now().In(jakartaLocation).Format("2006-01-02")
-	nextReference, err := s.nextManualCashReferencePreview(currentDate)
+	coaAccounts, err := s.coaCashBankPostingAccountsForAdmin()
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
@@ -447,11 +442,7 @@ func (s *Server) adminTransactionsPage(c *gin.Context) {
 		"Pagination":      transactions.Pagination,
 		"ServerPaginated": true,
 		"Filters":         filters,
-		"Categories":      cashTransactionCategoryLeaves(categories),
-		"AllCategories":   allCategories,
 		"COAAccounts":     coaAccounts,
-		"CurrentDate":     currentDate,
-		"NextReference":   nextReference,
 	}))
 }
 
@@ -461,14 +452,8 @@ func (s *Server) adminCOAPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
-	mappings, err := s.accountingMappingsForAdmin()
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
-		return
-	}
 	renderPage(c, "admin-coa", pageData(c, translate(languageFromRequest(c), "coa_management"), "coa", "coa_management", "coa_management_description", gin.H{
 		"COAAccounts": accounts,
-		"Mappings":    mappings,
 	}))
 }
 

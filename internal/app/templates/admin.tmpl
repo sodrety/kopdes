@@ -304,17 +304,23 @@
           <button type="submit">{{t .Lang "upload_coa_draft"}}</button>
         </form>
       </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-accounting-mappings"}}
+{{template "admin-shell-start" .}}
       <section class="panel">
         <h2>{{t .Lang "accounting_mapping"}}</h2>
         <p class="field-help">{{t .Lang "accounting_mapping_description"}}</p>
         <form class="filter-form" method="post" action="/api/admin/accounting-mappings">
           <label>{{t .Lang "transaction_type"}} <input name="transaction_type" required></label>
           <label>{{t .Lang "component"}} <input name="component" required></label>
+          <label>{{t .Lang "category"}} <input name="category"></label>
           <label>{{t .Lang "loan_type"}} <input name="loan_type"></label>
           <label>{{t .Lang "coa_account"}}
             <select name="coa_code" required>
               <option value="">{{t .Lang "select_coa_account"}}</option>
-              {{range .COAAccounts}}{{if .Active}}{{if not .IsGroup}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}{{end}}{{end}}
+              {{range .COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}
             </select>
           </label>
           <label>{{t .Lang "effective_from"}} <input type="date" name="effective_from"></label>
@@ -327,14 +333,15 @@
         <h2>{{t .Lang "accounting_mappings"}}</h2>
         {{if .Mappings}}
 {{template "table-open" .}}
-          <thead><tr><th>{{t $.Lang "transaction_type"}}</th><th>{{t $.Lang "component"}}</th><th>{{t $.Lang "loan_type"}}</th><th>{{t $.Lang "coa_account"}}</th><th>{{t $.Lang "effective_from"}}</th><th>{{t $.Lang "effective_to"}}</th><th>{{t $.Lang "active"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
+          <thead><tr><th>{{t $.Lang "transaction_type"}}</th><th>{{t $.Lang "component"}}</th><th>{{t $.Lang "category"}}</th><th>{{t $.Lang "loan_type"}}</th><th>{{t $.Lang "coa_account"}}</th><th>{{t $.Lang "effective_from"}}</th><th>{{t $.Lang "effective_to"}}</th><th>{{t $.Lang "active"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
           <tbody>
             {{range $mapping := .Mappings}}
             <tr>
               <td><input form="mapping-{{$mapping.ID}}" name="transaction_type" value="{{$mapping.TransactionType}}" required></td>
               <td><input form="mapping-{{$mapping.ID}}" name="component" value="{{$mapping.Component}}" required></td>
+              <td><input form="mapping-{{$mapping.ID}}" name="category" value="{{$mapping.Category}}"></td>
               <td><input form="mapping-{{$mapping.ID}}" name="loan_type" value="{{$mapping.LoanType}}"></td>
-              <td><select form="mapping-{{$mapping.ID}}" name="coa_code" required>{{range $.COAAccounts}}{{if .Active}}{{if not .IsGroup}}<option value="{{.Code}}" {{if eq .Code $mapping.COACode}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}{{end}}{{end}}</select></td>
+              <td><select form="mapping-{{$mapping.ID}}" name="coa_code" required>{{range $.COAAccounts}}<option value="{{.Code}}" {{if eq .Code $mapping.COACode}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></td>
               <td><input form="mapping-{{$mapping.ID}}" type="date" name="effective_from" value="{{$mapping.EffectiveFrom}}"></td>
               <td><input form="mapping-{{$mapping.ID}}" type="date" name="effective_to" value="{{$mapping.EffectiveTo}}"></td>
               <td><select form="mapping-{{$mapping.ID}}" name="active"><option value="true" {{if $mapping.Active}}selected{{end}}>{{t $.Lang "active"}}</option><option value="false" {{if not $mapping.Active}}selected{{end}}>{{t $.Lang "inactive"}}</option></select></td>
@@ -347,6 +354,102 @@
 {{template "empty-state" (t .Lang "no_accounting_mappings")}}
         {{end}}
       </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-journals"}}
+{{template "admin-shell-start" .}}
+      <section class="page-actions">
+        <a class="button-link {{if eq .View "journal"}}button-link-primary{{else}}button-link-secondary{{end}}" href="/admin/journals?view=journal">{{t .Lang "general_journal"}}</a>
+        <a class="button-link {{if eq .View "ledger"}}button-link-primary{{else}}button-link-secondary{{end}}" href="/admin/journals?view=ledger">{{t .Lang "general_ledger"}}</a>
+        <a class="button-link {{if eq .View "trial_balance"}}button-link-primary{{else}}button-link-secondary{{end}}" href="/admin/journals?view=trial_balance">{{t .Lang "trial_balance"}}</a>
+        {{if index .Permissions "accounting_mappings.manage"}}<a class="button-link button-link-secondary" href="/admin/accounting-mappings">{{t .Lang "accounting_mappings"}}</a>{{end}}
+        {{if index .Permissions "transactions.view"}}<a class="button-link button-link-secondary" href="/admin/transactions">{{t .Lang "cash_transactions"}}</a>{{end}}
+      </section>
+      {{if eq .View "journal"}}
+      {{if .CanRecord}}
+      <section class="panel form-panel">
+        <h2>{{t .Lang "record_general_journal"}}</h2>
+        <p class="field-help">{{t .Lang "general_journal_form_help"}}</p>
+        <form method="post" action="/api/admin/transactions" hx-post="/api/admin/transactions" hx-target="#general-journal-error" hx-swap="innerHTML">
+          <div class="form-grid form-grid-two">
+            <label>{{t .Lang "date"}} <input name="transaction_date" type="date" value="{{.DefaultDate}}" max="{{.DefaultDate}}" required></label>
+            <label>{{t .Lang "reference_number"}} <input name="reference_no" maxlength="100"></label>
+            <label>{{t .Lang "description"}} <input name="description" maxlength="200" required></label>
+            <label>{{t .Lang "note"}} <input name="note" maxlength="500"></label>
+          </div>
+          <div class="table-scroll"><table class="data-table">
+            <thead><tr><th>{{t .Lang "coa_account"}}</th><th>{{t .Lang "debit"}}</th><th>{{t .Lang "credit"}}</th><th>{{t .Lang "action"}}</th></tr></thead>
+            <tbody data-journal-lines>
+              {{range .InitialJournalLines}}<tr data-journal-line>
+                <td><select name="line_coa_code" required><option value="">{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></td>
+                <td><input name="debit_amount" type="text" inputmode="numeric" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" aria-label="{{t $.Lang "debit"}}"></td>
+                <td><input name="credit_amount" type="text" inputmode="numeric" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" aria-label="{{t $.Lang "credit"}}"></td>
+                <td><button type="button" class="button-secondary" data-remove-journal-line>{{t $.Lang "remove_line"}}</button></td>
+              </tr>{{end}}
+            </tbody>
+          </table></div>
+          <div class="button-row"><button type="button" class="button-secondary" data-add-journal-line>{{t .Lang "add_journal_line"}}</button><button type="submit">{{t .Lang "record_general_journal"}}</button></div>
+        </form>
+        {{template "form-error" (dict "ID" "general-journal-error")}}
+      </section>
+      {{end}}
+      <section class="panel">
+        <h2>{{t .Lang "journal_entries"}}</h2>
+        <form class="filter-form" method="get" action="/admin/journals">
+          <input type="hidden" name="view" value="journal">
+          <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label>
+          <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label>
+          <button type="submit">{{t .Lang "apply_filters"}}</button>
+          <a class="button-link button-link-secondary" href="/admin/journals?view=journal">{{t .Lang "reset"}}</a>
+        </form>
+        {{if .Entries}}
+{{template "table-open" .}}
+          <thead><tr><th>{{t $.Lang "date"}}</th><th>{{t $.Lang "reference"}}</th><th>{{t $.Lang "transaction_type"}}</th><th>{{t $.Lang "description"}}</th><th>{{t $.Lang "journal_lines"}}</th><th>{{t $.Lang "debit"}}</th><th>{{t $.Lang "credit"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
+          <tbody>{{range .Entries}}<tr>
+            <td>{{.Date}}</td><td>{{.ReferenceNo}}</td><td>{{t $.Lang (printf "transaction_type_%s" .TransactionType)}}</td><td>{{.Description}}{{if .CorrectionReason}}<small>{{t $.Lang "correction_reason"}}: {{.CorrectionReason}}</small>{{end}}{{if .ReversalOf}}<small>{{t $.Lang "reversal_of"}} {{.ReversalOf}}</small>{{end}}</td>
+            <td>{{range .Lines}}<div>{{if .COACode}}{{.COACode}} — {{.COAName}}{{else}}{{t $.Lang "pending_mapping"}}{{end}} · {{t $.Lang .Side}} · Rp {{nominal .Amount}}</div>{{end}}</td>
+            <td>Rp {{nominal .TotalDebit}}</td><td>Rp {{nominal .TotalCredit}}</td><td>{{t $.Lang (printf "journal_status_%s" .Status)}}</td>
+            <td>{{if and $.CanRecord .CanReverse}}<form method="post" action="/api/admin/journals/{{.ID}}/reverse" hx-post="/api/admin/journals/{{.ID}}/reverse" hx-target="#journal-reversal-error" hx-swap="innerHTML"><label>{{t $.Lang "correction_reason"}} <input name="reason" maxlength="500" required></label><label>{{t $.Lang "date"}} <input name="date" type="date" value="{{$.DefaultDate}}" required></label><button type="submit">{{t $.Lang "reverse_journal"}}</button></form>{{else if .ReversalOf}}{{t $.Lang "journal_reversed"}}{{else}}—{{end}}</td>
+          </tr>{{end}}</tbody>
+{{template "table-close" .}}
+        {{else}}{{template "empty-state" (t .Lang "no_journal_entries")}}{{end}}
+        {{template "form-error" (dict "ID" "journal-reversal-error")}}
+      </section>
+      {{else if eq .View "ledger"}}
+      <section class="panel">
+        <h2>{{t .Lang "general_ledger"}}</h2>
+        <form class="filter-form" method="get" action="/admin/journals"><input type="hidden" name="view" value="ledger">
+          <label>{{t .Lang "coa_account"}} <select name="account"><option value="">{{t .Lang "select_coa_account"}}</option>{{range .COAAccounts}}<option value="{{.Code}}" {{if eq $.SelectedAccount .Code}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+          <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label><label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label><button type="submit">{{t .Lang "apply_filters"}}</button>
+        </form>
+        {{if .LedgerAccount.Code}}<p><strong>{{.LedgerAccount.Code}} — {{.LedgerAccount.Name}}</strong></p><p>{{t .Lang "opening_balance"}}: Rp {{nominal .LedgerOpening}}</p>
+        {{if .Ledger}}{{template "table-open" .}}<thead><tr><th>{{t $.Lang "date"}}</th><th>{{t $.Lang "reference"}}</th><th>{{t $.Lang "description"}}</th><th>{{t $.Lang "debit"}}</th><th>{{t $.Lang "credit"}}</th><th>{{t $.Lang "balance"}}</th></tr></thead><tbody>{{range .Ledger}}<tr><td>{{.Date}}</td><td>{{.ReferenceNo}}</td><td>{{.Description}}</td><td>{{if .Debit}}Rp {{nominal .Debit}}{{else}}—{{end}}</td><td>{{if .Credit}}Rp {{nominal .Credit}}{{else}}—{{end}}</td><td>Rp {{nominal .Balance}}</td></tr>{{end}}</tbody>{{template "table-close" .}}{{else}}{{template "empty-state" (t .Lang "no_journal_entries")}}{{end}}
+        <p><strong>{{t .Lang "ending_balance"}}: Rp {{nominal .LedgerEnding}}</strong></p>{{else}}{{template "empty-state" (t .Lang "select_coa_account")}}{{end}}
+      </section>
+      {{else}}
+      <section class="panel">
+        <h2>{{t .Lang "trial_balance"}}</h2>
+        <form class="filter-form" method="get" action="/admin/journals"><input type="hidden" name="view" value="trial_balance"><label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label><label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label><button type="submit">{{t .Lang "apply_filters"}}</button></form>
+        {{if .TrialBalance}}{{template "table-open" .}}<thead><tr><th>{{t $.Lang "coa_account"}}</th><th>{{t $.Lang "account_type"}}</th><th>{{t $.Lang "debit"}}</th><th>{{t $.Lang "credit"}}</th><th>{{t $.Lang "balance"}}</th></tr></thead><tbody>{{range .TrialBalance}}<tr><td>{{.Code}} — {{.Name}}</td><td>{{t $.Lang (printf "account_type_%s" .AccountType)}}</td><td>Rp {{nominal .Debit}}</td><td>Rp {{nominal .Credit}}</td><td>Rp {{nominal .Balance}}</td></tr>{{end}}<tr class="balance-total-row"><td colspan="2">{{t $.Lang "total"}}</td><td>Rp {{nominal .TrialDebit}}</td><td>Rp {{nominal .TrialCredit}}</td><td>—</td></tr></tbody>{{template "table-close" .}}{{else}}{{template "empty-state" (t .Lang "no_journal_entries")}}{{end}}
+      </section>
+      {{end}}
+      <script>
+        (function () {
+          var body = document.querySelector('[data-journal-lines]');
+          var add = document.querySelector('[data-add-journal-line]');
+          if (!body || !add) return;
+          add.addEventListener('click', function () {
+            var row = body.querySelector('[data-journal-line]').cloneNode(true);
+            row.querySelectorAll('input').forEach(function (input) { input.value = ''; });
+            row.querySelector('select').selectedIndex = 0;
+            body.appendChild(row);
+          });
+          body.addEventListener('click', function (event) {
+            if (event.target.matches('[data-remove-journal-line]') && body.querySelectorAll('[data-journal-line]').length > 2) event.target.closest('[data-journal-line]').remove();
+          });
+        }());
+      </script>
 {{template "admin-shell-end" .}}
 {{end}}
 
@@ -372,7 +475,7 @@
       </section>
       <section class="panel">
         <h2>{{t .Lang "import_tagihan"}}</h2>
-        <p class="field-help">{{t .Lang "tagihan_source_help"}}</p>
+        <p class="field-help">{{t .Lang "tagihan_journal_mapping_help"}}</p>
         <form class="filter-form" method="post" action="/api/admin/tagihan/import" enctype="multipart/form-data">
           <label>{{t .Lang "statement_month"}}
             <input type="month" name="statement_month" value="{{.StatementMonth}}" required>
@@ -908,12 +1011,14 @@
           </label>
           <label>{{t .Lang "date"}} <input name="record_date" type="date" value="{{.CurrentDate}}" required></label>
           <label>{{t .Lang "reference_number"}} <input name="reference_no"></label>
-          <label>{{t .Lang "source"}}
-            <select name="source" required><option value="bank" selected>{{t .Lang "source_bank"}}</option><option value="cash">{{t .Lang "source_cash"}}</option></select>
+          {{if index .Permissions "accounting_coa.override"}}
+          <label>{{t .Lang "cash_bank_account"}} <span class="field-help">({{t .Lang "optional_override"}})</span>
+            <select name="cash_coa_code"><option value="">{{t .Lang "use_mapping"}}</option>{{range .COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select>
           </label>
-          <label>{{t .Lang "coa_account"}} <span class="field-help">({{t .Lang "pending_mapping"}})</span>
-            <select name="coa_code"><option value="">{{t .Lang "select_coa_account"}}</option>{{range .COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select>
+          <label>{{t .Lang "savings_liability_account"}} <span class="field-help">({{t .Lang "optional_override"}})</span>
+            <select name="coa_code"><option value="">{{t .Lang "use_mapping"}}</option>{{range .COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select>
           </label>
+          {{end}}
           <label>{{t .Lang "note"}} <input name="note"></label>
           <button type="submit" data-saving-submit>{{t .Lang "record_deposit"}}</button>
         </form>
@@ -933,76 +1038,11 @@
 {{template "summary-card" (dict "Label" (t .Lang "total_cash_out") "Value" (nominal .Summary.TotalExpense) "Icon" "arrow-up-from-line")}}
 {{template "summary-card" (dict "Label" (t .Lang "ending_balance") "Value" (nominal .Summary.EndingBalance) "Icon" "scale")}}
         </div>
-        <div class="summary-grid cash-summary-secondary">
-{{template "summary-card" (dict "Label" (t .Lang "cash_balance") "Value" (nominal .Summary.CashBalance) "Icon" "wallet")}}
-{{template "summary-card" (dict "Label" (t .Lang "bank_balance") "Value" (nominal .Summary.BankBalance) "Icon" "landmark")}}
-{{template "summary-card" (dict "Label" (t .Lang "combined_balance") "Value" (nominal .Summary.EndingBalance) "Icon" "scale")}}
-        </div>
       </section>
       {{if lt .Summary.EndingBalance 0}}<p class="form-error-message">{{t .Lang "negative_cash_balance_warning"}}</p>{{end}}
-      {{if index .Permissions "transactions.record"}}
-      <section class="panel form-panel cash-manual-panel">
-        <div class="section-heading-row">
-          <div><h2>{{t .Lang "record_manual_cash_transaction"}}</h2><p class="field-help">{{t .Lang "manual_cash_transaction_description"}}</p></div>
-          {{if index .Permissions "transaction_categories.manage"}}<a class="button-link button-link-secondary" href="/admin/transactions/categories">{{t .Lang "manage_cash_transaction_categories"}}</a>{{end}}
-        </div>
-        <form method="post" action="/api/admin/transactions" hx-post="/api/admin/transactions" hx-target="#manual-cash-transaction-error" hx-swap="innerHTML" data-manual-cash-form onsubmit="return window.confirmManualCashTransaction(this)" data-confirm-template="{{t .Lang "confirm_manual_cash_transaction"}}">
-          <div class="form-grid form-grid-two">
-            <label>{{t .Lang "accounting_direction"}}
-              <select name="direction" data-cash-direction required>
-                <option value="">{{t .Lang "select_direction"}}</option>
-                <option value="debit">{{t .Lang "debit"}}</option>
-                <option value="credit">{{t .Lang "credit"}}</option>
-              </select>
-            </label>
-            <label>{{t .Lang "source"}}
-              <select name="source" required>
-                <option value="">{{t .Lang "select_source"}}</option>
-                <option value="cash">{{t .Lang "source_cash"}}</option>
-                <option value="bank">{{t .Lang "source_bank"}}</option>
-              </select>
-            </label>
-            <label>{{t .Lang "coa_account"}}
-              <select name="coa_code" required>
-                <option value="">{{t .Lang "select_coa_account"}}</option>
-                {{range .COAAccounts}}<option value="{{.Code}}">{{.Code}} — {{.Name}}</option>{{end}}
-              </select>
-            </label>
-            <label>{{t .Lang "date"}}
-              <input name="transaction_date" type="date" value="{{.CurrentDate}}" max="{{.CurrentDate}}" required>
-            </label>
-            <label>{{t .Lang "amount"}}
-              <input name="amount" type="text" inputmode="numeric" placeholder="{{t .Lang "rupiah_placeholder"}}" data-rupiah-input data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" aria-describedby="manual-cash-amount-hint" aria-errormessage="manual-cash-amount-error" autocomplete="off" required>
-              <small id="manual-cash-amount-hint">{{t .Lang "rupiah_input_hint"}}</small>
-              <small id="manual-cash-amount-error" class="form-error-message" aria-live="polite" hidden></small>
-            </label>
-            <label>{{t .Lang "description"}}
-              <input name="description" maxlength="200" required>
-            </label>
-            <label>{{t .Lang "reference_number"}}
-              <input name="reference_no" maxlength="100" placeholder="{{.NextReference}}">
-              <small class="field-help">{{t .Lang "reference_auto_generated"}}</small>
-            </label>
-            <label>{{t .Lang "note"}} <span class="field-help">({{t .Lang "optional"}})</span>
-              <input name="note" maxlength="500">
-            </label>
-          </div>
-          <button type="submit">{{t .Lang "record_manual_cash_transaction"}}</button>
-        </form>
-        {{template "form-error" (dict "ID" "manual-cash-transaction-error")}}
-      </section>
-      {{end}}
       <section class="panel cash-transactions-panel">
-        <div class="section-heading-row"><h2>{{t .Lang "transaction_list"}}</h2><div class="button-row"><a class="button-link button-link-secondary" href="/api/admin/exports/transactions.csv">{{t .Lang "export_csv"}}</a>{{if index .Permissions "transaction_categories.manage"}}<a class="button-link button-link-secondary" href="/admin/transactions/categories">{{t .Lang "manage_cash_transaction_categories"}}</a>{{end}}</div></div>
+        <div class="section-heading-row"><h2>{{t .Lang "transaction_list"}}</h2><div class="button-row"><a class="button-link button-link-secondary" href="/api/admin/exports/transactions.csv">{{t .Lang "export_csv"}}</a></div></div>
         <div class="cash-tools-grid">
-          <div class="cash-tool-panel cash-bulk-panel">
-            <form id="bulk-source-form" class="filter-form cash-bulk-form" method="post" action="/api/admin/transactions/source" hx-post="/api/admin/transactions/source" hx-target="#bulk-source-error" hx-swap="innerHTML">
-              <label>{{t .Lang "source"}} <select name="source" required><option value="">{{t .Lang "select_source"}}</option><option value="cash">{{t .Lang "source_cash"}}</option><option value="bank">{{t .Lang "source_bank"}}</option></select></label>
-              <button type="submit">{{t .Lang "bulk_source_update"}}</button>
-              <span class="field-help">{{t .Lang "bulk_source_help"}}</span>
-            </form>
-            {{template "form-error" (dict "ID" "bulk-source-error")}}
-          </div>
           <div class="cash-tool-panel cash-filter-panel">
             <form class="filter-form cash-filter-form" method="get" action="/admin/transactions">
           <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.Filters.DateFrom}}"></label>
@@ -1014,7 +1054,7 @@
               <option value="credit" {{if or (eq .Filters.Category "credit") (eq .Filters.Category "cash_out")}}selected{{end}}>{{t .Lang "credit"}}</option>
             </select>
           </label>
-          <label>{{t .Lang "transaction_source"}}
+          <label>{{t .Lang "transaction_type"}}
             <select name="type">
               <option value="">{{t .Lang "all_types"}}</option>
               <option value="savings" {{if eq .Filters.Type "savings"}}selected{{end}}>{{t .Lang "transaction_type_savings"}}</option>
@@ -1022,13 +1062,6 @@
               <option value="loan" {{if eq .Filters.Type "loan"}}selected{{end}}>{{t .Lang "transaction_type_loan"}}</option>
               <option value="repayment" {{if eq .Filters.Type "repayment"}}selected{{end}}>{{t .Lang "transaction_type_repayment"}}</option>
               <option value="manual" {{if eq .Filters.Type "manual"}}selected{{end}}>{{t .Lang "transaction_type_manual"}}</option>
-            </select>
-          </label>
-          <label>{{t .Lang "source"}}
-            <select name="source">
-              <option value="">{{t .Lang "all_categories"}}</option>
-              <option value="cash" {{if eq .Filters.Source "cash"}}selected{{end}}>{{t .Lang "source_cash"}}</option>
-              <option value="bank" {{if eq .Filters.Source "bank"}}selected{{end}}>{{t .Lang "source_bank"}}</option>
             </select>
           </label>
           <label>{{t .Lang "coa_account"}}
@@ -1047,12 +1080,10 @@
 {{template "table-open" .}}
           <thead>
             <tr>
-              <th>{{t $.Lang "select_transactions"}}</th>
               <th>{{t $.Lang "date"}}</th>
               <th>{{t $.Lang "description"}}</th>
               <th>{{t $.Lang "direction"}}</th>
-              <th>{{t $.Lang "transaction_source"}}</th>
-              <th>{{t $.Lang "source"}}</th>
+              <th>{{t $.Lang "transaction_type"}}</th>
               <th>{{t $.Lang "coa_account"}}</th>
               <th>{{t $.Lang "cash_in"}}</th>
               <th>{{t $.Lang "cash_out"}}</th>
@@ -1065,19 +1096,10 @@
           <tbody>
             {{range .Transactions}}
             <tr>
-              <td><input form="bulk-source-form" type="checkbox" name="ids" value="{{.ID}}" aria-label="{{t $.Lang "select_transaction"}}"></td>
               <td>{{.TransactionDate}}</td>
               <td>{{.Description}}</td>
               <td>{{t $.Lang .Direction}}</td>
               <td>{{t $.Lang (printf "transaction_type_%s" .Type)}}</td>
-              <td>
-                <form method="post" action="/api/admin/transactions/{{.ID}}/source" class="inline-source-form">
-                  <select name="source" aria-label="{{t $.Lang "source"}}" onchange="this.form.submit()">
-                    <option value="cash" {{if eq .Source "cash"}}selected{{end}}>{{t $.Lang "source_cash"}}</option>
-                    <option value="bank" {{if eq .Source "bank"}}selected{{end}}>{{t $.Lang "source_bank"}}</option>
-                  </select>
-                </form>
-              </td>
               <td>{{if .COACode}}{{.COACode}}{{else if .Category}}{{.Category}}{{else}}{{t $.Lang "pending_mapping"}}{{end}}</td>
               <td>{{if gt .Income 0}}Rp {{nominal .Income}}{{else}}-{{end}}</td>
               <td>{{if gt .Expense 0}}Rp {{nominal .Expense}}{{else}}-{{end}}</td>
@@ -1101,25 +1123,6 @@
         {{end}}
         </div>
       </section>
-      <script>
-        window.confirmManualCashTransaction = function (form) {
-          var direction = form.elements.direction;
-          var source = form.elements.source;
-          var coa = form.elements.coa_code;
-          var values = [
-            direction.options[direction.selectedIndex].text,
-            source.options[source.selectedIndex].text,
-            coa.options[coa.selectedIndex].text,
-            form.elements.transaction_date.value,
-            form.elements.amount.value,
-            form.elements.description.value
-          ];
-          var message = form.dataset.confirmTemplate;
-          values.forEach(function (value) { message = message.replace("%s", value); });
-          return window.confirm(message);
-        };
-        document.addEventListener("DOMContentLoaded", function () {});
-      </script>
 {{template "admin-shell-end" .}}
 {{end}}
 
@@ -1553,8 +1556,10 @@
                 <div class="table-actions">
                   <strong>{{t $.Lang "super_admin_override"}}</strong>
                   <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/override-approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/override-approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
-                    <label>{{t $.Lang "source"}} <select name="source" required><option value="bank" selected>{{t $.Lang "source_bank"}}</option><option value="cash">{{t $.Lang "source_cash"}}</option></select></label>
-                    <label>{{t $.Lang "coa_account"}} <span class="field-help">({{t $.Lang "pending_mapping"}})</span><select name="coa_code"><option value="">{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                    {{if index $.Permissions "accounting_coa.override"}}
+                    <label>{{t $.Lang "cash_bank_account"}} <select name="cash_coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                    <label>{{t $.Lang "savings_liability_account"}} <select name="coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                    {{end}}
                     <input name="note" placeholder="{{t $.Lang "approval_note_optional"}}" aria-label="{{t $.Lang "approval_note_optional"}}">
                     <button type="submit">{{t $.Lang "super_admin_approve"}}</button>
                   </form>
@@ -1566,8 +1571,10 @@
                 {{else if and (eq .CurrentApprovalStage "manager") (or (eq $.Role "manager") (eq $.Role "admin")) (index $.Permissions "requests.decide")}}
                 <div class="table-actions">
                   <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
-                    <label>{{t $.Lang "source"}} <select name="source" required><option value="bank" selected>{{t $.Lang "source_bank"}}</option><option value="cash">{{t $.Lang "source_cash"}}</option></select></label>
-                    <label>{{t $.Lang "coa_account"}} <span class="field-help">({{t $.Lang "pending_mapping"}})</span><select name="coa_code"><option value="">{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                    {{if index $.Permissions "accounting_coa.override"}}
+                    <label>{{t $.Lang "cash_bank_account"}} <select name="cash_coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                    <label>{{t $.Lang "savings_liability_account"}} <select name="coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                    {{end}}
                     <input name="note" placeholder="{{t $.Lang "approval_note_optional"}}" aria-label="{{t $.Lang "approval_note_optional"}}">
                     <button type="submit">{{t $.Lang "approve"}}</button>
                   </form>
@@ -1710,8 +1717,11 @@
                     <div class="review-modal-actions">
                       <p><strong>{{t $.Lang "super_admin_override"}}</strong> — {{t $.Lang "super_admin_override_help"}}</p>
                       <form class="inline-approval-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/override-approve" hx-post="/api/admin/loan-requests/{{.ID}}/override-approve" hx-target="#loan-review-error" hx-swap="innerHTML" data-loan-fee-preview data-loan-type-value="{{.LoanType}}" data-monthly-admin-fee-label="{{t $.Lang "monthly_admin_fee"}}" data-total-admin-fee-label="{{t $.Lang "total_admin_fee"}}" data-total-obligation-label="{{t $.Lang "total_obligation"}}" data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}">
-                        <label>{{t $.Lang "source"}} <select name="source" required><option value="bank" selected>{{t $.Lang "source_bank"}}</option><option value="cash">{{t $.Lang "source_cash"}}</option></select></label>
-                        <label>{{t $.Lang "coa_account"}} <span class="field-help">({{t $.Lang "pending_mapping"}})</span><select name="coa_code"><option value="">{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        {{if index $.Permissions "accounting_coa.override"}}
+                        <label>{{t $.Lang "cash_bank_account"}} <select name="cash_coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}" {{if eq .Code $.ProposedCashCOACode}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        <label>{{t $.Lang "loan_receivable_account"}} <select name="coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}" {{if eq .Code $.ProposedLoanCOACode}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        <label>{{t $.Lang "admin_fee_income_account"}} <select name="admin_fee_coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}" {{if eq .Code $.ProposedAdminFeeCOACode}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        {{end}}
                         <label>{{t $.Lang "approved_amount"}}
                           <input name="approved_amount" type="text" inputmode="numeric" value="{{if gt .ProposedApprovedAmount 0}}{{.ProposedApprovedAmount}}{{else}}{{.RequestedAmount}}{{end}}" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $.Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="{{.MaxLoanAmount}}" data-rupiah-max-invalid="{{t $.Lang "error_loan_amount_limit"}}" autocomplete="off" spellcheck="false" required>
                         </label>
@@ -1729,8 +1739,11 @@
                     {{else if and (eq .CurrentApprovalStage "manager") (or (eq $.Role "manager") (eq $.Role "admin")) (index $.Permissions "requests.decide")}}
                     <div class="review-modal-actions">
                       <form class="inline-approval-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/approve" hx-post="/api/admin/loan-requests/{{.ID}}/approve" hx-target="#loan-review-error" hx-swap="innerHTML" data-loan-fee-preview data-loan-type-value="{{.LoanType}}" data-monthly-admin-fee-label="{{t $.Lang "monthly_admin_fee"}}" data-total-admin-fee-label="{{t $.Lang "total_admin_fee"}}" data-total-obligation-label="{{t $.Lang "total_obligation"}}" data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}">
-                        <label>{{t $.Lang "source"}} <select name="source" required><option value="bank" selected>{{t $.Lang "source_bank"}}</option><option value="cash">{{t $.Lang "source_cash"}}</option></select></label>
-                        <label>{{t $.Lang "coa_account"}} <span class="field-help">({{t $.Lang "pending_mapping"}})</span><select name="coa_code"><option value="">{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        {{if index $.Permissions "accounting_coa.override"}}
+                        <label>{{t $.Lang "cash_bank_account"}} <select name="cash_coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        <label>{{t $.Lang "loan_receivable_account"}} <select name="coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        <label>{{t $.Lang "admin_fee_income_account"}} <select name="admin_fee_coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        {{end}}
                         {{if or (eq $.Role "manager") (eq $.Role "admin")}}
                         <label>{{t $.Lang "approved_amount"}}
                           <input name="approved_amount" type="text" inputmode="numeric" value="{{.RequestedAmount}}" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $.Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="{{.MaxLoanAmount}}" data-rupiah-max-invalid="{{t $.Lang "error_loan_amount_limit"}}" aria-describedby="approved-amount-hint-{{.ID}}" aria-errormessage="approved-amount-error-{{.ID}}" autocomplete="off" spellcheck="false" required>
@@ -1842,10 +1855,12 @@
                 <form class="inline-repayment-form" method="post" action="/api/admin/loans/{{.ID}}/repayments" hx-post="/api/admin/loans/{{.ID}}/repayments" hx-target="#repayment-form-error" hx-swap="innerHTML">
                   <input name="amount" type="text" inputmode="numeric" placeholder="Rp 0" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $.Lang "error_invalid_rupiah_amount"}}" data-rupiah-max="{{.RemainingBalance}}" data-rupiah-max-invalid="{{t $.Lang "error_loan_repayment_over_balance"}}" title="{{t $.Lang "rupiah_input_hint"}}" aria-label="{{t $.Lang "repayment_amount"}}" aria-errormessage="repayment-amount-error-{{.ID}}" required>
                   <span id="repayment-amount-error-{{.ID}}" class="form-error-message" aria-live="polite" hidden></span>
-                  <input name="record_date" type="date" aria-label="{{t $.Lang "repayment_date"}}">
+                  <input name="record_date" type="date" value="{{$.CurrentDate}}" aria-label="{{t $.Lang "repayment_date"}}" required>
                   <input name="reference_no" placeholder="{{t $.Lang "reference"}}" aria-label="{{t $.Lang "reference_number"}}">
-                  <select name="source" aria-label="{{t $.Lang "source"}}" required><option value="bank" selected>{{t $.Lang "source_bank"}}</option><option value="cash">{{t $.Lang "source_cash"}}</option></select>
-                  <select name="coa_code" aria-label="{{t $.Lang "coa_account"}}"><option value="">{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select>
+                  {{if index $.Permissions "accounting_coa.override"}}
+                  <select name="cash_coa_code" aria-label="{{t $.Lang "cash_bank_account"}}"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select>
+                  <select name="coa_code" aria-label="{{t $.Lang "loan_receivable_account"}}"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select>
+                  {{end}}
                   <input name="note" placeholder="{{t $.Lang "note"}}" aria-label="{{t $.Lang "repayment_note"}}">
                   <button type="submit">{{t $.Lang "record_repayment"}}</button>
                 </form>

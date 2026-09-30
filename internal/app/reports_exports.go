@@ -1512,12 +1512,11 @@ func (s *Server) exportTransactionsCSV(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
-	writeCSV(c, "transaksi-kas-export.csv", []string{"date", "direction", "source", "transaction_type", "coa_account", "description", "cash_in", "cash_out", "amount", "member_no", "member", "reference_no", "recorded_by"}, func(w *csv.Writer) error {
+	writeCSV(c, "transaksi-kas-export.csv", []string{"date", "direction", "transaction_type", "coa_account", "description", "cash_in", "cash_out", "amount", "member_no", "member", "reference_no", "recorded_by"}, func(w *csv.Writer) error {
 		for _, transaction := range transactions.Rows {
 			if err := w.Write([]string{
 				transaction.TransactionDate,
 				transaction.Direction,
-				transaction.Source,
 				transaction.Type,
 				transaction.COACode,
 				transaction.Description,

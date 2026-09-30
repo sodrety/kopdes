@@ -27,6 +27,9 @@ type LoanRequest struct {
 	ProposedMonthlyAdminFee *int64            `json:"proposed_monthly_admin_fee,omitempty"`
 	ProposedTotalAdminFee   int64             `json:"proposed_total_admin_fee,omitempty"`
 	ProposedTotalObligation int64             `json:"proposed_total_obligation,omitempty"`
+	ProposedCashCOACode     string            `json:"-"`
+	ProposedLoanCOACode     string            `json:"-"`
+	ProposedAdminFeeCOACode string            `json:"-"`
 	RejectionReason         string            `json:"rejection_reason,omitempty"`
 	LatestDecision          *ApprovalDecision `json:"latest_decision,omitempty"`
 	CreatedAt               string            `json:"created_at,omitempty"`
@@ -312,7 +315,7 @@ func (s *Server) loanRequestsForAdmin(status string) ([]AdminLoanRequest, error)
 
 func (s *Server) loanRequestsForAdminFiltered(status, source, batchID string) ([]AdminLoanRequest, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.loan_type, lr.legacy_terms, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_admin_fee_policy,''), lr.proposed_monthly_admin_fee, COALESCE(lr.proposed_total_admin_fee,0), COALESCE(lr.proposed_total_obligation,0), lr.rejection_reason, lr.created_at, lr.updated_at, COALESCE(lr.creation_source,'member'), COALESCE(lr.created_by,''), COALESCE(creator.full_name,creator.email,''), COALESCE(lr.batch_id,'')
+	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.loan_type, lr.legacy_terms, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_admin_fee_policy,''), lr.proposed_monthly_admin_fee, COALESCE(lr.proposed_total_admin_fee,0), COALESCE(lr.proposed_total_obligation,0), COALESCE(lr.proposed_cash_coa_code,''), COALESCE(lr.proposed_loan_coa_code,''), COALESCE(lr.proposed_admin_fee_coa_code,''), lr.rejection_reason, lr.created_at, lr.updated_at, COALESCE(lr.creation_source,'member'), COALESCE(lr.created_by,''), COALESCE(creator.full_name,creator.email,''), COALESCE(lr.batch_id,'')
 		FROM loan_requests lr
 		INNER JOIN members m ON m.id = lr.member_id
 		LEFT JOIN users creator ON creator.id = lr.created_by`
@@ -342,7 +345,7 @@ func (s *Server) loanRequestsForAdminFiltered(status, source, batchID string) ([
 	var requests []AdminLoanRequest
 	for rows.Next() {
 		var request AdminLoanRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.CreationSource, &request.CreatedByID, &request.CreatedByName, &request.BatchID); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.CreationSource, &request.CreatedByID, &request.CreatedByName, &request.BatchID); err != nil {
 			return nil, err
 		}
 		requests = append(requests, request)

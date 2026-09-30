@@ -23,6 +23,8 @@ type WithdrawalRequest struct {
 	LatestDecision       *ApprovalDecision `json:"latest_decision,omitempty"`
 	CreatedAt            string            `json:"created_at,omitempty"`
 	UpdatedAt            string            `json:"updated_at,omitempty"`
+	ProposedCashCOACode  string            `json:"-"`
+	ProposedSavingsCOACode string           `json:"-"`
 }
 
 type AdminWithdrawalRequest struct {
@@ -45,9 +47,10 @@ type rejectWithdrawalInput struct {
 }
 
 type approveWithdrawalInput struct {
-	Source  string `json:"source" form:"source"`
-	COACode string `json:"coa_code" form:"coa_code"`
-	Note    string `json:"note" form:"note"`
+	Source       string `json:"source" form:"source"`
+	COACode      string `json:"coa_code" form:"coa_code"`
+	CashCOACode  string `json:"cash_coa_code" form:"cash_coa_code"`
+	Note         string `json:"note" form:"note"`
 }
 
 var (
@@ -162,6 +165,10 @@ func (s *Server) approveWithdrawalRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errInvalidTransactionSource) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_transaction_source"))
+		return
+	}
+	if errors.Is(err, errAccountingCOAOverrideForbidden) {
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(languageFromRequest(c), "error_accounting_coa_override_forbidden"))
 		return
 	}
 	if errors.Is(err, errCOAAccountNotFound) || errors.Is(err, errCOAAccountInactive) || errors.Is(err, errCOAAccountGroup) || errors.Is(err, errJournalAccountConflict) {
@@ -355,10 +362,10 @@ func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalReq
 }
 
 func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, req approveWithdrawalInput) (WithdrawalRequest, error) {
-	source := normalizeTransactionSource(req.Source)
-	if !validTransactionSource(source) {
-		return WithdrawalRequest{}, errInvalidTransactionSource
+	if (strings.TrimSpace(req.COACode) != "" || strings.TrimSpace(req.CashCOACode) != "") && !hasPermission(officer.Role, PermissionAccountingCOAOverride) {
+		return WithdrawalRequest{}, errAccountingCOAOverrideForbidden
 	}
+	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 
@@ -370,11 +377,11 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 
 	var request WithdrawalRequest
 	if err := tx.QueryRow(
-		`SELECT id, member_id, amount, note, status, COALESCE(current_approval_stage,''), COALESCE(CAST(reviewed_at AS TEXT), ''), rejection_reason, COALESCE(saving_record_id, ''), created_at, updated_at
+		`SELECT id, member_id, amount, note, status, COALESCE(current_approval_stage,''), COALESCE(CAST(reviewed_at AS TEXT), ''), rejection_reason, COALESCE(saving_record_id, ''), created_at, updated_at,COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_savings_coa_code,'')
 		FROM withdrawal_requests
 		WHERE id = $1`+rowLockClause(s.db),
 		requestID,
-	).Scan(&request.ID, &request.MemberID, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt); err != nil {
+	).Scan(&request.ID, &request.MemberID, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt, &request.ProposedCashCOACode, &request.ProposedSavingsCOACode); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return WithdrawalRequest{}, errWithdrawalRequestNotFound
 		}
@@ -395,7 +402,11 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	}
 	nextStage := nextApprovalStage(stageRole)
 	if nextStage != "" {
-		result, err := tx.Exec(`UPDATE withdrawal_requests SET current_approval_stage=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='pending' AND current_approval_stage=$3`, nextStage, requestID, stageRole)
+		if stageRole == approvalStageManager {
+			request.ProposedCashCOACode = strings.TrimSpace(req.CashCOACode)
+			request.ProposedSavingsCOACode = strings.TrimSpace(req.COACode)
+		}
+		result, err := tx.Exec(`UPDATE withdrawal_requests SET current_approval_stage=$1,proposed_cash_coa_code=$2,proposed_savings_coa_code=$3,updated_at=CURRENT_TIMESTAMP WHERE id=$4 AND status='pending' AND current_approval_stage=$5`, nextStage, request.ProposedCashCOACode, request.ProposedSavingsCOACode, requestID, stageRole)
 		if err != nil {
 			return WithdrawalRequest{}, err
 		}
@@ -442,7 +453,7 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 		recordID,
 		request.MemberID,
 		source,
-		nullIfEmpty(strings.TrimSpace(req.COACode)),
+		nullIfEmpty(request.ProposedSavingsCOACode),
 		request.Amount,
 		time.Now().In(jakartaLocation).Format("2006-01-02"),
 		request.Note,
@@ -452,7 +463,12 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	}
 	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
 		ReferenceNo: "", TransactionID: recordID, TransactionType: "withdrawal", TransactionDate: time.Now().In(jakartaLocation).Format("2006-01-02"),
-		Source: source, Amount: request.Amount, Direction: accountingDirectionCredit, COACode: strings.TrimSpace(req.COACode),
+		Source: source, Amount: request.Amount, Category: "sukarela",
+		Components: []accountingJournalComponent{
+			{Component: "savings_liability", Side: accountingDirectionDebit, Amount: request.Amount},
+			{Component: "cash_bank", Side: accountingDirectionCredit, Amount: request.Amount},
+		},
+		COAOverrides: map[string]string{"cash_bank": request.ProposedCashCOACode, "savings_liability": request.ProposedSavingsCOACode},
 		Description: "Penarikan sukarela", RecordedBy: officer.ID,
 	}); err != nil {
 		return WithdrawalRequest{}, err

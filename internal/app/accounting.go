@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 
@@ -40,18 +41,38 @@ type accountingJournalInput struct {
 	Amount          int64
 	Direction       string
 	COACode         string
+	Category        string
+	LoanType        string
+	Components      []accountingJournalComponent
+	Lines           []accountingJournalLineInput
+	COAOverrides    map[string]string
 	Description     string
 	RecordedBy      string
 	BatchID         string
 }
 
+type accountingJournalComponent struct {
+	Component string
+	Side      string
+	Amount    int64
+}
+
+type accountingJournalLineInput struct {
+	Component string
+	Side      string
+	COACode   string
+	Amount    int64
+}
+
 var (
-	errInvalidTransactionSource   = errors.New("invalid transaction source")
-	errInvalidAccountingDirection = errors.New("invalid accounting direction")
-	errCOAAccountNotFound         = errors.New("coa account not found")
-	errCOAAccountInactive         = errors.New("coa account inactive")
-	errCOAAccountGroup            = errors.New("coa group account cannot be posted directly")
-	errJournalAccountConflict     = errors.New("journal source and coa account must differ")
+	errInvalidTransactionSource       = errors.New("invalid transaction source")
+	errInvalidAccountingDirection     = errors.New("invalid accounting direction")
+	errCOAAccountNotFound             = errors.New("coa account not found")
+	errCOAAccountInactive             = errors.New("coa account inactive")
+	errCOAAccountGroup                = errors.New("coa group account cannot be posted directly")
+	errJournalAccountConflict         = errors.New("journal source and coa account must differ")
+	errUnbalancedFinancialJournal     = errors.New("financial journal debits and credits must balance")
+	errAccountingCOAOverrideForbidden = errors.New("per-transaction coa override is not permitted for this role")
 )
 
 func validTransactionSource(value string) bool {
@@ -161,51 +182,207 @@ func (s *Server) createFinancialJournalTx(tx *sql.Tx, input accountingJournalInp
 	input.Direction = strings.ToLower(strings.TrimSpace(input.Direction))
 	input.COACode = strings.TrimSpace(input.COACode)
 	if !validTransactionSource(input.Source) {
-		return errInvalidTransactionSource
-	}
-	if !validAccountingDirection(input.Direction) {
-		return errInvalidAccountingDirection
+		input.Source = transactionSourceBank
 	}
 	if input.Amount <= 0 || strings.TrimSpace(input.TransactionID) == "" || strings.TrimSpace(input.TransactionType) == "" || strings.TrimSpace(input.TransactionDate) == "" || strings.TrimSpace(input.RecordedBy) == "" {
 		return errInvalidManualCashTransaction
 	}
+	input.TransactionType = strings.ToLower(strings.TrimSpace(input.TransactionType))
+	input.Category = strings.ToLower(strings.TrimSpace(input.Category))
+	input.LoanType = strings.ToLower(strings.TrimSpace(input.LoanType))
 	reference := strings.TrimSpace(input.ReferenceNo)
 	if reference == "" {
 		reference = "TXN-" + input.TransactionID
 	}
-	status := "pending_mapping"
-	sourceCode := sourceCOACode(input.Source)
-	if input.COACode != "" {
-		if sourceCode == input.COACode {
-			return errJournalAccountConflict
+
+	lines := append([]accountingJournalLineInput(nil), input.Lines...)
+	if len(lines) == 0 {
+		for _, component := range input.Components {
+			lines = append(lines, accountingJournalLineInput{Component: component.Component, Side: component.Side, Amount: component.Amount})
 		}
-		if _, err := s.coaAccountForPostingTx(tx, input.COACode); err != nil {
-			return err
-		}
-		if _, err := s.coaAccountForPostingTx(tx, sourceCode); err != nil {
-			return err
-		}
-		status = "posted"
 	}
-	journalID := newID()
-	if _, err := tx.Exec(`INSERT INTO financial_journal_entries (id,reference_no,transaction_id,transaction_type,transaction_date,source,amount,status,batch_id,description,recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, journalID, reference, input.TransactionID, input.TransactionType, input.TransactionDate, input.Source, input.Amount, status, strings.TrimSpace(input.BatchID), strings.TrimSpace(input.Description), input.RecordedBy); err != nil {
-		return err
+	if len(lines) == 0 {
+		if !validAccountingDirection(input.Direction) {
+			return errInvalidAccountingDirection
+		}
+		sourceCode := sourceCOACode(input.Source)
+		debitCode, creditCode := input.COACode, sourceCode
+		if input.Direction == accountingDirectionDebit {
+			debitCode, creditCode = sourceCode, input.COACode
+		}
+		lines = []accountingJournalLineInput{
+			{Component: "source", Side: accountingDirectionDebit, COACode: debitCode, Amount: input.Amount},
+			{Component: "counterpart", Side: accountingDirectionCredit, COACode: creditCode, Amount: input.Amount},
+		}
 	}
-	if status != "posted" {
+
+	var totalDebits, totalCredits int64
+	for index := range lines {
+		lines[index].Component = strings.ToLower(strings.TrimSpace(lines[index].Component))
+		lines[index].Side = strings.ToLower(strings.TrimSpace(lines[index].Side))
+		lines[index].COACode = strings.TrimSpace(lines[index].COACode)
+		if lines[index].Component == "" || !validAccountingDirection(lines[index].Side) || lines[index].Amount <= 0 {
+			return errInvalidManualCashTransaction
+		}
+		if lines[index].Side == accountingDirectionDebit {
+			if lines[index].Amount > math.MaxInt64-totalDebits {
+				return errUnbalancedFinancialJournal
+			}
+			totalDebits += lines[index].Amount
+		} else {
+			if lines[index].Amount > math.MaxInt64-totalCredits {
+				return errUnbalancedFinancialJournal
+			}
+			totalCredits += lines[index].Amount
+		}
+	}
+	if totalDebits <= 0 || totalDebits != totalCredits {
+		return errUnbalancedFinancialJournal
+	}
+
+	var journalID, existingStatus string
+	err := tx.QueryRow(`SELECT id,status FROM financial_journal_entries WHERE transaction_id=$1 AND transaction_type=$2 ORDER BY created_at,id LIMIT 1`+rowLockClause(s.db), input.TransactionID, input.TransactionType).Scan(&journalID, &existingStatus)
+	if err == nil && existingStatus == "posted" {
 		return nil
 	}
-	debitCode, creditCode := input.COACode, sourceCode
-	if input.Direction == accountingDirectionDebit {
-		debitCode, creditCode = sourceCode, input.COACode
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
 	}
-	for _, line := range []struct {
-		side, code, component string
-	}{
-		{accountingDirectionDebit, debitCode, "source"},
-		{accountingDirectionCredit, creditCode, "counterpart"},
-	} {
-		if _, err := tx.Exec(`INSERT INTO financial_journal_lines (id,journal_id,side,coa_code,amount,component) VALUES ($1,$2,$3,$4,$5,$6)`, newID(), journalID, line.side, line.code, input.Amount, line.component); err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
+		journalID = newID()
+		if _, err := tx.Exec(`INSERT INTO financial_journal_entries (id,reference_no,transaction_id,transaction_type,transaction_date,source,amount,status,batch_id,description,recorded_by,category,loan_type) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending_mapping',$8,$9,$10,$11,$12)`, journalID, reference, input.TransactionID, input.TransactionType, input.TransactionDate, input.Source, totalDebits, strings.TrimSpace(input.BatchID), strings.TrimSpace(input.Description), input.RecordedBy, input.Category, input.LoanType); err != nil {
 			return err
+		}
+	} else {
+		if _, err := tx.Exec(`DELETE FROM financial_journal_lines WHERE journal_id=$1`, journalID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE financial_journal_entries SET reference_no=$1,transaction_date=$2,source=$3,amount=$4,batch_id=$5,description=$6,recorded_by=$7,category=$8,loan_type=$9 WHERE id=$10 AND status='pending_mapping'`, reference, input.TransactionDate, input.Source, totalDebits, strings.TrimSpace(input.BatchID), strings.TrimSpace(input.Description), input.RecordedBy, input.Category, input.LoanType, journalID); err != nil {
+			return err
+		}
+	}
+
+	allMapped := true
+	manualLineSelections := len(input.Lines) > 0
+	for _, line := range lines {
+		coaCode := line.COACode
+		isOverride := coaCode != "" && !manualLineSelections
+		if coaCode == "" {
+			coaCode = strings.TrimSpace(input.COAOverrides[line.Component])
+			isOverride = coaCode != ""
+		}
+		if coaCode == "" {
+			coaCode, err = s.accountingMappingCOACodeTx(tx, input.TransactionType, line.Component, input.Category, input.LoanType, input.TransactionDate)
+			if err != nil {
+				return err
+			}
+		}
+		if coaCode == "" {
+			allMapped = false
+		} else if _, err := s.coaAccountForPostingTx(tx, coaCode); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO financial_journal_lines (id,journal_id,side,coa_code,amount,component,mapping_override) VALUES ($1,$2,$3,$4,$5,$6,$7)`, newID(), journalID, line.Side, coaCode, line.Amount, line.Component, isOverride); err != nil {
+			return err
+		}
+	}
+	if allMapped {
+		_, err = tx.Exec(`UPDATE financial_journal_entries SET status='posted' WHERE id=$1 AND status='pending_mapping'`, journalID)
+	}
+	return err
+}
+
+func (s *Server) accountingMappingCOACodeTx(tx *sql.Tx, transactionType, component, category, loanType, transactionDate string) (string, error) {
+	var code string
+	err := tx.QueryRow(`SELECT COALESCE(coa_code,'') FROM accounting_mappings
+		WHERE transaction_type=$1 AND component=$2 AND active=TRUE
+		  AND (category=$3 OR category='') AND (loan_type=$4 OR loan_type='')
+		  AND (effective_from IS NULL OR effective_from <= $5)
+		  AND (effective_to IS NULL OR effective_to >= $5)
+		ORDER BY CASE WHEN category=$3 THEN 0 ELSE 1 END,
+		         CASE WHEN loan_type=$4 THEN 0 ELSE 1 END,
+		         COALESCE(effective_from,'0000-00-00') DESC,id
+		LIMIT 1`, transactionType, component, category, loanType, transactionDate).Scan(&code)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return code, err
+}
+
+func (s *Server) resolvePendingFinancialJournalsTx(tx *sql.Tx) error {
+	rows, err := tx.Query(`SELECT id,transaction_type,category,loan_type,transaction_date FROM financial_journal_entries WHERE status='pending_mapping' ORDER BY transaction_date,id`)
+	if err != nil {
+		return err
+	}
+	type pendingJournal struct{ id, transactionType, category, loanType, date string }
+	var journals []pendingJournal
+	for rows.Next() {
+		var item pendingJournal
+		if err := rows.Scan(&item.id, &item.transactionType, &item.category, &item.loanType, &item.date); err != nil {
+			rows.Close()
+			return err
+		}
+		journals = append(journals, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, journal := range journals {
+		var totalLines int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM financial_journal_lines WHERE journal_id=$1`, journal.id).Scan(&totalLines); err != nil {
+			return err
+		}
+		if totalLines == 0 {
+			// Backfill populates the template lines before resolving mappings. Never
+			// promote an empty journal just because it has no unresolved lines.
+			continue
+		}
+		lines, err := tx.Query(`SELECT id,component FROM financial_journal_lines WHERE journal_id=$1 AND coa_code=''`, journal.id)
+		if err != nil {
+			return err
+		}
+		type pendingLine struct{ id, component string }
+		var pending []pendingLine
+		for lines.Next() {
+			var line pendingLine
+			if err := lines.Scan(&line.id, &line.component); err != nil {
+				lines.Close()
+				return err
+			}
+			pending = append(pending, line)
+		}
+		if err := lines.Err(); err != nil {
+			lines.Close()
+			return err
+		}
+		if err := lines.Close(); err != nil {
+			return err
+		}
+		allMapped := len(pending) == 0 && totalLines > 0
+		for _, line := range pending {
+			code, err := s.accountingMappingCOACodeTx(tx, journal.transactionType, line.component, journal.category, journal.loanType, journal.date)
+			if err != nil {
+				return err
+			}
+			if code == "" {
+				allMapped = false
+				continue
+			}
+			if _, err := s.coaAccountForPostingTx(tx, code); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`UPDATE financial_journal_lines SET coa_code=$1 WHERE id=$2 AND coa_code=''`, code, line.id); err != nil {
+				return err
+			}
+		}
+		if allMapped {
+			if _, err := tx.Exec(`UPDATE financial_journal_entries SET status='posted' WHERE id=$1 AND status='pending_mapping'`, journal.id); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -235,10 +235,7 @@ func (s *Server) overrideWithdrawalRejection(c *gin.Context) {
 }
 
 func (s *Server) overrideLoanRequestByID(requestID string, admin User, req approveLoanInput) (LoanApprovalResult, error) {
-	source := normalizeTransactionSource(req.Source)
-	if !validTransactionSource(source) {
-		return LoanApprovalResult{}, errInvalidTransactionSource
-	}
+	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 
@@ -398,7 +395,18 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 			return LoanApprovalResult{}, err
 		}
 	}
-	if err := s.createFinancialJournalTx(tx, accountingJournalInput{ReferenceNo: requestID, TransactionID: loan.ID, TransactionType: "loan", TransactionDate: loan.StartDate, Source: loan.Source, Amount: loan.ApprovedAmount, Direction: accountingDirectionCredit, COACode: loan.COACode, Description: "Pencairan pinjaman", RecordedBy: admin.ID}); err != nil {
+	feeAmount := loan.TotalObligation - loan.ApprovedAmount
+	if feeAmount < 0 {
+		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
+	}
+	loanComponents := []accountingJournalComponent{
+		{Component: "loan_receivable", Side: accountingDirectionDebit, Amount: loan.TotalObligation},
+		{Component: "cash_bank", Side: accountingDirectionCredit, Amount: loan.ApprovedAmount},
+	}
+	if feeAmount > 0 {
+		loanComponents = append(loanComponents, accountingJournalComponent{Component: "admin_fee_income", Side: accountingDirectionCredit, Amount: feeAmount})
+	}
+	if err := s.createFinancialJournalTx(tx, accountingJournalInput{ReferenceNo: requestID, TransactionID: loan.ID, TransactionType: "loan", TransactionDate: loan.StartDate, Source: loan.Source, Amount: loan.TotalObligation, LoanType: loan.LoanType, Components: loanComponents, COAOverrides: map[string]string{"cash_bank": strings.TrimSpace(req.CashCOACode), "loan_receivable": loan.COACode, "admin_fee_income": strings.TrimSpace(req.AdminFeeCOACode)}, Description: "Pencairan pinjaman", RecordedBy: admin.ID}); err != nil {
 		return LoanApprovalResult{}, err
 	}
 	if err := resolveRequestNotifications(tx, "loan", requestID); err != nil {
@@ -455,10 +463,7 @@ func (s *Server) rejectLoanRequestBySuperAdmin(requestID string, admin User, req
 }
 
 func (s *Server) approveWithdrawalRequestBySuperAdmin(requestID string, admin User, req approveWithdrawalInput) (WithdrawalRequest, error) {
-	source := normalizeTransactionSource(req.Source)
-	if !validTransactionSource(source) {
-		return WithdrawalRequest{}, errInvalidTransactionSource
-	}
+	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 	tx, err := s.db.Begin()
@@ -509,7 +514,7 @@ func (s *Server) approveWithdrawalRequestBySuperAdmin(requestID string, admin Us
 	if _, err := tx.Exec(`INSERT INTO saving_records (id,member_id,type,category,source,coa_code,amount,record_date,reference_no,note,recorded_by) VALUES ($1,$2,'withdrawal','sukarela',$3,$4,$5,$6,'',$7,$8)`, recordID, request.MemberID, source, nullIfEmpty(strings.TrimSpace(req.COACode)), request.Amount, recordDate, note, admin.ID); err != nil {
 		return WithdrawalRequest{}, err
 	}
-	if err := s.createFinancialJournalTx(tx, accountingJournalInput{TransactionID: recordID, TransactionType: "withdrawal", TransactionDate: recordDate, Source: source, Amount: request.Amount, Direction: accountingDirectionCredit, COACode: strings.TrimSpace(req.COACode), Description: "Penarikan sukarela", RecordedBy: admin.ID}); err != nil {
+	if err := s.createFinancialJournalTx(tx, accountingJournalInput{TransactionID: recordID, TransactionType: "withdrawal", TransactionDate: recordDate, Source: source, Amount: request.Amount, Category: "sukarela", Components: []accountingJournalComponent{{Component: "savings_liability", Side: accountingDirectionDebit, Amount: request.Amount}, {Component: "cash_bank", Side: accountingDirectionCredit, Amount: request.Amount}}, COAOverrides: map[string]string{"cash_bank": strings.TrimSpace(req.CashCOACode), "savings_liability": strings.TrimSpace(req.COACode)}, Description: "Penarikan sukarela", RecordedBy: admin.ID}); err != nil {
 		return WithdrawalRequest{}, err
 	}
 	if _, err := tx.Exec(`UPDATE withdrawal_requests SET status='approved',current_approval_stage=NULL,reviewed_by=$1,reviewed_at=CURRENT_TIMESTAMP,saving_record_id=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$3 AND status='pending'`, admin.ID, recordID, requestID); err != nil {

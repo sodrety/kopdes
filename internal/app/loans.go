@@ -68,12 +68,14 @@ type AdminLoan struct {
 }
 
 type approveLoanInput struct {
-	ApprovedAmount int64  `json:"approved_amount" form:"approved_amount"`
-	DurationMonths int    `json:"duration_months" form:"duration_months"`
-	StartDate      string `json:"start_date" form:"start_date"`
-	Source         string `json:"source" form:"source"`
-	COACode        string `json:"coa_code" form:"coa_code"`
-	Note           string `json:"note" form:"note"`
+	ApprovedAmount   int64  `json:"approved_amount" form:"approved_amount"`
+	DurationMonths   int    `json:"duration_months" form:"duration_months"`
+	StartDate        string `json:"start_date" form:"start_date"`
+	Source           string `json:"source" form:"source"`
+	COACode          string `json:"coa_code" form:"coa_code"`
+	CashCOACode      string `json:"cash_coa_code" form:"cash_coa_code"`
+	AdminFeeCOACode  string `json:"admin_fee_coa_code" form:"admin_fee_coa_code"`
+	Note             string `json:"note" form:"note"`
 }
 
 type LoanApprovalResult struct {
@@ -157,6 +159,10 @@ func (s *Server) approveLoanRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errInvalidTransactionSource) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_transaction_source"))
+		return
+	}
+	if errors.Is(err, errAccountingCOAOverrideForbidden) {
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(lang, "error_accounting_coa_override_forbidden"))
 		return
 	}
 	if errors.Is(err, errCOAAccountNotFound) || errors.Is(err, errCOAAccountInactive) || errors.Is(err, errCOAAccountGroup) || errors.Is(err, errJournalAccountConflict) {
@@ -292,10 +298,10 @@ func (s *Server) adminLoans(c *gin.Context) {
 }
 
 func (s *Server) approveLoanRequestByID(requestID string, officer User, req approveLoanInput) (LoanApprovalResult, error) {
-	source := normalizeTransactionSource(req.Source)
-	if !validTransactionSource(source) {
-		return LoanApprovalResult{}, errInvalidTransactionSource
+	if (strings.TrimSpace(req.COACode) != "" || strings.TrimSpace(req.CashCOACode) != "" || strings.TrimSpace(req.AdminFeeCOACode) != "") && !hasPermission(officer.Role, PermissionAccountingCOAOverride) {
+		return LoanApprovalResult{}, errAccountingCOAOverrideForbidden
 	}
+	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 
@@ -320,11 +326,14 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		ProposedMonthlyAdminFee *int64
 		ProposedTotalAdminFee   int64
 		ProposedTotalObligation int64
+		ProposedCashCOACode     string
+		ProposedLoanCOACode     string
+		ProposedAdminFeeCOACode string
 	}
 	err = tx.QueryRow(
-		`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0) FROM loan_requests WHERE id = $1`+rowLockClause(s.db),
+		`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,'') FROM loan_requests WHERE id = $1`+rowLockClause(s.db),
 		requestID,
-	).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation)
+	).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
@@ -391,7 +400,10 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		}
 		request.ProposedTotalAdminFee = calc.TotalAdminFee
 		request.ProposedTotalObligation = calc.TotalObligation
-		if _, err := tx.Exec(`UPDATE loan_requests SET proposed_approved_amount=$1,proposed_duration_months=$2,proposed_start_date=$3,proposed_admin_fee_policy=$4,proposed_monthly_admin_fee=$5,proposed_total_admin_fee=$6,proposed_total_obligation=$7,updated_at=CURRENT_TIMESTAMP WHERE id=$8 AND status='pending' AND current_approval_stage='manager'`, req.ApprovedAmount, req.DurationMonths, startDate, adminFeePolicy, request.ProposedMonthlyAdminFee, calc.TotalAdminFee, calc.TotalObligation, requestID); err != nil {
+		request.ProposedCashCOACode = strings.TrimSpace(req.CashCOACode)
+		request.ProposedLoanCOACode = strings.TrimSpace(req.COACode)
+		request.ProposedAdminFeeCOACode = strings.TrimSpace(req.AdminFeeCOACode)
+		if _, err := tx.Exec(`UPDATE loan_requests SET proposed_approved_amount=$1,proposed_duration_months=$2,proposed_start_date=$3,proposed_admin_fee_policy=$4,proposed_monthly_admin_fee=$5,proposed_total_admin_fee=$6,proposed_total_obligation=$7,proposed_cash_coa_code=$8,proposed_loan_coa_code=$9,proposed_admin_fee_coa_code=$10,updated_at=CURRENT_TIMESTAMP WHERE id=$11 AND status='pending' AND current_approval_stage='manager'`, req.ApprovedAmount, req.DurationMonths, startDate, adminFeePolicy, request.ProposedMonthlyAdminFee, calc.TotalAdminFee, calc.TotalObligation, request.ProposedCashCOACode, request.ProposedLoanCOACode, request.ProposedAdminFeeCOACode, requestID); err != nil {
 			return LoanApprovalResult{}, err
 		}
 	}
@@ -475,7 +487,7 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		FinalDueDate:       calc.Installments[len(calc.Installments)-1].DueDate,
 		Status:             "active",
 		Source:             source,
-		COACode:            strings.TrimSpace(req.COACode),
+		COACode:            request.ProposedLoanCOACode,
 		ApprovedBy:         officer.ID,
 	}
 
@@ -513,9 +525,21 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 			return LoanApprovalResult{}, err
 		}
 	}
+	feeAmount := loan.TotalObligation - loan.ApprovedAmount
+	if feeAmount < 0 {
+		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
+	}
+	loanComponents := []accountingJournalComponent{
+		{Component: "loan_receivable", Side: accountingDirectionDebit, Amount: loan.TotalObligation},
+		{Component: "cash_bank", Side: accountingDirectionCredit, Amount: loan.ApprovedAmount},
+	}
+	if feeAmount > 0 {
+		loanComponents = append(loanComponents, accountingJournalComponent{Component: "admin_fee_income", Side: accountingDirectionCredit, Amount: feeAmount})
+	}
 	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
 		ReferenceNo: loan.LoanRequestID, TransactionID: loan.ID, TransactionType: "loan", TransactionDate: loan.StartDate,
-		Source: loan.Source, Amount: loan.ApprovedAmount, Direction: accountingDirectionCredit, COACode: loan.COACode,
+		Source: loan.Source, Amount: loan.TotalObligation, LoanType: loan.LoanType, Components: loanComponents,
+		COAOverrides: map[string]string{"cash_bank": request.ProposedCashCOACode, "loan_receivable": loan.COACode, "admin_fee_income": request.ProposedAdminFeeCOACode},
 		Description: "Pencairan pinjaman", RecordedBy: officer.ID,
 	}); err != nil {
 		return LoanApprovalResult{}, err

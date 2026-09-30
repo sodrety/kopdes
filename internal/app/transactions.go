@@ -16,7 +16,6 @@ type CashTransactionFilters struct {
 	Category            string `form:"category"`
 	Type                string `form:"type"`
 	TransactionCategory string `form:"transaction_category"`
-	Source              string `form:"source"`
 }
 
 type CashTransactionSummary struct {
@@ -66,7 +65,6 @@ func cashTransactionFiltersFromQuery(query interface{ Query(string) string }) Ca
 		Category:            strings.TrimSpace(query.Query("category")),
 		Type:                strings.TrimSpace(query.Query("type")),
 		TransactionCategory: strings.TrimSpace(query.Query("transaction_category")),
-		Source:              strings.TrimSpace(query.Query("source")),
 	}
 }
 
@@ -114,128 +112,79 @@ func cashTransactionPaginationURL(filters CashTransactionFilters, page int) stri
 	if filters.TransactionCategory != "" {
 		values.Set("transaction_category", filters.TransactionCategory)
 	}
-	if filters.Source != "" {
-		values.Set("source", filters.Source)
-	}
 	values.Set("page", strconv.Itoa(page))
 	return "/admin/transactions?" + values.Encode()
 }
 
 func (s *Server) cashTransactionsQuery(filters CashTransactionFilters) (string, []any) {
+	coaIsCashBank := `a.account_type='asset' AND (COALESCE(a.subtype,'') IN ('cash','bank') OR COALESCE(a.system_key,'') IN ('CASH','BANK'))`
+	stringAgg := `string_agg(DISTINCT CASE WHEN ` + coaIsCashBank + ` THEN l.coa_code END, ', ')`
+	if strings.Contains(strings.ToLower(fmt.Sprintf("%T", s.db.Driver())), "sqlite") {
+		stringAgg = `GROUP_CONCAT(DISTINCT CASE WHEN ` + coaIsCashBank + ` THEN l.coa_code END)`
+	}
 	query := strings.Builder{}
-	query.WriteString(`
-		SELECT id, transaction_date, member_no, full_name, direction, transaction_type, category_id, description, category_name, source, coa_code, income, expense, amount, reference_no, recorded_by, created_at
-		FROM (
-			SELECT
-				'saving:' || sr.id AS id,
-				sr.record_date AS transaction_date,
-				m.member_no AS member_no,
-				m.full_name AS full_name,
-				'debit' AS direction,
-				'savings' AS transaction_type,
-				'' AS category_id,
-				'Simpanan ' || sr.category || ' dari ' || m.full_name AS description,
-				'' AS category_name,
-				COALESCE(sr.source,'bank') AS source,
-				COALESCE(sr.coa_code,'') AS coa_code,
-				sr.amount AS income,
-				0 AS expense,
-				sr.amount AS amount,
-				sr.reference_no AS reference_no,
-				'' AS recorded_by,
-				CAST(sr.created_at AS TEXT) AS created_at
-			FROM saving_records sr
-			JOIN members m ON m.id = sr.member_id
-			WHERE sr.type = 'deposit'
-			UNION ALL
-			SELECT
-				'withdrawal:' || sr.id AS id,
-				sr.record_date AS transaction_date,
-				m.member_no AS member_no,
-				m.full_name AS full_name,
-				'credit' AS direction,
-				'withdrawal' AS transaction_type,
-				'' AS category_id,
-				'Penarikan sukarela oleh ' || m.full_name AS description,
-				'' AS category_name,
-				COALESCE(sr.source,'bank') AS source,
-				COALESCE(sr.coa_code,'') AS coa_code,
-				0 AS income,
-				sr.amount AS expense,
-				sr.amount AS amount,
-				sr.reference_no AS reference_no,
-				'' AS recorded_by,
-				CAST(sr.created_at AS TEXT) AS created_at
-			FROM saving_records sr
-			JOIN members m ON m.id = sr.member_id
-			WHERE sr.type = 'withdrawal'
-			UNION ALL
-			SELECT
-				'loan:' || l.id AS id,
-				COALESCE(NULLIF(l.start_date, ''), SUBSTR(CAST(l.approved_at AS TEXT), 1, 10), SUBSTR(CAST(l.created_at AS TEXT), 1, 10)) AS transaction_date,
-				m.member_no AS member_no,
-				m.full_name AS full_name,
-				'credit' AS direction,
-				'loan' AS transaction_type,
-				'' AS category_id,
-				'Pencairan pinjaman untuk ' || m.full_name AS description,
-				'' AS category_name,
-				COALESCE(l.source,'bank') AS source,
-				COALESCE(l.coa_code,'') AS coa_code,
-				0 AS income,
-				l.approved_amount AS expense,
-				l.approved_amount AS amount,
-				l.loan_request_id AS reference_no,
-				'' AS recorded_by,
-				CAST(l.created_at AS TEXT) AS created_at
-			FROM loans l
-			JOIN members m ON m.id = l.member_id
-			WHERE l.status <> 'cancelled'
-			UNION ALL
-			SELECT
-				'repayment:' || lr.id AS id,
-				lr.record_date AS transaction_date,
-				m.member_no AS member_no,
-				m.full_name AS full_name,
-				'debit' AS direction,
-				'repayment' AS transaction_type,
-				'' AS category_id,
-				'Angsuran pinjaman dari ' || m.full_name AS description,
-				'' AS category_name,
-				COALESCE(lr.source,'bank') AS source,
-				COALESCE(lr.coa_code,'') AS coa_code,
-				lr.amount AS income,
-				0 AS expense,
-				lr.amount AS amount,
-				lr.reference_no AS reference_no,
-				'' AS recorded_by,
-				CAST(lr.created_at AS TEXT) AS created_at
-			FROM loan_repayments lr
-			JOIN members m ON m.id = lr.member_id
-			UNION ALL
-			SELECT
-				'manual:' || mt.id AS id,
-				mt.transaction_date AS transaction_date,
-				'' AS member_no,
-				'' AS full_name,
-				COALESCE(mt.accounting_direction, CASE WHEN mt.direction='cash_in' THEN 'debit' ELSE 'credit' END) AS direction,
-				'manual' AS transaction_type,
-				mt.category_id AS category_id,
-				mt.description AS description,
-				COALESCE(NULLIF(c.name,''), mt.coa_code, '') AS category_name,
-				COALESCE(mt.source,'bank') AS source,
-				COALESCE(mt.coa_code, c.account_code, '') AS coa_code,
-				CASE WHEN mt.direction = 'cash_in' THEN mt.amount ELSE 0 END AS income,
-				CASE WHEN mt.direction = 'cash_out' THEN mt.amount ELSE 0 END AS expense,
-				mt.amount AS amount,
-				mt.reference_no AS reference_no,
-				COALESCE(NULLIF(u.full_name, ''), u.email) AS recorded_by,
-				CAST(mt.created_at AS TEXT) AS created_at
-			FROM manual_cash_transactions mt
-			LEFT JOIN cash_transaction_categories c ON c.id = mt.category_id
-			JOIN users u ON u.id = mt.recorded_by
-		) cash_transactions
-		WHERE 1 = 1`)
+	query.WriteString(`WITH cash_movement AS (
+		SELECT e.transaction_id,e.transaction_type,e.id AS journal_id,e.status,
+			COALESCE(SUM(CASE WHEN a.account_type='asset' AND (COALESCE(a.subtype,'') IN ('cash','bank') OR COALESCE(a.system_key,'') IN ('CASH','BANK'))
+				THEN CASE WHEN l.side='debit' THEN l.amount ELSE -l.amount END ELSE 0 END),0) AS net_amount,
+			COALESCE(` + stringAgg + `,'') AS coa_codes
+		FROM financial_journal_entries e
+		LEFT JOIN financial_journal_lines l ON l.journal_id=e.id
+		LEFT JOIN coa_accounts a ON a.code=l.coa_code
+		GROUP BY e.id
+	)
+	SELECT id,transaction_date,member_no,full_name,direction,transaction_type,category_id,description,category_name,source,coa_code,income,expense,amount,reference_no,recorded_by,created_at
+	FROM (
+		SELECT 'saving:' || sr.id AS id,sr.record_date AS transaction_date,m.member_no,m.full_name,
+			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN CASE WHEN cm.net_amount>0 THEN 'debit' ELSE 'credit' END ELSE 'pending_mapping' END AS direction,
+			'savings' AS transaction_type,'' AS category_id,'Simpanan ' || sr.category || ' dari ' || m.full_name AS description,'' AS category_name,'' AS source,COALESCE(cm.coa_codes,'') AS coa_code,
+			CASE WHEN cm.status='posted' AND cm.net_amount>0 THEN cm.net_amount ELSE 0 END AS income,
+			CASE WHEN cm.status='posted' AND cm.net_amount<0 THEN -cm.net_amount ELSE 0 END AS expense,
+			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN ABS(cm.net_amount) ELSE sr.amount END AS amount,
+			sr.reference_no AS reference_no,COALESCE(NULLIF(u.full_name,''),u.email,'') AS recorded_by,CAST(sr.created_at AS TEXT) AS created_at
+		FROM saving_records sr JOIN members m ON m.id=sr.member_id LEFT JOIN users u ON u.id=sr.recorded_by
+		LEFT JOIN cash_movement cm ON cm.transaction_id=sr.id AND cm.transaction_type='savings' WHERE sr.type='deposit'
+		UNION ALL
+		SELECT 'withdrawal:' || sr.id,sr.record_date,m.member_no,m.full_name,
+			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN CASE WHEN cm.net_amount>0 THEN 'debit' ELSE 'credit' END ELSE 'pending_mapping' END,
+			'withdrawal','', 'Penarikan sukarela oleh ' || m.full_name,'','',COALESCE(cm.coa_codes,''),
+			CASE WHEN cm.status='posted' AND cm.net_amount>0 THEN cm.net_amount ELSE 0 END,
+			CASE WHEN cm.status='posted' AND cm.net_amount<0 THEN -cm.net_amount ELSE 0 END,
+			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN ABS(cm.net_amount) ELSE sr.amount END,
+			sr.reference_no,COALESCE(NULLIF(u.full_name,''),u.email,''),CAST(sr.created_at AS TEXT)
+		FROM saving_records sr JOIN members m ON m.id=sr.member_id LEFT JOIN users u ON u.id=sr.recorded_by
+		LEFT JOIN cash_movement cm ON cm.transaction_id=sr.id AND cm.transaction_type='withdrawal' WHERE sr.type='withdrawal'
+		UNION ALL
+		SELECT 'loan:' || l.id,COALESCE(NULLIF(l.start_date,''),SUBSTR(CAST(l.approved_at AS TEXT),1,10),SUBSTR(CAST(l.created_at AS TEXT),1,10)),m.member_no,m.full_name,
+			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN CASE WHEN cm.net_amount>0 THEN 'debit' ELSE 'credit' END ELSE 'pending_mapping' END,
+			'loan','','Pencairan pinjaman untuk ' || m.full_name,'','',COALESCE(cm.coa_codes,''),
+			CASE WHEN cm.status='posted' AND cm.net_amount>0 THEN cm.net_amount ELSE 0 END,
+			CASE WHEN cm.status='posted' AND cm.net_amount<0 THEN -cm.net_amount ELSE 0 END,
+			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN ABS(cm.net_amount) ELSE l.approved_amount END,
+			l.loan_request_id,COALESCE(NULLIF(u.full_name,''),u.email,''),CAST(l.created_at AS TEXT)
+		FROM loans l JOIN members m ON m.id=l.member_id LEFT JOIN users u ON u.id=l.approved_by
+		LEFT JOIN cash_movement cm ON cm.transaction_id=l.id AND cm.transaction_type='loan' WHERE l.status<>'cancelled'
+		UNION ALL
+		SELECT 'repayment:' || lr.id,lr.record_date,m.member_no,m.full_name,
+			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN CASE WHEN cm.net_amount>0 THEN 'debit' ELSE 'credit' END ELSE 'pending_mapping' END,
+			'repayment','','Angsuran pinjaman dari ' || m.full_name,'','',COALESCE(cm.coa_codes,''),
+			CASE WHEN cm.status='posted' AND cm.net_amount>0 THEN cm.net_amount ELSE 0 END,
+			CASE WHEN cm.status='posted' AND cm.net_amount<0 THEN -cm.net_amount ELSE 0 END,
+			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN ABS(cm.net_amount) ELSE lr.amount END,
+			lr.reference_no,COALESCE(NULLIF(u.full_name,''),u.email,''),CAST(lr.created_at AS TEXT)
+		FROM loan_repayments lr JOIN members m ON m.id=lr.member_id LEFT JOIN users u ON u.id=lr.recorded_by
+		LEFT JOIN cash_movement cm ON cm.transaction_id=lr.id AND cm.transaction_type='repayment'
+		UNION ALL
+		SELECT 'manual:' || mt.id,mt.transaction_date,'','',
+			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN CASE WHEN cm.net_amount>0 THEN 'debit' ELSE 'credit' END ELSE 'pending_mapping' END,
+			'manual',COALESCE(mt.category_id,''),mt.description,COALESCE(NULLIF(c.name,''),''),'',COALESCE(cm.coa_codes,''),
+			CASE WHEN cm.status='posted' AND cm.net_amount>0 THEN cm.net_amount ELSE 0 END,
+			CASE WHEN cm.status='posted' AND cm.net_amount<0 THEN -cm.net_amount ELSE 0 END,
+			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN ABS(cm.net_amount) ELSE mt.amount END,
+			mt.reference_no,COALESCE(NULLIF(u.full_name,''),u.email,''),CAST(mt.created_at AS TEXT)
+		FROM manual_cash_transactions mt LEFT JOIN cash_transaction_categories c ON c.id=mt.category_id
+		LEFT JOIN users u ON u.id=mt.recorded_by LEFT JOIN cash_movement cm ON cm.transaction_id=mt.id AND cm.transaction_type='manual'
+	) cash_transactions WHERE 1=1`)
 
 	var args []any
 	addFilter := func(condition string, value any) {
@@ -259,10 +208,7 @@ func (s *Server) cashTransactionsQuery(filters CashTransactionFilters) (string, 
 	}
 	if filters.TransactionCategory != "" {
 		addFilter("(category_id =", filters.TransactionCategory)
-		query.WriteString(fmt.Sprintf(" OR coa_code = $%d)", len(args)))
-	}
-	if filters.Source != "" && validTransactionSource(filters.Source) {
-		addFilter("source =", filters.Source)
+		query.WriteString(fmt.Sprintf(" OR coa_code LIKE '%%' || $%d || '%%')", len(args)))
 	}
 	return query.String(), args
 }
@@ -292,19 +238,6 @@ func (s *Server) cashTransactionRows(query string, args ...any) ([]CashTransacti
 func (page *CashTransactionPage) addSummary(row CashTransactionRow) {
 	page.Summary.TotalIncome += row.Income
 	page.Summary.TotalExpense += row.Expense
-	if row.Source == transactionSourceCash {
-		if row.Direction == accountingDirectionDebit {
-			page.Summary.CashBalance += row.Amount
-		} else {
-			page.Summary.CashBalance -= row.Amount
-		}
-	} else {
-		if row.Direction == accountingDirectionDebit {
-			page.Summary.BankBalance += row.Amount
-		} else {
-			page.Summary.BankBalance -= row.Amount
-		}
-	}
 }
 
 func (s *Server) cashTransactionsForAdmin(filters CashTransactionFilters) (CashTransactionPage, error) {
@@ -337,9 +270,7 @@ func (s *Server) cashTransactionsPageForAdmin(filters CashTransactionFilters, pa
 		SELECT
 			COUNT(*),
 			COALESCE(SUM(income), 0),
-			COALESCE(SUM(expense), 0),
-			COALESCE(SUM(CASE WHEN source = 'cash' AND direction = 'debit' THEN amount WHEN source = 'cash' THEN -amount ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN source <> 'cash' AND direction = 'debit' THEN amount WHEN source <> 'cash' THEN -amount ELSE 0 END), 0)
+			COALESCE(SUM(expense), 0)
 		FROM (%s) cash_transactions`, baseQuery)
 
 	var page CashTransactionPage
@@ -348,8 +279,6 @@ func (s *Server) cashTransactionsPageForAdmin(filters CashTransactionFilters, pa
 		&totalRows,
 		&page.Summary.TotalIncome,
 		&page.Summary.TotalExpense,
-		&page.Summary.CashBalance,
-		&page.Summary.BankBalance,
 	); err != nil {
 		return CashTransactionPage{}, err
 	}
