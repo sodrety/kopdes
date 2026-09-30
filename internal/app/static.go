@@ -1965,6 +1965,23 @@ td:nth-child(n+2):not(.review-cell) {
   color: var(--primary);
   box-shadow: none;
 }
+.balance-export-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.balance-export-form label {
+  width: 148px;
+  gap: 4px;
+  font-size: 11px;
+}
+.balance-export-form input {
+  padding: 8px;
+}
+.balance-export-form button {
+  white-space: nowrap;
+  padding: 9px 14px;
+}
 .balance-report-card-body {
   display: grid;
   gap: 24px;
@@ -2583,6 +2600,7 @@ td:nth-child(n+2):not(.review-cell) {
     padding: 16px;
   }
   .balance-filter-form,
+  .balance-export-form,
   .balance-kpi-grid,
   .balance-stat-grid,
   .balance-breakdown-grid,
@@ -2595,9 +2613,17 @@ td:nth-child(n+2):not(.review-cell) {
   }
   .balance-filter-form button,
   .balance-filter-form .button-link,
+  .balance-export-form,
+  .balance-export-form label,
+  .balance-export-form input,
+  .balance-export-form button,
   .profit-action-row button,
   .profit-action-row .button-link {
     width: 100%;
+  }
+  .balance-export-form {
+    flex-direction: column;
+    align-items: stretch;
   }
   .profit-period-toolbar,
   .profit-period-form {
