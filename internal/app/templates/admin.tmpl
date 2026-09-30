@@ -389,7 +389,13 @@
               </tr>{{end}}
             </tbody>
           </table></div>
-          <div class="button-row"><button type="button" class="button-secondary" data-add-journal-line>{{t .Lang "add_journal_line"}}</button><button type="submit">{{t .Lang "record_general_journal"}}</button></div>
+          <div class="journal-balance-summary" data-journal-balance data-balanced="false" data-group-separator="{{if eq .Lang "id"}}.{{else}},{{end}}" data-balanced-message="{{t .Lang "journal_balanced"}}" data-unbalanced-message="{{t .Lang "journal_unbalanced"}}" aria-live="polite">
+            <div><span>{{t .Lang "debit"}}</span><strong>Rp <span data-journal-debit-total>0</span></strong></div>
+            <div><span>{{t .Lang "credit"}}</span><strong>Rp <span data-journal-credit-total>0</span></strong></div>
+            <div><span>{{t .Lang "journal_difference"}}</span><strong>Rp <span data-journal-difference>0</span></strong></div>
+            <p data-journal-balance-status>{{t .Lang "journal_unbalanced"}}</p>
+          </div>
+          <div class="button-row"><button type="button" class="button-secondary" data-add-journal-line>{{t .Lang "add_journal_line"}}</button><button type="submit" data-journal-submit disabled>{{t .Lang "record_general_journal"}}</button></div>
         </form>
         {{template "form-error" (dict "ID" "general-journal-error")}}
       </section>
@@ -408,7 +414,18 @@
           <thead><tr><th>{{t $.Lang "date"}}</th><th>{{t $.Lang "reference"}}</th><th>{{t $.Lang "transaction_type"}}</th><th>{{t $.Lang "description"}}</th><th>{{t $.Lang "journal_lines"}}</th><th>{{t $.Lang "debit"}}</th><th>{{t $.Lang "credit"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
           <tbody>{{range .Entries}}<tr>
             <td>{{.Date}}</td><td>{{.ReferenceNo}}</td><td>{{t $.Lang (printf "transaction_type_%s" .TransactionType)}}</td><td>{{.Description}}{{if .CorrectionReason}}<small>{{t $.Lang "correction_reason"}}: {{.CorrectionReason}}</small>{{end}}{{if .ReversalOf}}<small>{{t $.Lang "reversal_of"}} {{.ReversalOf}}</small>{{end}}</td>
-            <td>{{range .Lines}}<div>{{if .COACode}}{{.COACode}} — {{.COAName}}{{else}}{{t $.Lang "pending_mapping"}}{{end}} · {{t $.Lang .Side}} · Rp {{nominal .Amount}}</div>{{end}}</td>
+            <td>
+              <div class="journal-line-groups">
+                <div class="journal-line-group journal-line-group-debit">
+                  <strong class="journal-line-group-title">{{t $.Lang "debit"}}</strong>
+                  {{range .Lines}}{{if eq .Side "debit"}}<div class="journal-line-item"><span>{{if .COACode}}{{.COACode}} — {{.COAName}}{{else}}{{t $.Lang "pending_mapping"}}{{end}}</span><strong>Rp {{nominal .Amount}}</strong></div>{{end}}{{end}}
+                </div>
+                <div class="journal-line-group journal-line-group-credit">
+                  <strong class="journal-line-group-title">{{t $.Lang "credit"}}</strong>
+                  {{range .Lines}}{{if eq .Side "credit"}}<div class="journal-line-item"><span>{{if .COACode}}{{.COACode}} — {{.COAName}}{{else}}{{t $.Lang "pending_mapping"}}{{end}}</span><strong>Rp {{nominal .Amount}}</strong></div>{{end}}{{end}}
+                </div>
+              </div>
+            </td>
             <td>Rp {{nominal .TotalDebit}}</td><td>Rp {{nominal .TotalCredit}}</td><td>{{t $.Lang (printf "journal_status_%s" .Status)}}</td>
             <td>{{if and $.CanRecord .CanReverse}}<form method="post" action="/api/admin/journals/{{.ID}}/reverse" hx-post="/api/admin/journals/{{.ID}}/reverse" hx-target="#journal-reversal-error" hx-swap="innerHTML"><label>{{t $.Lang "correction_reason"}} <input name="reason" maxlength="500" required></label><label>{{t $.Lang "date"}} <input name="date" type="date" value="{{$.DefaultDate}}" required></label><button type="submit">{{t $.Lang "reverse_journal"}}</button></form>{{else if .ReversalOf}}{{t $.Lang "journal_reversed"}}{{else}}—{{end}}</td>
           </tr>{{end}}</tbody>
@@ -438,16 +455,74 @@
         (function () {
           var body = document.querySelector('[data-journal-lines]');
           var add = document.querySelector('[data-add-journal-line]');
-          if (!body || !add) return;
+          var summary = document.querySelector('[data-journal-balance]');
+          if (!body || !add || !summary) return;
+          var form = body.closest('form');
+          var submit = form.querySelector('[data-journal-submit]');
+          var debitOutput = summary.querySelector('[data-journal-debit-total]');
+          var creditOutput = summary.querySelector('[data-journal-credit-total]');
+          var differenceOutput = summary.querySelector('[data-journal-difference]');
+          var statusOutput = summary.querySelector('[data-journal-balance-status]');
+          var maximumAmount = 9223372036854775807n;
+          function amountDigits(value) {
+            var normalized = String(value || '').trim().replace(/^rp\s*/i, '');
+            if (!normalized) return '0';
+            if (/^\d+$/.test(normalized)) return normalized.replace(/^0+(?=\d)/, '');
+            if (/^\d{1,3}([.,]\d{3})+$/.test(normalized) && !(normalized.includes('.') && normalized.includes(','))) {
+              return normalized.replace(/[.,]/g, '').replace(/^0+(?=\d)/, '');
+            }
+            return null;
+          }
+          function totalFor(name) {
+            var total = 0n;
+            var valid = true;
+            body.querySelectorAll('[name="' + name + '"]').forEach(function (input) {
+              var digits = amountDigits(input.value);
+              if (digits === null) {
+                valid = false;
+                return;
+              }
+              total += BigInt(digits);
+            });
+            return valid && total <= maximumAmount ? total : null;
+          }
+          function formattedAmount(amount) {
+            var separator = summary.dataset.groupSeparator || ',';
+            return amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, separator);
+          }
+          function updateBalance() {
+            var debit = totalFor('debit_amount');
+            var credit = totalFor('credit_amount');
+            var validTotals = debit !== null && credit !== null;
+            var difference = validTotals ? (debit >= credit ? debit - credit : credit - debit) : null;
+            debitOutput.textContent = debit === null ? '—' : formattedAmount(debit);
+            creditOutput.textContent = credit === null ? '—' : formattedAmount(credit);
+            differenceOutput.textContent = difference === null ? '—' : formattedAmount(difference);
+            var balanced = validTotals && debit > 0n && debit === credit;
+            summary.dataset.balanced = balanced ? 'true' : 'false';
+            statusOutput.textContent = balanced ? summary.dataset.balancedMessage : summary.dataset.unbalancedMessage;
+            submit.disabled = !balanced;
+          }
+          form.addEventListener('input', updateBalance);
+          form.addEventListener('change', updateBalance);
+          form.addEventListener('submit', function (event) {
+            updateBalance();
+            if (submit.disabled) event.preventDefault();
+          });
           add.addEventListener('click', function () {
             var row = body.querySelector('[data-journal-line]').cloneNode(true);
             row.querySelectorAll('input').forEach(function (input) { input.value = ''; });
             row.querySelector('select').selectedIndex = 0;
             body.appendChild(row);
+            updateBalance();
           });
           body.addEventListener('click', function (event) {
-            if (event.target.matches('[data-remove-journal-line]') && body.querySelectorAll('[data-journal-line]').length > 2) event.target.closest('[data-journal-line]').remove();
+            if (event.target.matches('[data-remove-journal-line]') && body.querySelectorAll('[data-journal-line]').length > 2) {
+              event.target.closest('[data-journal-line]').remove();
+              updateBalance();
+            }
           });
+          updateBalance();
         }());
       </script>
 {{template "admin-shell-end" .}}
