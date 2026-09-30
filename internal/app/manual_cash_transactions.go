@@ -221,6 +221,12 @@ func (s *Server) insertManualCashTransaction(req manualCashTransactionRequest, r
 	req.RecordDate = strings.TrimSpace(req.RecordDate)
 	req.ReferenceNo = strings.TrimSpace(req.ReferenceNo)
 	req.Note = strings.TrimSpace(req.Note)
+	if req.CategoryID != "" && len(req.Lines) < 2 {
+		var categoryActive, categoryIsGroup bool
+		if err := s.db.QueryRow(`SELECT active,is_group FROM cash_transaction_categories WHERE id=$1`, req.CategoryID).Scan(&categoryActive, &categoryIsGroup); err == nil && categoryActive && categoryIsGroup {
+			return nil, errCashTransactionCategoryGroup
+		}
+	}
 	if err := validateManualCashTransactionRequest(req); err != nil {
 		return nil, err
 	}
