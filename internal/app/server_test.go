@@ -207,16 +207,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 31 {
-		t.Fatalf("expected thirty-one tracked migrations, got %d", migrationCount)
+	if migrationCount != 33 {
+		t.Fatalf("expected thirty-three tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 31`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 33`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "add_accounting_transaction_hierarchy" {
-		t.Fatalf("expected latest accounting hierarchy migration, got %q", latestName)
+	if latestName != "multi_line_coa_journals" {
+		t.Fatalf("expected latest journal migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -2246,21 +2246,14 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	if tagihanExcelRow == 0 {
 		t.Fatalf("expected Tagihan row for member %s, got %#v", member.ID, rows)
 	}
-	expectedHeaders := "Member ID|NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Source|Status"
+	expectedHeaders := "Member ID|NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Status"
 	if strings.Join(rows[0], "|") != expectedHeaders {
 		t.Fatalf("unexpected Tagihan headers: %#v", rows[0])
-	}
-	sourceCell, err := excelize.CoordinatesToCellName(10, tagihanExcelRow)
-	if err != nil {
-		t.Fatalf("find source cell: %v", err)
-	}
-	if err := workbook.SetCellValue(sheet, sourceCell, "bank"); err != nil {
-		t.Fatalf("set Tagihan source: %v", err)
 	}
 	if tagihanRow[1] != "K-TAG-001" || tagihanRow[3] != "100000" || tagihanRow[4] != "50000" || tagihanRow[5] != "210000" || tagihanRow[6] != "120000" || tagihanRow[7] != "210000" || tagihanRow[8] != "690000" {
 		t.Fatalf("unexpected Tagihan row: %#v, loan=%+v", tagihanRow, loan)
 	}
-	statusCell, err := excelize.CoordinatesToCellName(11, tagihanExcelRow)
+	statusCell, err := excelize.CoordinatesToCellName(10, tagihanExcelRow)
 	if err != nil {
 		t.Fatalf("find status cell: %v", err)
 	}
@@ -4149,6 +4142,30 @@ func TestAdminRepaymentsMenuLinksToActiveRepaymentsPage(t *testing.T) {
 func TestAdminTransactionsPageShowsAggregateCashLedgerAndManualEntryForm(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
+	if _, err := fixture.db.Exec(`INSERT INTO coa_accounts (id,code,name,account_type,subtype,normal_balance,is_group,active) VALUES
+		('test-savings-liability','TEST-SAVINGS-LIABILITY','Test savings liability','liability','savings','C',FALSE,TRUE),
+		('test-loan-receivable','TEST-LOAN-RECEIVABLE','Test loan receivable','asset','receivable','D',FALSE,TRUE),
+		('test-loan-fee-income','TEST-LOAN-FEE','Test loan fee income','revenue','Laba Rugi','C',FALSE,TRUE)`); err != nil {
+		t.Fatalf("seed posting COA accounts: %v", err)
+	}
+	for _, mapping := range []struct {
+		id, transactionType, component, category, loanType, coaCode string
+	}{
+		{"test-cash-savings", "savings", "cash_bank", "", "", "CASH"},
+		{"test-savings-liability", "savings", "savings_liability", "sukarela", "", "TEST-SAVINGS-LIABILITY"},
+		{"test-cash-withdrawal", "withdrawal", "cash_bank", "", "", "CASH"},
+		{"test-withdrawal-liability", "withdrawal", "savings_liability", "sukarela", "", "TEST-SAVINGS-LIABILITY"},
+		{"test-cash-loan", "loan", "cash_bank", "", "", "CASH"},
+		{"test-loan-receivable", "loan", "loan_receivable", "", "regular", "TEST-LOAN-RECEIVABLE"},
+		{"test-loan-fee", "loan", "admin_fee_income", "", "regular", "TEST-LOAN-FEE"},
+		{"test-cash-repayment", "repayment", "cash_bank", "", "", "CASH"},
+		{"test-repayment-receivable", "repayment", "loan_receivable", "", "regular", "TEST-LOAN-RECEIVABLE"},
+	} {
+		mappingKey := strings.Join([]string{mapping.transactionType, mapping.component, mapping.category, mapping.loanType, "", ""}, "|")
+		if _, err := fixture.db.Exec(`INSERT INTO accounting_mappings (id,mapping_key,transaction_type,component,category,loan_type,coa_code,active) VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE)`, mapping.id, mappingKey, mapping.transactionType, mapping.component, mapping.category, mapping.loanType, mapping.coaCode); err != nil {
+			t.Fatalf("seed posting mapping %s: %v", mapping.id, err)
+		}
+	}
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-CASH-1","full_name":"Cash Ledger Member","join_date":"2026-06-16","status":"active","email":"cash-ledger@coop.test","password":"member-password"}`)
 	memberToken := fixture.login(t, "cash-ledger@coop.test", "member-password")
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 750000, "CASH-SAVE", "Cash saving")
@@ -4174,9 +4191,18 @@ func TestAdminTransactionsPageShowsAggregateCashLedgerAndManualEntryForm(t *test
 			t.Fatalf("expected transactions page to include %q, got %s", text, body)
 		}
 	}
-	for _, text := range []string{"Catat transaksi kas manual", `name="direction"`, `name="source"`, `name="coa_code"`, `name="transaction_date"`, `name="reference_no"`, "Kelola kategori kas"} {
-		if !strings.Contains(body, text) {
-			t.Fatalf("expected transactions page to include %q, got %s", text, body)
+
+	journalReq := httptest.NewRequest(http.MethodGet, "/admin/journals", nil)
+	journalReq.AddCookie(adminCookie)
+	journalReq.AddCookie(fixture.setLanguage(t, "id", "/admin/journals"))
+	journalRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(journalRec, journalReq)
+	if journalRec.Code != http.StatusOK {
+		t.Fatalf("expected general journal page status 200, got %d: %s", journalRec.Code, journalRec.Body.String())
+	}
+	for _, text := range []string{`name="line_coa_code"`, `name="debit_amount"`, `name="credit_amount"`} {
+		if !strings.Contains(journalRec.Body.String(), text) {
+			t.Fatalf("expected general journal page to include %q, got %s", text, journalRec.Body.String())
 		}
 	}
 
@@ -4204,6 +4230,11 @@ func TestAdminTransactionsPageShowsAggregateCashLedgerAndManualEntryForm(t *test
 func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t *testing.T) {
 	fixture := newTestFixture(t)
 	managerToken := fixture.login(t, "admin@coop.test", "password")
+	if _, err := fixture.db.Exec(`INSERT INTO coa_accounts (id,code,name,account_type,subtype,normal_balance,is_group,active) VALUES
+		('test-manual-income','TEST-MANUAL-INCOME','Pendapatan Jasa','revenue','Laba Rugi','C',FALSE,TRUE),
+		('test-manual-expense','TEST-MANUAL-EXPENSE','ATK','expense','Laba Rugi','D',FALSE,TRUE)`); err != nil {
+		t.Fatalf("seed manual journal COA accounts: %v", err)
+	}
 
 	record := func(t *testing.T, token, body string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -4215,7 +4246,7 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 		return rec
 	}
 
-	incomeRec := record(t, managerToken, `{"direction":"cash_in","category_id":"cash-in-pendapatan-jasa","description":"Pendapatan jasa administrasi","amount":125000,"transaction_date":"2026-06-17","note":"Setoran koreksi kas"}`)
+	incomeRec := record(t, managerToken, `{"category_id":"cash-in-pendapatan-jasa","description":"Pendapatan jasa administrasi","amount":125000,"transaction_date":"2026-06-17","note":"Setoran koreksi kas","lines":[{"coa_code":"BANK","debit":125000},{"coa_code":"TEST-MANUAL-INCOME","credit":125000}]}`)
 	if incomeRec.Code != http.StatusCreated {
 		t.Fatalf("expected manual cash-in status 201, got %d: %s", incomeRec.Code, incomeRec.Body.String())
 	}
@@ -4230,15 +4261,15 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 		t.Fatalf("expected generated reference and category, got %+v", income)
 	}
 
-	outcomeRec := record(t, managerToken, `{"direction":"cash_out","category_id":"cash-out-atk","description":"Pembelian alat tulis","amount":200000,"transaction_date":"2026-06-18","reference_no":"KAS-KOREKSI-1","note":"Koreksi kas"}`)
+	outcomeRec := record(t, managerToken, `{"category_id":"cash-out-atk","description":"Pembelian alat tulis","amount":200000,"transaction_date":"2026-06-18","reference_no":"KAS-KOREKSI-1","note":"Koreksi kas","lines":[{"coa_code":"TEST-MANUAL-EXPENSE","debit":200000},{"coa_code":"BANK","credit":200000}]}`)
 	if outcomeRec.Code != http.StatusCreated {
 		t.Fatalf("expected manual cash-out status 201, got %d: %s", outcomeRec.Code, outcomeRec.Body.String())
 	}
-	duplicateRec := record(t, managerToken, `{"direction":"cash_in","category_id":"cash-in-pendapatan-jasa","description":"Referensi duplikat","amount":1000,"transaction_date":"2026-06-19","reference_no":"KAS-KOREKSI-1"}`)
+	duplicateRec := record(t, managerToken, `{"category_id":"cash-in-pendapatan-jasa","description":"Referensi duplikat","amount":1000,"transaction_date":"2026-06-19","reference_no":"KAS-KOREKSI-1","lines":[{"coa_code":"BANK","debit":1000},{"coa_code":"TEST-MANUAL-INCOME","credit":1000}]}`)
 	if duplicateRec.Code != http.StatusConflict {
 		t.Fatalf("expected duplicate reference status 409, got %d: %s", duplicateRec.Code, duplicateRec.Body.String())
 	}
-	futureRec := record(t, managerToken, `{"direction":"cash_in","category_id":"cash-in-pendapatan-jasa","description":"Masa depan","amount":1000,"transaction_date":"2099-01-01"}`)
+	futureRec := record(t, managerToken, `{"category_id":"cash-in-pendapatan-jasa","description":"Masa depan","amount":1000,"transaction_date":"2099-01-01","lines":[{"coa_code":"BANK","debit":1000},{"coa_code":"TEST-MANUAL-INCOME","credit":1000}]}`)
 	if futureRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected future date status 400, got %d: %s", futureRec.Code, futureRec.Body.String())
 	}
@@ -4266,7 +4297,7 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 	if categoryUpdate.Code != http.StatusOK {
 		t.Fatalf("expected category deactivate status 200, got %d: %s", categoryUpdate.Code, categoryUpdate.Body.String())
 	}
-	deactivatedRecord := record(t, managerToken, `{"direction":"cash_out","category_id":"`+category.ID+`","description":"Kategori nonaktif","amount":1000,"transaction_date":"2026-06-20"}`)
+	deactivatedRecord := record(t, managerToken, `{"category_id":"`+category.ID+`","description":"Kategori nonaktif","amount":1000,"transaction_date":"2026-06-20","lines":[{"coa_code":"TEST-MANUAL-EXPENSE","debit":1000},{"coa_code":"BANK","credit":1000}]}`)
 	if deactivatedRecord.Code != http.StatusBadRequest {
 		t.Fatalf("expected deactivated category status 400, got %d: %s", deactivatedRecord.Code, deactivatedRecord.Body.String())
 	}

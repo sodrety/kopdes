@@ -504,7 +504,6 @@
               <th>{{t $.Lang "loan_type_secondary_goods"}}</th>
               <th>{{t $.Lang "loan_type_goods_purchase_paylater"}}</th>
               <th>{{t $.Lang "total_tagihan"}}</th>
-              <th>{{t $.Lang "source"}}</th>
               <th>{{t $.Lang "status"}}</th>
             </tr>
           </thead>
@@ -520,7 +519,6 @@
               <td>{{nominal .PinjamanBarangSekunder}}</td>
               <td>{{nominal .PembelianBarang}}</td>
               <td>{{nominal .Total}}</td>
-              <td>{{if .Source}}{{.Source}}{{else}}-{{end}}</td>
               <td>{{.Status}}</td>
             </tr>
             {{end}}

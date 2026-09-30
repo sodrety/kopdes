@@ -16,19 +16,37 @@ func TestAdminTransactionsPageUsesServerSidePagination(t *testing.T) {
 	if err := fixture.db.QueryRow(`SELECT id FROM users WHERE email=$1`, "admin@coop.test").Scan(&adminID); err != nil {
 		t.Fatalf("find admin user: %v", err)
 	}
+	if _, err := fixture.db.Exec(`INSERT INTO coa_accounts (id,code,name,account_type,subtype,normal_balance,is_group,active) VALUES ('pagination-income','PAGINATION-INCOME','Pagination income','revenue','Laba Rugi','C',FALSE,TRUE)`); err != nil {
+		t.Fatalf("seed pagination income COA: %v", err)
+	}
 	for i := 0; i < 55; i++ {
+		transactionID := fmt.Sprintf("manual-page-%03d", i)
+		journalID := "journal-" + transactionID
+		transactionDate := fmt.Sprintf("2026-%02d-01", 1+i/5)
+		description := fmt.Sprintf("Pagination row %03d", i)
+		referenceNo := fmt.Sprintf("PAGE-%03d", i)
+		amount := int64(i + 1)
 		if _, err := fixture.db.Exec(`
 			INSERT INTO manual_cash_transactions
 				(id, transaction_date, direction, category_id, description, amount, reference_no, note, recorded_by, source, coa_code, accounting_direction)
 			VALUES ($1, $2, 'cash_in', NULL, $3, $4, $5, '', $6, 'bank', 'BANK', 'debit')`,
-			fmt.Sprintf("manual-page-%03d", i),
-			fmt.Sprintf("2026-%02d-01", 1+i/5),
-			fmt.Sprintf("Pagination row %03d", i),
-			int64(i+1),
-			fmt.Sprintf("PAGE-%03d", i),
+			transactionID,
+			transactionDate,
+			description,
+			amount,
+			referenceNo,
 			adminID,
 		); err != nil {
 			t.Fatalf("insert pagination row %d: %v", i, err)
+		}
+		if _, err := fixture.db.Exec(`INSERT INTO financial_journal_entries
+			(id,reference_no,transaction_id,transaction_type,transaction_date,source,amount,status,description,recorded_by)
+			VALUES ($1,$2,$3,'manual',$4,'bank',$5,'posted',$6,$7)`, journalID, referenceNo, transactionID, transactionDate, amount, description, adminID); err != nil {
+			t.Fatalf("insert pagination journal %d: %v", i, err)
+		}
+		if _, err := fixture.db.Exec(`INSERT INTO financial_journal_lines (id,journal_id,side,coa_code,amount,component) VALUES
+			($1,$2,'debit','BANK',$3,'manual'),($4,$2,'credit','PAGINATION-INCOME',$3,'manual')`, "line-debit-"+transactionID, journalID, amount, "line-credit-"+transactionID); err != nil {
+			t.Fatalf("insert pagination journal lines %d: %v", i, err)
 		}
 	}
 
