@@ -4357,8 +4357,15 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 	if pageRec.Code != http.StatusOK {
 		t.Fatalf("expected Bendahara transactions page status 200, got %d: %s", pageRec.Code, pageRec.Body.String())
 	}
-	if !strings.Contains(pageRec.Body.String(), "Record manual cash transaction") || strings.Contains(pageRec.Body.String(), `href="/admin/savings"`) || strings.Contains(pageRec.Body.String(), `href="/admin/members"`) || strings.Contains(pageRec.Body.String(), `href="/admin/reports/balance"`) {
-		t.Fatalf("expected Bendahara to see only the cash workflow, got %s", pageRec.Body.String())
+	if !strings.Contains(pageRec.Body.String(), `href="/admin/journals"`) || strings.Contains(pageRec.Body.String(), `href="/admin/savings"`) || strings.Contains(pageRec.Body.String(), `href="/admin/members"`) || strings.Contains(pageRec.Body.String(), `href="/admin/reports/balance"`) {
+		t.Fatalf("expected Bendahara to see the transaction and journal workflows only, got %s", pageRec.Body.String())
+	}
+	journalReq := httptest.NewRequest(http.MethodGet, "/admin/journals", nil)
+	journalReq.Header.Set("Authorization", "Bearer "+bendaharaToken)
+	journalRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(journalRec, journalReq)
+	if journalRec.Code != http.StatusOK || !strings.Contains(journalRec.Body.String(), `name="line_coa_code"`) {
+		t.Fatalf("expected Bendahara to create Jurnal Umum vouchers, got %d: %s", journalRec.Code, journalRec.Body.String())
 	}
 
 	for _, path := range []string{"/api/admin/savings", "/admin/members"} {

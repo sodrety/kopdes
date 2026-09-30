@@ -63,7 +63,7 @@ func TestAdminTransactionsPageUsesServerSidePagination(t *testing.T) {
 	}
 
 	firstPage := requestPage("1")
-	if got := strings.Count(firstPage, `name="ids"`); got != 50 {
+	if got := strings.Count(firstPage, "Pagination row "); got != 50 {
 		t.Fatalf("expected first page to render 50 transaction rows, got %d", got)
 	}
 	if !strings.Contains(firstPage, "Page 1 / 2") || !strings.Contains(firstPage, "Pagination row 054") || strings.Contains(firstPage, "Pagination row 000") {
@@ -74,7 +74,7 @@ func TestAdminTransactionsPageUsesServerSidePagination(t *testing.T) {
 	}
 
 	secondPage := requestPage("2")
-	if got := strings.Count(secondPage, `name="ids"`); got != 5 {
+	if got := strings.Count(secondPage, "Pagination row "); got != 5 {
 		t.Fatalf("expected second page to render 5 transaction rows, got %d", got)
 	}
 	if !strings.Contains(secondPage, "Page 2 / 2") || !strings.Contains(secondPage, "Pagination row 000") {
