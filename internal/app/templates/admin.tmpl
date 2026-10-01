@@ -78,6 +78,49 @@
 {{template "admin-shell-end" .}}
 {{end}}
 
+{{define "admin-loan-disbursements"}}
+{{template "admin-shell-start" .}}
+  <section class="panel">
+    <h2>{{t .Lang "loan_disbursements"}}</h2>
+    <p class="field-help">{{t .Lang "loan_disbursements_description"}}</p>
+    {{if .LoanRequests}}
+{{template "table-open" .}}
+      <thead>
+        <tr>
+          <th>{{t $.Lang "member"}}</th>
+          <th>{{t $.Lang "approved_amount"}}</th>
+          <th>{{t $.Lang "duration"}}</th>
+          <th>{{t $.Lang "purpose"}}</th>
+          <th>{{t $.Lang "loan_disbursement_date"}}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .LoanRequests}}
+        <tr>
+          <td>{{template "member-table-cell" .}}</td>
+          <td>{{if gt .ProposedApprovedAmount 0}}{{nominal .ProposedApprovedAmount}}{{else}}{{nominal .RequestedAmount}}{{end}}</td>
+          <td>{{if gt .ProposedDurationMonths 0}}{{.ProposedDurationMonths}}{{else}}{{.DurationMonths}}{{end}} {{t $.Lang "months"}}</td>
+          <td>{{.Purpose}}</td>
+          <td>
+            <form method="post" action="/api/admin/loan-requests/{{.ID}}/disburse" hx-post="/api/admin/loan-requests/{{.ID}}/disburse" hx-target="#loan-disbursement-error" hx-swap="innerHTML">
+              <label>{{t $.Lang "loan_disbursement_date"}}
+                <input name="disbursement_date" type="date" max="{{$.CurrentDate}}" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "loan_disbursement_date"}}">
+              </label>
+              <button type="submit">{{t $.Lang "record_loan_disbursement"}}</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+{{template "table-close" .}}
+    {{else}}
+{{template "empty-state" (t .Lang "no_loans_waiting_disbursement")}}
+    {{end}}
+    {{template "form-error" (dict "ID" "loan-disbursement-error")}}
+  </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
 {{define "admin-loan-request-batch"}}
 {{template "admin-shell-start" .}}
       <section class="page-actions">

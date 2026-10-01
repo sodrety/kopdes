@@ -51,12 +51,12 @@ func (s *Server) memberLoanRequestDetailPage(c *gin.Context) {
 func (s *Server) loanRequestByMemberID(requestID, memberID string) (LoanRequest, error) {
 	var request LoanRequest
 	err := s.db.QueryRow(
-		`SELECT id, member_id, requested_amount, duration_months, purpose, status, loan_type, legacy_terms, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_admin_fee_policy,''), proposed_monthly_admin_fee, COALESCE(proposed_total_admin_fee,0), COALESCE(proposed_total_obligation,0), rejection_reason, created_at, updated_at
+		`SELECT id, member_id, requested_amount, duration_months, purpose, status, loan_type, legacy_terms, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_admin_fee_policy,''), proposed_monthly_admin_fee, COALESCE(proposed_total_admin_fee,0), COALESCE(proposed_total_obligation,0), COALESCE(disbursement_date,''), COALESCE(disbursed_by,''), COALESCE(CAST(disbursed_at AS TEXT),''), rejection_reason, created_at, updated_at
 		FROM loan_requests
 		WHERE id = $1 AND member_id = $2`,
 		requestID,
 		memberID,
-	).Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt)
+	).Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt)
 	if err == nil {
 		request.LatestDecision, err = latestApprovalDecision(s.db, "loan_request_approvals", request.ID)
 	}

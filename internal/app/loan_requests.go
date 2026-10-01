@@ -30,6 +30,9 @@ type LoanRequest struct {
 	ProposedCashCOACode     string            `json:"-"`
 	ProposedLoanCOACode     string            `json:"-"`
 	ProposedAdminFeeCOACode string            `json:"-"`
+	DisbursementDate        string            `json:"disbursement_date,omitempty"`
+	DisbursedBy             string            `json:"-"`
+	DisbursedAt             string            `json:"-"`
 	RejectionReason         string            `json:"rejection_reason,omitempty"`
 	LatestDecision          *ApprovalDecision `json:"latest_decision,omitempty"`
 	CreatedAt               string            `json:"created_at,omitempty"`
@@ -40,6 +43,7 @@ type AdminLoanRequest struct {
 	LoanRequest
 	MemberNo        string             `json:"member_no"`
 	FullName        string             `json:"full_name"`
+	MemberType      string             `json:"member_type"`
 	MaxLoanAmount   int64              `json:"max_loan_amount"`
 	ApprovalHistory []ApprovalDecision `json:"approval_history"`
 	CanDecide       bool               `json:"can_decide"`
@@ -60,17 +64,36 @@ type rejectLoanInput struct {
 	RejectionReason string `json:"rejection_reason" form:"rejection_reason"`
 }
 
-const maxLoanMultiplier int64 = 4
+const ketuaUtamaLoanApprovalThreshold int64 = 20_000_000
 
-func maxLoanAmountForSavingBalance(balance int64) int64 {
-	if balance <= 0 {
+func maxLoanAmountForMemberSavings(memberType string, wajibBalance, sukarelaBalance int64) int64 {
+	multiplier := int64(0)
+	switch memberType {
+	case "contract_worker":
+		multiplier = 2
+	case "employee":
+		multiplier = 4
+	case "daily_worker", "customer":
+		multiplier = 1
+	}
+	if multiplier == 0 {
 		return 0
 	}
+	if wajibBalance < 0 {
+		wajibBalance = 0
+	}
+	if sukarelaBalance < 0 {
+		sukarelaBalance = 0
+	}
 	const maxInt64Value int64 = 1<<63 - 1
-	if balance > maxInt64Value/maxLoanMultiplier {
+	if wajibBalance > maxInt64Value/multiplier {
 		return maxInt64Value
 	}
-	return balance * maxLoanMultiplier
+	wajibLimit := wajibBalance * multiplier
+	if sukarelaBalance > maxInt64Value-wajibLimit {
+		return maxInt64Value
+	}
+	return wajibLimit + sukarelaBalance
 }
 
 func (s *Server) submitLoanRequest(c *gin.Context) {
@@ -211,8 +234,8 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 	defer func() { _ = tx.Rollback() }()
 	// PostgreSQL serializes all outstanding/pending checks for this member.
 	// SQLite serializes writers and the in-process mutex avoids upgrade races.
-	var lockedMemberID, memberStatus, bankName, bankAccount string
-	if err := tx.QueryRow(`SELECT id,status,COALESCE(bank_name,''),COALESCE(bank_account,'') FROM members WHERE id = $1`+rowLockClause(s.db), member.ID).Scan(&lockedMemberID, &memberStatus, &bankName, &bankAccount); err != nil {
+	var lockedMemberID, memberStatus, memberType, bankName, bankAccount string
+	if err := tx.QueryRow(`SELECT id,status,member_type,COALESCE(bank_name,''),COALESCE(bank_account,'') FROM members WHERE id = $1`+rowLockClause(s.db), member.ID).Scan(&lockedMemberID, &memberStatus, &memberType, &bankName, &bankAccount); err != nil {
 		return LoanRequest{}, err
 	}
 	if memberStatus != "active" {
@@ -225,11 +248,11 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 	if err != nil {
 		return LoanRequest{}, err
 	}
-	if req.RequestedAmount > maxLoanAmountForSavingBalance(summary.CurrentBalance) {
+	if req.RequestedAmount > maxLoanAmountForMemberSavings(memberType, summary.WajibBalance, summary.SukarelaBalance) {
 		return LoanRequest{}, errLoanAmountLimitExceeded
 	}
 	var pendingID string
-	err = tx.QueryRow(`SELECT id FROM loan_requests WHERE member_id = $1 AND status = 'pending' LIMIT 1`, member.ID).Scan(&pendingID)
+	err = tx.QueryRow(`SELECT id FROM loan_requests WHERE member_id = $1 AND (status='pending' OR (status='approved' AND disbursement_date='')) LIMIT 1`, member.ID).Scan(&pendingID)
 	if err == nil {
 		return LoanRequest{}, errPendingLoanRequestExists
 	}
@@ -276,7 +299,7 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 
 func (s *Server) loanRequestsByMember(memberID string) ([]LoanRequest, error) {
 	rows, err := s.db.Query(
-		`SELECT id, member_id, requested_amount, duration_months, purpose, status, loan_type, legacy_terms, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_admin_fee_policy,''), proposed_monthly_admin_fee, COALESCE(proposed_total_admin_fee,0), COALESCE(proposed_total_obligation,0), rejection_reason, created_at, updated_at
+		`SELECT id, member_id, requested_amount, duration_months, purpose, status, loan_type, legacy_terms, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_admin_fee_policy,''), proposed_monthly_admin_fee, COALESCE(proposed_total_admin_fee,0), COALESCE(proposed_total_obligation,0), COALESCE(disbursement_date,''), COALESCE(disbursed_by,''), COALESCE(CAST(disbursed_at AS TEXT),''), rejection_reason, created_at, updated_at
 		FROM loan_requests
 		WHERE member_id = $1
 		ORDER BY created_at DESC`,
@@ -288,7 +311,7 @@ func (s *Server) loanRequestsByMember(memberID string) ([]LoanRequest, error) {
 	var requests []LoanRequest
 	for rows.Next() {
 		var request LoanRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt); err != nil {
 			return nil, err
 		}
 		requests = append(requests, request)
@@ -315,7 +338,7 @@ func (s *Server) loanRequestsForAdmin(status string) ([]AdminLoanRequest, error)
 
 func (s *Server) loanRequestsForAdminFiltered(status, source, batchID string) ([]AdminLoanRequest, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.loan_type, lr.legacy_terms, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_admin_fee_policy,''), lr.proposed_monthly_admin_fee, COALESCE(lr.proposed_total_admin_fee,0), COALESCE(lr.proposed_total_obligation,0), COALESCE(lr.proposed_cash_coa_code,''), COALESCE(lr.proposed_loan_coa_code,''), COALESCE(lr.proposed_admin_fee_coa_code,''), lr.rejection_reason, lr.created_at, lr.updated_at, COALESCE(lr.creation_source,'member'), COALESCE(lr.created_by,''), COALESCE(creator.full_name,creator.email,''), COALESCE(lr.batch_id,'')
+	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, m.member_type, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.loan_type, lr.legacy_terms, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_admin_fee_policy,''), lr.proposed_monthly_admin_fee, COALESCE(lr.proposed_total_admin_fee,0), COALESCE(lr.proposed_total_obligation,0), COALESCE(lr.proposed_cash_coa_code,''), COALESCE(lr.proposed_loan_coa_code,''), COALESCE(lr.proposed_admin_fee_coa_code,''), COALESCE(lr.disbursement_date,''), COALESCE(lr.disbursed_by,''), COALESCE(CAST(lr.disbursed_at AS TEXT),''), lr.rejection_reason, lr.created_at, lr.updated_at, COALESCE(lr.creation_source,'member'), COALESCE(lr.created_by,''), COALESCE(creator.full_name,creator.email,''), COALESCE(lr.batch_id,'')
 		FROM loan_requests lr
 		INNER JOIN members m ON m.id = lr.member_id
 		LEFT JOIN users creator ON creator.id = lr.created_by`
@@ -345,7 +368,7 @@ func (s *Server) loanRequestsForAdminFiltered(status, source, batchID string) ([
 	var requests []AdminLoanRequest
 	for rows.Next() {
 		var request AdminLoanRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.CreationSource, &request.CreatedByID, &request.CreatedByName, &request.BatchID); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.MemberType, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.CreationSource, &request.CreatedByID, &request.CreatedByName, &request.BatchID); err != nil {
 			return nil, err
 		}
 		requests = append(requests, request)
@@ -362,7 +385,7 @@ func (s *Server) loanRequestsForAdminFiltered(status, source, batchID string) ([
 		if summaryErr != nil {
 			return nil, summaryErr
 		}
-		requests[index].MaxLoanAmount = maxLoanAmountForSavingBalance(summary.CurrentBalance)
+		requests[index].MaxLoanAmount = maxLoanAmountForMemberSavings(requests[index].MemberType, summary.WajibBalance, summary.SukarelaBalance)
 		requests[index].ApprovalHistory, err = approvalHistoryWithOverrides(s.db, "loan_request_approvals", "loan", requests[index].ID, true)
 		if err != nil {
 			return nil, err
@@ -484,11 +507,11 @@ func (s *Server) cancelLoanRequestByID(requestID, memberID string) (LoanRequest,
 func (s *Server) loanRequestByID(id string) (LoanRequest, error) {
 	var request LoanRequest
 	err := s.db.QueryRow(
-		`SELECT id, member_id, requested_amount, duration_months, purpose, status, loan_type, legacy_terms, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_admin_fee_policy,''), proposed_monthly_admin_fee, COALESCE(proposed_total_admin_fee,0), COALESCE(proposed_total_obligation,0), rejection_reason, created_at, updated_at
+		`SELECT id, member_id, requested_amount, duration_months, purpose, status, loan_type, legacy_terms, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_admin_fee_policy,''), proposed_monthly_admin_fee, COALESCE(proposed_total_admin_fee,0), COALESCE(proposed_total_obligation,0), COALESCE(disbursement_date,''), COALESCE(disbursed_by,''), COALESCE(CAST(disbursed_at AS TEXT),''), rejection_reason, created_at, updated_at
 		FROM loan_requests
 		WHERE id = $1`,
 		id,
-	).Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt)
+	).Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt)
 	if err == nil {
 		request.LatestDecision, err = latestDecisionWithOverrides(s.db, "loan_request_approvals", "loan", request.ID)
 	}

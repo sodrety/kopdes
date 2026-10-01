@@ -301,15 +301,16 @@ func (s *Server) validateAdminLoanRow(tx *sql.Tx, row *adminLoanRequestRow, lock
 		return "", nil, nil
 	}
 	memberID := ""
+	memberType := ""
 	status := ""
 	bankName := ""
 	bankAccount := ""
-	if err := tx.QueryRow(`SELECT id,status,COALESCE(bank_name,''),COALESCE(bank_account,''),full_name FROM members WHERE member_no=$1`+func() string {
+	if err := tx.QueryRow(`SELECT id,status,member_type,COALESCE(bank_name,''),COALESCE(bank_account,''),full_name FROM members WHERE member_no=$1`+func() string {
 		if lock {
 			return rowLockClause(s.db)
 		}
 		return ""
-	}(), row.MemberNo).Scan(&memberID, &status, &bankName, &bankAccount, &row.FullName); errors.Is(err, sql.ErrNoRows) {
+	}(), row.MemberNo).Scan(&memberID, &status, &memberType, &bankName, &bankAccount, &row.FullName); errors.Is(err, sql.ErrNoRows) {
 		row.Errors = append(row.Errors, "admin_issue_member_not_found")
 		return "", nil, nil
 	} else if err != nil {
@@ -325,11 +326,11 @@ func (s *Server) validateAdminLoanRow(tx *sql.Tx, row *adminLoanRequestRow, lock
 	if err != nil {
 		return "", nil, err
 	}
-	if row.RequestedAmount > maxLoanAmountForSavingBalance(summary.CurrentBalance) {
+	if row.RequestedAmount > maxLoanAmountForMemberSavings(memberType, summary.WajibBalance, summary.SukarelaBalance) {
 		row.Errors = append(row.Errors, "admin_issue_amount_limit")
 	}
 	var pendingID string
-	if err := tx.QueryRow(`SELECT id FROM loan_requests WHERE member_id=$1 AND status='pending' LIMIT 1`, memberID).Scan(&pendingID); err == nil {
+	if err := tx.QueryRow(`SELECT id FROM loan_requests WHERE member_id=$1 AND (status='pending' OR (status='approved' AND disbursement_date='')) LIMIT 1`, memberID).Scan(&pendingID); err == nil {
 		row.Errors = append(row.Errors, "admin_issue_pending")
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return "", nil, err

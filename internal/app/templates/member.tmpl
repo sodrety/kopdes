@@ -134,7 +134,7 @@
         <div><span>{{t .Lang "loan_type"}}</span><strong>{{template "loan-type-label" (dict "Lang" .Lang "LoanType" .Request.LoanType "LegacyTerms" .Request.LegacyTerms)}}</strong></div>
         <div><span>{{t .Lang "requested_amount"}}</span><strong>Rp {{nominal .Request.RequestedAmount}}</strong></div>
         <div><span>{{t .Lang "duration"}}</span><strong>{{.Request.DurationMonths}} {{t .Lang "months"}}</strong></div>
-        <div><span>{{t .Lang "status"}}</span><strong>{{template "status-badge" (dict "Lang" .Lang "Status" .Request.Status)}}</strong></div>
+        <div><span>{{t .Lang "status"}}</span><strong>{{template "status-badge" (dict "Lang" .Lang "Status" .Request.Status)}}{{if eq .Request.Status "approved"}}<small>{{if .Request.DisbursementDate}}{{t .Lang "loan_disbursed_on"}} {{.Request.DisbursementDate}}{{else}}{{t .Lang "loan_waiting_for_disbursement"}}{{end}}</small>{{end}}</strong></div>
         <div><span>{{t .Lang "purpose"}}</span><strong>{{.Request.Purpose}}</strong></div>
         {{if .Request.RejectionReason}}<div><span>{{t .Lang "rejection_reason"}}</span><strong>{{.Request.RejectionReason}}</strong></div>{{end}}
       </div>
@@ -425,7 +425,7 @@
               <td>{{nominal .RequestedAmount}}</td>
               <td>{{template "loan-type-label" (dict "Lang" $.Lang "LoanType" .LoanType "LegacyTerms" .LegacyTerms)}}</td>
               <td>{{.DurationMonths}}</td>
-              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}{{if eq .Status "approved"}}<small>{{if .DisbursementDate}}{{t $.Lang "loan_disbursed_on"}} {{.DisbursementDate}}{{else}}{{t $.Lang "loan_waiting_for_disbursement"}}{{end}}</small>{{end}}</td>
               <td>{{.Purpose}}</td>
               <td><a class="button-link button-link-secondary" href="/member/loan-requests/{{.ID}}">{{t $.Lang "view_details"}}</a></td>
               <td>{{if .CurrentApprovalStage}}{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}{{end}}{{if .LatestDecision}}<div>{{t $.Lang (printf "role_%s" .LatestDecision.OfficerRole)}} — {{t $.Lang (printf "status_%s" .LatestDecision.Decision)}} — {{.LatestDecision.CreatedAt}}{{if .LatestDecision.Note}} · {{.LatestDecision.Note}}{{end}}{{if .LatestDecision.Reason}} · {{.LatestDecision.Reason}}{{end}}</div>{{end}}{{if eq .Status "pending"}}<form method="post" action="/api/member/loan-requests/{{.ID}}/cancel" hx-post="/api/member/loan-requests/{{.ID}}/cancel"><button class="button-secondary" type="submit">{{t $.Lang "cancel"}}</button></form>{{end}}</td>

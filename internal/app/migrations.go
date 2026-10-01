@@ -486,6 +486,18 @@ var migrations = []migration{
 			`CREATE TABLE accounting_backfill_runs (name TEXT PRIMARY KEY,completed_at TIMESTAMP NULL)`,
 		},
 	},
+	{
+		Version: 34,
+		Name:    "member_type_loan_limits_and_disbursement",
+		Statements: []string{
+			`ALTER TABLE loan_requests ADD COLUMN disbursement_date TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE loan_requests ADD COLUMN disbursed_by TEXT NULL REFERENCES users(id)`,
+			`ALTER TABLE loan_requests ADD COLUMN disbursed_at TIMESTAMP NULL`,
+			`UPDATE loan_requests SET disbursement_date=(SELECT start_date FROM loans WHERE loans.loan_request_id=loan_requests.id), disbursed_by=(SELECT approved_by FROM loans WHERE loans.loan_request_id=loan_requests.id), disbursed_at=(SELECT approved_at FROM loans WHERE loans.loan_request_id=loan_requests.id) WHERE EXISTS (SELECT 1 FROM loans WHERE loans.loan_request_id=loan_requests.id)`,
+			`DROP INDEX IF EXISTS idx_loan_requests_one_pending_per_member`,
+			`CREATE UNIQUE INDEX idx_loan_requests_one_pending_per_member ON loan_requests(member_id) WHERE status='pending' OR (status='approved' AND disbursement_date='')`,
+		},
+	},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -778,6 +790,14 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 	}
 	if migration.Version == 31 {
 		if err := relaxManualCashTransactionSourceProtection(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 34 {
+		if err := addMemberTypeLoanLimitIntegrity(tx, isSQLite); err != nil {
+			return err
+		}
+		if err := addLoanApprovalDisbursementIntegrity(tx, isSQLite); err != nil {
 			return err
 		}
 	}

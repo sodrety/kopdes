@@ -362,6 +362,24 @@ func (s *Server) adminLoanRequestsPage(c *gin.Context) {
 	}))
 }
 
+func (s *Server) adminLoanDisbursementsPage(c *gin.Context) {
+	requests, err := s.loanRequestsForAdminFiltered("approved", "", "")
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	waiting := make([]AdminLoanRequest, 0, len(requests))
+	for _, request := range requests {
+		if request.DisbursementDate == "" {
+			waiting = append(waiting, request)
+		}
+	}
+	renderPage(c, "admin-loan-disbursements", pageData(c, translate(languageFromRequest(c), "loan_disbursements"), "loan-disbursements", "loan_disbursements", "loan_disbursements_description", gin.H{
+		"LoanRequests": waiting,
+		"CurrentDate":  time.Now().In(jakartaLocation).Format("2006-01-02"),
+	}))
+}
+
 func (s *Server) adminLoansPage(c *gin.Context) {
 	loans, err := s.loansForAdmin("")
 	if err != nil {
@@ -548,7 +566,7 @@ func (s *Server) memberLoanRequestsPage(c *gin.Context) {
 		"LoanRequests":     requests,
 		"OutstandingLoans": outstanding,
 		"TotalOutstanding": total,
-		"MaxLoanAmount":    maxLoanAmountForSavingBalance(summary.CurrentBalance),
+		"MaxLoanAmount":    maxLoanAmountForMemberSavings(member.MemberType, summary.WajibBalance, summary.SukarelaBalance),
 		"BankDetailsReady": strings.TrimSpace(member.BankName) != "" && strings.TrimSpace(member.BankAccount) != "",
 		"ShellClass":       "member-loan-requests-shell",
 	}))

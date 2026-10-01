@@ -64,6 +64,13 @@ func nextLoanApprovalStage(stage string) string {
 	}
 }
 
+func nextLoanApprovalStageForAmount(stage string, approvedAmount int64) string {
+	if stage == approvalStageKetuaI && approvedAmount < ketuaUtamaLoanApprovalThreshold {
+		return ""
+	}
+	return nextLoanApprovalStage(stage)
+}
+
 func insertApprovalDecision(tx *sql.Tx, table, requestID string, officer User, decision, note, reason string) error {
 	if table != "loan_request_approvals" && table != "withdrawal_request_approvals" {
 		return fmt.Errorf("unsupported approval table %q", table)
@@ -236,6 +243,72 @@ func createMemberOutcomeNotification(tx *sql.Tx, requestType, requestID, memberI
 	}
 	for _, userID := range userIDs {
 		if _, err := tx.Exec(`INSERT INTO notifications (id,event_id,user_id,title_key,body_key,link,audience) VALUES ($1,$2,$3,$4,$5,$6,'member')`, newID(), eventID, userID, "notification_"+outcome+"_title", "notification_"+outcome+"_body", link); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func createLoanApprovalReadyNotification(tx *sql.Tx, requestID, memberID string) error {
+	eventID := newID()
+	if _, err := tx.Exec(`INSERT INTO notification_events (id,event_type,request_type,request_id,payload) VALUES ($1,'loan_approval_complete','loan',$2,'{}')`, eventID, requestID); err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT id FROM users WHERE member_id=$1 AND historical_identity=FALSE AND active=TRUE`, memberID)
+	if err != nil {
+		return err
+	}
+	var userIDs []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, userID := range userIDs {
+		if _, err := tx.Exec(`INSERT INTO notifications (id,event_id,user_id,title_key,body_key,link,audience) VALUES ($1,$2,$3,'notification_loan_waiting_disbursement_title','notification_loan_waiting_disbursement_body','/member/loan-requests','member')`, newID(), eventID, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func createLoanDisbursementReadyNotification(tx *sql.Tx, requestID string) error {
+	eventID := newID()
+	if _, err := tx.Exec(`INSERT INTO notification_events (id,event_type,request_type,request_id,payload) VALUES ($1,'loan_disbursement_ready','loan',$2,'{}')`, eventID, requestID); err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT u.id FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE WHERE oa.role='bendahara' AND oa.active=TRUE AND m.status='active' AND u.active=TRUE`)
+	if err != nil {
+		return err
+	}
+	var userIDs []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, userID := range userIDs {
+		if _, err := tx.Exec(`INSERT INTO notifications (id,event_id,user_id,title_key,body_key,link,audience) VALUES ($1,$2,$3,'notification_loan_disbursement_ready_title','notification_loan_disbursement_ready_body','/admin/loan-disbursements','officer')`, newID(), eventID, userID); err != nil {
 			return err
 		}
 	}

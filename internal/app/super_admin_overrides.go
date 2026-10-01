@@ -124,7 +124,7 @@ func (s *Server) overrideLoanRequest(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
 		return
 	}
-	respondOKOrHXRedirect(c, "/admin/loans", result)
+	respondOKOrHXRedirect(c, "/admin/loan-requests?status=approved", result)
 }
 
 func (s *Server) overrideLoanRejection(c *gin.Context) {
@@ -235,7 +235,6 @@ func (s *Server) overrideWithdrawalRejection(c *gin.Context) {
 }
 
 func (s *Server) overrideLoanRequestByID(requestID string, admin User, req approveLoanInput) (LoanApprovalResult, error) {
-	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 
@@ -260,8 +259,11 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 		ProposedMonthlyAdminFee *int64
 		ProposedTotalAdminFee   int64
 		ProposedTotalObligation int64
+		ProposedCashCOACode     string
+		ProposedLoanCOACode     string
+		ProposedAdminFeeCOACode string
 	}
-	err = tx.QueryRow(`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0) FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation)
+	err = tx.QueryRow(`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,'') FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
@@ -300,8 +302,8 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 		return LoanApprovalResult{}, errInvalidLoanApproval
 	}
 
-	var memberStatus string
-	if err := tx.QueryRow(`SELECT status FROM members WHERE id=$1`+rowLockClause(s.db), request.MemberID).Scan(&memberStatus); err != nil {
+	var memberStatus, memberType string
+	if err := tx.QueryRow(`SELECT status,member_type FROM members WHERE id=$1`+rowLockClause(s.db), request.MemberID).Scan(&memberStatus, &memberType); err != nil {
 		return LoanApprovalResult{}, err
 	}
 	if memberStatus != "active" {
@@ -311,7 +313,7 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 	if err != nil {
 		return LoanApprovalResult{}, err
 	}
-	if amount > maxLoanAmountForSavingBalance(summary.CurrentBalance) {
+	if amount > maxLoanAmountForMemberSavings(memberType, summary.WajibBalance, summary.SukarelaBalance) {
 		return LoanApprovalResult{}, errLoanAmountLimitExceeded
 	}
 	start, parseErr := parseLoanDate(startDate)
@@ -383,50 +385,42 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 	if err != nil {
 		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
 	}
-	loan := Loan{ID: newID(), LoanRequestID: requestID, MemberID: request.MemberID, LoanType: request.LoanType, ApprovedAmount: request.ProposedApprovedAmount, DurationMonths: request.ProposedDurationMonths, MonthlyInstallment: calc.Installments[0].ScheduledAmount, RemainingBalance: request.ProposedTotalObligation, StartDate: request.ProposedStartDate, AdminFeePolicy: request.ProposedAdminFeePolicy, MonthlyAdminFee: request.ProposedMonthlyAdminFee, TotalAdminFee: request.ProposedTotalAdminFee, TotalObligation: request.ProposedTotalObligation, NextDueDate: calc.Installments[0].DueDate, FinalDueDate: calc.Installments[len(calc.Installments)-1].DueDate, Status: "active", Source: source, COACode: strings.TrimSpace(req.COACode), ApprovedBy: admin.ID}
-	if _, err := tx.Exec(`UPDATE loan_requests SET status='approved',current_approval_stage=NULL,reviewed_by=$1,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='pending'`, admin.ID, requestID); err != nil {
+	cashCOACode := strings.TrimSpace(req.CashCOACode)
+	if cashCOACode == "" {
+		cashCOACode = request.ProposedCashCOACode
+	}
+	loanCOACode := strings.TrimSpace(req.COACode)
+	if loanCOACode == "" {
+		loanCOACode = request.ProposedLoanCOACode
+	}
+	adminFeeCOACode := strings.TrimSpace(req.AdminFeeCOACode)
+	if adminFeeCOACode == "" {
+		adminFeeCOACode = request.ProposedAdminFeeCOACode
+	}
+	result, err := tx.Exec(`UPDATE loan_requests SET status='approved',current_approval_stage=NULL,reviewed_by=$1,reviewed_at=CURRENT_TIMESTAMP,proposed_cash_coa_code=$2,proposed_loan_coa_code=$3,proposed_admin_fee_coa_code=$4,updated_at=CURRENT_TIMESTAMP WHERE id=$5 AND status='pending'`, admin.ID, cashCOACode, loanCOACode, adminFeeCOACode, requestID)
+	if err != nil {
 		return LoanApprovalResult{}, err
 	}
-	if _, err := tx.Exec(`INSERT INTO loans (id,loan_request_id,member_id,loan_type,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_by,source,coa_code,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`, loan.ID, loan.LoanRequestID, loan.MemberID, loan.LoanType, loan.ApprovedAmount, loan.DurationMonths, loan.MonthlyInstallment, loan.RemainingBalance, loan.ApprovedBy, loan.Source, nullIfEmpty(loan.COACode), loan.StartDate, loan.AdminFeePolicy, loan.MonthlyAdminFee, loan.TotalAdminFee, loan.TotalObligation, loan.NextDueDate, loan.FinalDueDate); err != nil {
-		return LoanApprovalResult{}, err
-	}
-	for _, installment := range calc.Installments {
-		if _, err := tx.Exec(`INSERT INTO loan_installments (id,loan_id,installment_no,due_date,scheduled_amount,paid_amount) VALUES ($1,$2,$3,$4,$5,0)`, newID(), loan.ID, installment.Number, installment.DueDate, installment.ScheduledAmount); err != nil {
-			return LoanApprovalResult{}, err
-		}
-	}
-	feeAmount := loan.TotalObligation - loan.ApprovedAmount
-	if feeAmount < 0 {
-		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
-	}
-	loanComponents := []accountingJournalComponent{
-		{Component: "loan_receivable", Side: accountingDirectionDebit, Amount: loan.TotalObligation},
-		{Component: "cash_bank", Side: accountingDirectionCredit, Amount: loan.ApprovedAmount},
-	}
-	if feeAmount > 0 {
-		loanComponents = append(loanComponents, accountingJournalComponent{Component: "admin_fee_income", Side: accountingDirectionCredit, Amount: feeAmount})
-	}
-	if err := s.createFinancialJournalTx(tx, accountingJournalInput{ReferenceNo: requestID, TransactionID: loan.ID, TransactionType: "loan", TransactionDate: loan.StartDate, Source: loan.Source, Amount: loan.TotalObligation, LoanType: loan.LoanType, Components: loanComponents, COAOverrides: map[string]string{"cash_bank": strings.TrimSpace(req.CashCOACode), "loan_receivable": loan.COACode, "admin_fee_income": strings.TrimSpace(req.AdminFeeCOACode)}, Description: "Pencairan pinjaman", RecordedBy: admin.ID}); err != nil {
-		return LoanApprovalResult{}, err
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return LoanApprovalResult{}, errLoanRequestNotPending
 	}
 	if err := resolveRequestNotifications(tx, "loan", requestID); err != nil {
 		return LoanApprovalResult{}, err
 	}
-	if err := createMemberOutcomeNotification(tx, "loan", requestID, request.MemberID, "approved", "/member/loan-requests"); err != nil {
+	if err := createLoanApprovalReadyNotification(tx, requestID, request.MemberID); err != nil {
+		return LoanApprovalResult{}, err
+	}
+	if err := createLoanDisbursementReadyNotification(tx, requestID); err != nil {
 		return LoanApprovalResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return LoanApprovalResult{}, err
-	}
-	createdLoan, err := s.loanByID(loan.ID)
-	if err != nil {
 		return LoanApprovalResult{}, err
 	}
 	updated, err := s.loanRequestByID(requestID)
 	if err != nil {
 		return LoanApprovalResult{}, err
 	}
-	return LoanApprovalResult{Request: updated, Loan: &createdLoan}, nil
+	return LoanApprovalResult{Request: updated}, nil
 }
 
 func (s *Server) rejectLoanRequestBySuperAdmin(requestID string, admin User, req rejectLoanInput) (LoanRequest, error) {
