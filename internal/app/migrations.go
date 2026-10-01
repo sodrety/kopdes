@@ -498,6 +498,10 @@ var migrations = []migration{
 			`CREATE UNIQUE INDEX idx_loan_requests_one_pending_per_member ON loan_requests(member_id) WHERE status='pending' OR (status='approved' AND disbursement_date='')`,
 		},
 	},
+	{
+		Version: 35,
+		Name:    "fix_bendahara_loan_disbursement_guard",
+	},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -798,6 +802,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 			return err
 		}
 		if err := addLoanApprovalDisbursementIntegrity(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 35 {
+		if err := fixBendaharaLoanDisbursementGuard(tx, isSQLite); err != nil {
 			return err
 		}
 	}

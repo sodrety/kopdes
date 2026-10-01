@@ -647,13 +647,6 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 	if err != nil {
 		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
 	}
-	var outstanding int64
-	if err := tx.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND status<>'cancelled' AND remaining_balance>0`, request.MemberID).Scan(&outstanding); err != nil {
-		return LoanApprovalResult{}, err
-	}
-	if outstanding > 0 {
-		return LoanApprovalResult{}, errOutstandingLoanBalance
-	}
 	var existingLoanID string
 	if err := tx.QueryRow(`SELECT id FROM loans WHERE loan_request_id=$1`, requestID).Scan(&existingLoanID); err == nil {
 		return LoanApprovalResult{}, errLoanRequestNotReadyForDisbursement

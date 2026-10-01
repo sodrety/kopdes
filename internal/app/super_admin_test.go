@@ -87,8 +87,23 @@ func TestSuperAdminCanOverrideLoanWithoutOfficerApprovals(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode override loan response: %v", err)
 	}
-	if response.Loan == nil || response.Loan.ID == "" {
-		t.Fatal("expected super admin override to create the loan")
+	if response.Loan != nil {
+		t.Fatal("super admin override must wait for Bendahara disbursement before creating a Loan")
+	}
+	var requestStatus string
+	var loanCount int
+	if err := fixture.db.QueryRow(`SELECT status FROM loan_requests WHERE id=$1`, requestID).Scan(&requestStatus); err != nil {
+		t.Fatalf("read overridden loan request: %v", err)
+	}
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loans WHERE loan_request_id=$1`, requestID).Scan(&loanCount); err != nil {
+		t.Fatalf("count loans before disbursement: %v", err)
+	}
+	if requestStatus != "approved" || loanCount != 0 {
+		t.Fatalf("expected approved request without Loan before disbursement, status=%q loans=%d", requestStatus, loanCount)
+	}
+	loan := fixture.disburseLoanRequest(t, requestID, startDate)
+	if loan.ID == "" {
+		t.Fatal("expected Bendahara disbursement to create the Loan")
 	}
 	var approvals, overrides, audits int
 	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id=$1`, requestID).Scan(&approvals); err != nil {

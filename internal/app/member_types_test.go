@@ -50,7 +50,7 @@ func TestMemberTypeMigrationBackfillsExistingMembers(t *testing.T) {
 		t.Fatalf("mark unrelated Loan Amount Limit migration applied: %v", err)
 	}
 
-	if err := app.Migrate(db); err != nil {
+	if err := app.MigrateTo(db, 22); err != nil {
 		t.Fatalf("apply Member Type migration: %v", err)
 	}
 	var memberType string

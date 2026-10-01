@@ -40,6 +40,7 @@ func TestGroupedRupiahBrowserFormsPersistExactAmounts(t *testing.T) {
 	if withdrawalResponse.Code != http.StatusSeeOther {
 		t.Fatalf("record grouped withdrawal: status=%d body=%s", withdrawalResponse.Code, withdrawalResponse.Body.String())
 	}
+	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "wajib", 1_000_000, "RUPIAH-WAJIB", "Loan capacity")
 	var withdrawalAmount int
 	if err := fixture.db.QueryRow(`SELECT amount FROM withdrawal_requests WHERE member_id=$1`, member.ID).Scan(&withdrawalAmount); err != nil || withdrawalAmount != 250000 {
 		t.Fatalf("withdrawal amount = %d, %v; want 250000", withdrawalAmount, err)

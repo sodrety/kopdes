@@ -117,6 +117,15 @@ func TestRegularLoanAdminFeeSQLiteRejectsWrongTierFormulaEvenWhenTotalsAreCohere
 	if _, err := db.Exec(`UPDATE loan_requests SET proposed_approved_amount=30000000,proposed_duration_months=24,proposed_start_date='2026-01-15',proposed_admin_fee_policy='regular_tiered_monthly_v1',proposed_monthly_admin_fee=325000,proposed_total_admin_fee=7800000,proposed_total_obligation=37800000 WHERE id='correct-tier'`); err != nil {
 		t.Fatalf("SQLite rejected exact Regular v1 formula: %v", err)
 	}
+	if _, err := db.Exec(`INSERT INTO members (id,member_no,full_name,join_date,status) VALUES ('member-bendahara','M-015-B','Bendahara','2026-01-01','active')`); err != nil {
+		t.Fatalf("seed Bendahara member for disbursement: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO users (id,email,password_hash,role,member_id,full_name,active,historical_identity) VALUES ('user-bendahara','bendahara@test.local','hash','member','member-bendahara','Bendahara',TRUE,FALSE)`); err != nil {
+		t.Fatalf("seed Bendahara for disbursement: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO officer_appointments (id,member_id,role,active) VALUES ('appointment-bendahara','member-bendahara','bendahara',TRUE)`); err != nil {
+		t.Fatalf("assign Bendahara for disbursement: %v", err)
+	}
 	for _, approval := range []struct {
 		id, stage string
 	}{
@@ -137,11 +146,14 @@ func TestRegularLoanAdminFeeSQLiteRejectsWrongTierFormulaEvenWhenTotalsAreCohere
 		case "ketua_i":
 			_, err = db.Exec(`UPDATE loan_requests SET current_approval_stage='ketua_utama' WHERE id='correct-tier'`)
 		case "ketua_utama":
-			_, err = db.Exec(`UPDATE loan_requests SET status='approved',current_approval_stage=NULL WHERE id='correct-tier'`)
+			_, err = db.Exec(`UPDATE loan_requests SET status='approved',current_approval_stage=NULL,reviewed_by='user-officer',reviewed_at=CURRENT_TIMESTAMP WHERE id='correct-tier'`)
 		}
 		if err != nil {
 			t.Fatalf("advance after %s approval: %v", approval.stage, err)
 		}
+	}
+	if _, err := db.Exec(`UPDATE loan_requests SET disbursement_date='2026-01-15',disbursed_by='user-bendahara',disbursed_at=CURRENT_TIMESTAMP WHERE id='correct-tier'`); err != nil {
+		t.Fatalf("mark the approved request as disbursed: %v", err)
 	}
 	loanSQL := `INSERT INTO loans (id,loan_request_id,member_id,loan_type,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_by,start_date,interest_rate_bps,total_interest,total_obligation,next_due_date,final_due_date,admin_fee_policy,monthly_admin_fee,total_admin_fee) VALUES ($1,'correct-tier','member-history','regular',30000000,24,$2,$3,'cancelled','user-officer','2026-01-15',100,$4,$5,'2026-02-15','2028-01-15','regular_tiered_monthly_v1',$6,$7)`
 	if _, err := db.Exec(loanSQL, "wrong-tier-loan", 1550000, 37200000, 7200000, 37200000, 300000, 7200000); err == nil {

@@ -66,6 +66,9 @@ func TestRegularLoanAdminFeePostgresMigrationBackfillsLegacyTotal(t *testing.T) 
 			t.Fatalf("loans.%s retained default %q", column, defaultValue)
 		}
 	}
+	if _, err := db.Exec(`INSERT INTO saving_records (id,member_id,type,category,amount,record_date,reference_no,note,recorded_by) VALUES ('pg-loan-limit-wajib','member-affected','deposit','wajib',50000000,'2026-07-15','PG-WAJIB','PostgreSQL loan capacity fixture','user-affected')`); err != nil {
+		t.Fatalf("seed Wajib loan capacity: %v", err)
+	}
 	insertPostgresPendingSnapshottedLoanRequest(t, db, "request-overflow", 200000000, 24, 2875000, 69000000, 269000000, "ketua_ii")
 	if _, err := db.Exec(`UPDATE loan_requests SET proposed_total_admin_fee=69000001 WHERE id='request-overflow'`); err == nil {
 		t.Fatal("PostgreSQL allowed direct mutation of a proposed fee snapshot")
@@ -368,7 +371,7 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 			if err := db.QueryRow(`SELECT id FROM users WHERE member_id=$1 AND historical_identity=FALSE`, id).Scan(&userID); err != nil {
 				t.Fatalf("find %s User for saving fixture: %v", role, err)
 			}
-			if _, err := db.Exec(`INSERT INTO saving_records (id,member_id,type,category,amount,record_date,reference_no,note,recorded_by) VALUES ('saving-pg-borrower',$1,'deposit','sukarela',50000000,'2026-07-15','','PostgreSQL loan capacity fixture',$2)`, id, userID); err != nil {
+			if _, err := db.Exec(`INSERT INTO saving_records (id,member_id,type,category,amount,record_date,reference_no,note,recorded_by) VALUES ('saving-pg-borrower',$1,'deposit','wajib',50000000,'2026-07-15','','PostgreSQL loan capacity fixture',$2)`, id, userID); err != nil {
 				t.Fatalf("seed %s savings: %v", role, err)
 			}
 		}
@@ -386,6 +389,7 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 	seedIdentity("pg-ketua-i", "PG-KI", "ketua-i-pg@coop.test", "ketua_i")
 	seedIdentity("pg-ketua-ii", "PG-KII", "ketua-ii-pg@coop.test", "ketua_ii")
 	seedIdentity("pg-ketua-utama", "PG-KU", "ketua-utama-pg@coop.test", "ketua_utama")
+	seedIdentity("pg-bendahara", "PG-BEND", "bendahara-pg@coop.test", "bendahara")
 	seedIdentity("pg-borrower", "PG-BORROWER", "borrower-pg@coop.test", "")
 
 	cfg := Config{JWTSecret: "0123456789abcdef0123456789abcdef"}
@@ -469,6 +473,12 @@ func TestPostgresRegularLoanApplicationEndToEndWithBIGINTObligation(t *testing.T
 	}
 	approveConcurrently("ketua-utama-pg@coop.test", `{}`)
 	assertRowCount(t, db, `SELECT COUNT(*) FROM loan_request_approvals WHERE request_id='`+requestID+`' AND stage='ketua_utama'`, 1)
+	assertRowCount(t, db, `SELECT COUNT(*) FROM loans WHERE loan_request_id='`+requestID+`'`, 0)
+	disbursement := url.Values{"disbursement_date": {startDate}}
+	disbursed := request(http.MethodPost, "/api/admin/loan-requests/"+requestID+"/disburse", login("bendahara-pg@coop.test"), "application/x-www-form-urlencoded", disbursement.Encode())
+	if disbursed.Code != http.StatusSeeOther {
+		t.Fatalf("PostgreSQL Bendahara disbursement: %d %s", disbursed.Code, disbursed.Body.String())
+	}
 	assertRowCount(t, db, `SELECT COUNT(*) FROM loans WHERE loan_request_id='`+requestID+`'`, 1)
 
 	var loanID, policy string

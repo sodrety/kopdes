@@ -3,12 +3,19 @@ package app
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 func addMemberTypeLoanLimitIntegrity(tx *sql.Tx, isSQLite bool) error {
-	statements := postgresMemberTypeLoanLimitStatements()
+	var statements []string
 	if isSQLite {
 		statements = sqliteMemberTypeLoanLimitStatements()
+	} else {
+		searchPath, err := postgresMigrationSearchPath(tx)
+		if err != nil {
+			return err
+		}
+		statements = postgresMemberTypeLoanLimitStatements(searchPath)
 	}
 	for index, statement := range statements {
 		if _, err := tx.Exec(statement); err != nil {
@@ -44,7 +51,16 @@ func sqliteMemberTypeLoanLimitStatements() []string {
 	}
 }
 
-func postgresMemberTypeLoanLimitStatements() []string {
+func postgresMigrationSearchPath(tx *sql.Tx) (string, error) {
+	var schema string
+	if err := tx.QueryRow(`SELECT current_schema()`).Scan(&schema); err != nil {
+		return "", fmt.Errorf("read PostgreSQL migration schema: %w", err)
+	}
+	quotedSchema := `"` + strings.ReplaceAll(schema, `"`, `""`) + `"`
+	return quotedSchema + ", pg_temp", nil
+}
+
+func postgresMemberTypeLoanLimitStatements(searchPath string) []string {
 	return []string{
 		`CREATE OR REPLACE VIEW member_loan_amount_limits AS
 			SELECT m.id AS member_id,
@@ -53,26 +69,26 @@ func postgresMemberTypeLoanLimitStatements() []string {
 					+ GREATEST(COALESCE(SUM(CASE WHEN sr.category='sukarela' AND sr.type='deposit' THEN sr.amount::NUMERIC WHEN sr.category='sukarela' AND sr.type='withdrawal' THEN -sr.amount::NUMERIC ELSE 0 END),0),0) AS loan_limit
 			FROM members m LEFT JOIN saving_records sr ON sr.member_id=m.id
 			GROUP BY m.id,m.member_type`,
-		`CREATE OR REPLACE FUNCTION validate_loan_request_amount_against_savings() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$ DECLARE member_loan_limit NUMERIC; BEGIN
+		fmt.Sprintf(`CREATE OR REPLACE FUNCTION validate_loan_request_amount_against_savings() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = %s AS $$ DECLARE member_loan_limit NUMERIC; BEGIN
 			IF NEW.legacy_terms=FALSE THEN
 				SELECT loan_limit INTO member_loan_limit FROM member_loan_amount_limits WHERE member_id=NEW.member_id;
 				IF NEW.requested_amount::NUMERIC>COALESCE(member_loan_limit,0) THEN RAISE EXCEPTION 'loan amount exceeds the member-type limit'; END IF;
 			END IF;
 			RETURN NEW;
-		END $$`,
-		`CREATE OR REPLACE FUNCTION validate_loan_proposed_amount_against_savings() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$ DECLARE member_loan_limit NUMERIC; BEGIN
+		END $$`, searchPath),
+		fmt.Sprintf(`CREATE OR REPLACE FUNCTION validate_loan_proposed_amount_against_savings() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = %s AS $$ DECLARE member_loan_limit NUMERIC; BEGIN
 			IF NEW.legacy_terms=FALSE AND NEW.proposed_approved_amount IS NOT NULL THEN
 				SELECT loan_limit INTO member_loan_limit FROM member_loan_amount_limits WHERE member_id=NEW.member_id;
 				IF NEW.proposed_approved_amount::NUMERIC>COALESCE(member_loan_limit,0) THEN RAISE EXCEPTION 'approved loan amount exceeds the member-type limit'; END IF;
 			END IF;
 			RETURN NEW;
-		END $$`,
-		`CREATE OR REPLACE FUNCTION validate_loan_approved_amount_against_savings() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$ DECLARE member_loan_limit NUMERIC; BEGIN
+		END $$`, searchPath),
+		fmt.Sprintf(`CREATE OR REPLACE FUNCTION validate_loan_approved_amount_against_savings() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = %s AS $$ DECLARE member_loan_limit NUMERIC; BEGIN
 			IF NEW.legacy_terms=FALSE THEN
 				SELECT loan_limit INTO member_loan_limit FROM member_loan_amount_limits WHERE member_id=NEW.member_id;
 				IF NEW.approved_amount::NUMERIC>COALESCE(member_loan_limit,0) THEN RAISE EXCEPTION 'approved loan amount exceeds the member-type limit'; END IF;
 			END IF;
 			RETURN NEW;
-		END $$`,
+		END $$`, searchPath),
 	}
 }

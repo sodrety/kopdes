@@ -60,18 +60,20 @@ func TestConcurrentLoanApprovalsCreateOneDecisionPerStageAndOneLoan(t *testing.T
 	assertCount(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id='`+requestID+`' AND stage='manager'`, 1)
 	assertCount(`SELECT COUNT(*) FROM loans WHERE loan_request_id='`+requestID+`'`, 0)
 
-	for _, credentials := range []struct{ email, password string }{{"ketua-ii@coop.test", "password"}, {"ketua-i@coop.test", "password"}} {
+	for _, credentials := range []struct{ email, password string }{{"ketua-ii@coop.test", "password"}} {
 		token := fixture.login(t, credentials.email, credentials.password)
 		if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", token, `{}`); response.Code != http.StatusOK {
 			t.Fatalf("advance to final stage: %d %s", response.Code, response.Body.String())
 		}
 	}
-	finalCodes := runConcurrent(fixture.login(t, "ketua-utama@coop.test", "password"), `{}`)
-	assertExactlyOneOK("ketua_utama", finalCodes)
-	assertCount(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id='`+requestID+`' AND stage='ketua_utama'`, 1)
-	assertCount(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id='`+requestID+`'`, 4)
-	assertCount(`SELECT COUNT(*) FROM loans WHERE loan_request_id='`+requestID+`'`, 1)
+	finalCodes := runConcurrent(fixture.login(t, "ketua-i@coop.test", "password"), `{}`)
+	assertExactlyOneOK("ketua_i", finalCodes)
+	assertCount(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id='`+requestID+`' AND stage='ketua_i'`, 1)
+	assertCount(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id='`+requestID+`'`, 3)
+	assertCount(`SELECT COUNT(*) FROM loans WHERE loan_request_id='`+requestID+`'`, 0)
 	assertCount(`SELECT COUNT(*) FROM loan_requests WHERE id='`+requestID+`' AND status='approved' AND current_approval_stage IS NULL`, 1)
+	fixture.disburseLoanRequest(t, requestID, time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02"))
+	assertCount(`SELECT COUNT(*) FROM loans WHERE loan_request_id='`+requestID+`'`, 1)
 }
 
 func TestManagerMayDecreaseLoanTermsAndLaterStagesCannotReplaceSnapshot(t *testing.T) {
@@ -93,11 +95,19 @@ func TestManagerMayDecreaseLoanTermsAndLaterStagesCannotReplaceSnapshot(t *testi
 	if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", ketuaIIToken, tamperingPayload); response.Code != http.StatusOK {
 		t.Fatalf("later-stage review payload: %d %s", response.Code, response.Body.String())
 	}
-	for _, credentials := range []struct{ email, password string }{{"ketua-i@coop.test", "password"}, {"ketua-utama@coop.test", "password"}} {
+	for _, credentials := range []struct{ email, password string }{{"ketua-i@coop.test", "password"}} {
 		if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", fixture.login(t, credentials.email, credentials.password), `{}`); response.Code != http.StatusOK {
 			t.Fatalf("complete approval: %d %s", response.Code, response.Body.String())
 		}
 	}
+	var loansBeforeDisbursement int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loans WHERE loan_request_id=$1`, requestID).Scan(&loansBeforeDisbursement); err != nil {
+		t.Fatalf("count loans before disbursement: %v", err)
+	}
+	if loansBeforeDisbursement != 0 {
+		t.Fatalf("expected no Loan before Bendahara disbursement, got %d", loansBeforeDisbursement)
+	}
+	fixture.disburseLoanRequest(t, requestID, startDate)
 
 	var amount, monthlyFee, totalFee, obligation int64
 	var duration int
@@ -115,7 +125,6 @@ func TestLoanApprovalRequiresEveryOfficerStageAndCreatesLoanOnlyAtFinalStage(t *
 	managerToken := fixture.login(t, "admin@coop.test", "password")
 	ketuaIToken := fixture.login(t, "ketua-i@coop.test", "password")
 	ketuaIIToken := fixture.login(t, "ketua-ii@coop.test", "password")
-	ketuaUtamaToken := fixture.login(t, "ketua-utama@coop.test", "password")
 	member := fixture.createMember(t, managerToken, `{"member_no":"HIER-001","full_name":"Hierarchy Member","join_date":"2026-07-01","status":"active"}`)
 	if _, err := fixture.db.Exec(`UPDATE users SET member_id=$1 WHERE id='member-user-id'`, member.ID); err != nil {
 		t.Fatalf("link member user: %v", err)
@@ -128,7 +137,8 @@ func TestLoanApprovalRequiresEveryOfficerStageAndCreatesLoanOnlyAtFinalStage(t *
 		t.Fatalf("expected wrong-stage approval status 403, got %d: %s", response.Code, response.Body.String())
 	}
 
-	managerBody := `{"approved_amount":900000,"duration_months":9,"start_date":"` + time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02") + `","note":"Terms verified"}`
+	startDate := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
+	managerBody := `{"approved_amount":900000,"duration_months":9,"start_date":"` + startDate + `","note":"Terms verified"}`
 	stages := []struct {
 		token     string
 		body      string
@@ -136,8 +146,7 @@ func TestLoanApprovalRequiresEveryOfficerStageAndCreatesLoanOnlyAtFinalStage(t *
 	}{
 		{managerToken, managerBody, "ketua_ii"},
 		{ketuaIIToken, `{"note":"Ketua II review"}`, "ketua_i"},
-		{ketuaIToken, `{}`, "ketua_utama"},
-		{ketuaUtamaToken, `{"note":"Externally completed"}`, ""},
+		{ketuaIToken, `{}`, ""},
 	}
 	for index, stage := range stages {
 		response = hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", stage.token, stage.body)
@@ -148,21 +157,22 @@ func TestLoanApprovalRequiresEveryOfficerStageAndCreatesLoanOnlyAtFinalStage(t *
 		if err := fixture.db.QueryRow(`SELECT status,COALESCE(current_approval_stage,'') FROM loan_requests WHERE id=$1`, requestID).Scan(&status, &currentStage); err != nil {
 			t.Fatalf("read loan request: %v", err)
 		}
-		if index < len(stages)-1 && (status != "pending" || currentStage != stage.nextStage) {
-			t.Fatalf("stage %d left request at status=%s stage=%s", index, status, currentStage)
+		if index < len(stages)-1 {
+			if status != "pending" || currentStage != stage.nextStage {
+				t.Fatalf("stage %d left request at status=%s stage=%s", index, status, currentStage)
+			}
+		} else if status != "approved" || currentStage != "" {
+			t.Fatalf("final approval should leave request ready for disbursement, got status=%s stage=%s", status, currentStage)
 		}
 		var loanCount int
 		if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loans WHERE loan_request_id=$1`, requestID).Scan(&loanCount); err != nil {
 			t.Fatalf("count loans: %v", err)
 		}
-		expected := 0
-		if index == len(stages)-1 {
-			expected = 1
-		}
-		if loanCount != expected {
-			t.Fatalf("stage %d expected %d loans, got %d", index, expected, loanCount)
+		if loanCount != 0 {
+			t.Fatalf("stage %d created a Loan before Bendahara disbursement", index)
 		}
 	}
+	fixture.disburseLoanRequest(t, requestID, startDate)
 
 	var decisions int
 	var approvedAmount, monthlyAdminFee, totalAdminFee int64
@@ -172,7 +182,7 @@ func TestLoanApprovalRequiresEveryOfficerStageAndCreatesLoanOnlyAtFinalStage(t *
 	if err := fixture.db.QueryRow(`SELECT approved_amount,monthly_admin_fee,total_admin_fee FROM loans WHERE loan_request_id=$1`, requestID).Scan(&approvedAmount, &monthlyAdminFee, &totalAdminFee); err != nil {
 		t.Fatalf("read final loan: %v", err)
 	}
-	if decisions != 4 || approvedAmount != 900_000 || monthlyAdminFee != 9_000 || totalAdminFee != 81_000 {
+	if decisions != 3 || approvedAmount != 900_000 || monthlyAdminFee != 9_000 || totalAdminFee != 81_000 {
 		t.Fatalf("unexpected final loan decisions=%d amount=%d monthly fee=%d total fee=%d", decisions, approvedAmount, monthlyAdminFee, totalAdminFee)
 	}
 }
@@ -344,7 +354,6 @@ func TestApprovalNotificationsMoveToNextRoleAndFinishWithMember(t *testing.T) {
 	stages := []string{
 		fixture.login(t, "ketua-ii@coop.test", "password"),
 		fixture.login(t, "ketua-i@coop.test", "password"),
-		fixture.login(t, "ketua-utama@coop.test", "password"),
 	}
 	for _, token := range stages {
 		if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", token, `{}`); response.Code != http.StatusOK {
@@ -357,7 +366,7 @@ func TestApprovalNotificationsMoveToNextRoleAndFinishWithMember(t *testing.T) {
 		t.Fatalf("count notification events: %v", err)
 	}
 	if events != 5 {
-		t.Fatalf("expected four stage events and one outcome event, got %d", events)
+		t.Fatalf("expected three approval events and two finalization events, got %d", events)
 	}
 }
 
@@ -432,6 +441,7 @@ func TestManagerChangedLoanTermsNotifyMember(t *testing.T) {
 	memberToken := fixture.login(t, "member@coop.test", "password")
 	requestID := fixture.createLoanRequest(t, memberToken, 500_000, 5)
 	fixture.recordDeposit(t, managerToken, member.ID, 25_000)
+	fixture.ensureLoanCapacityForRequest(t, managerToken, requestID, 600_000)
 
 	managerBody := `{"approved_amount":600000,"duration_months":5,"start_date":"` + time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02") + `"}`
 	if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, managerBody); response.Code != http.StatusOK {
