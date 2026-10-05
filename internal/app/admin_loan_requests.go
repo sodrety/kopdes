@@ -1047,7 +1047,7 @@ func (s *Server) cancelAdminLoanRequest(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "error_internal_server")
 		return
 	}
-	if source != "admin" || (actor.Role != "super_admin" && (actor.Role != "admin" || createdBy != actor.ID)) {
+	if source != "admin" || (actor.Role != "super_admin" && (!hasPermission(actor.Role, PermissionRequestsManage) || createdBy != actor.ID)) {
 		respondError(c, http.StatusForbidden, "FORBIDDEN", "error_admin_loan_cancel_forbidden")
 		return
 	}

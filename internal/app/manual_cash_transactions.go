@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -51,6 +52,18 @@ type manualCashJournalLineRequest struct {
 	Credit  int64  `json:"credit"`
 }
 
+type ManualCashTransactionDraftView struct {
+	ID              string
+	EntryType       string
+	CategoryID      string
+	TransactionDate string
+	ReferenceNo     string
+	Description     string
+	Note            string
+	RecordedBy      string
+	Lines           []manualCashJournalLineRequest
+}
+
 type cashTransactionCategoryRequest struct {
 	Direction     string `json:"direction" form:"direction"`
 	Name          string `json:"name" form:"name"`
@@ -81,6 +94,8 @@ var (
 	errCashTransactionCategoryParentNotFound  = errors.New("cash transaction category parent not found")
 	errCashTransactionCategoryParentDirection = errors.New("cash transaction category parent direction mismatch")
 	errCashTransactionCategoryCycle           = errors.New("cash transaction category parent cycle")
+	errManualCashTransactionDraftNotFound     = errors.New("manual cash transaction draft not found")
+	errManualCashTransactionDraftNotPending   = errors.New("manual cash transaction draft is no longer pending")
 )
 
 func normalizeCashTransactionCategoryName(value string) string {
@@ -132,6 +147,28 @@ func validateManualCashTransactionRequest(req manualCashTransactionRequest) erro
 }
 
 func (s *Server) recordManualCashTransaction(c *gin.Context) {
+	req, parseErr := manualCashTransactionRequestFromContext(c)
+	if parseErr != nil {
+		if errors.Is(parseErr, errInvalidRupiahAmountInput) {
+			invalidRupiahAmountResponse(c)
+		} else {
+			respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_manual_cash_transaction"))
+		}
+		return
+	}
+	user, ok := currentUser(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", translate(languageFromRequest(c), "error_authentication_required"))
+		return
+	}
+	entryType := manualCashEntryTypeFromPath(c.Request.URL.Path)
+	record, err := s.saveManualCashTransactionDraft(req, entryType, user.ID, "")
+	respondManualCashTransactionResult(c, entryType, record, err)
+}
+
+var errInvalidRupiahAmountInput = errors.New("invalid rupiah amount input")
+
+func manualCashTransactionRequestFromContext(c *gin.Context) (manualCashTransactionRequest, error) {
 	var req manualCashTransactionRequest
 	if isBrowserFormRequest(c) {
 		if err := c.Request.ParseForm(); err == nil {
@@ -158,27 +195,143 @@ func (s *Server) recordManualCashTransaction(c *gin.Context) {
 				if debitRaw != "" {
 					amount, err := parseRupiahAmount(debitRaw)
 					if err != nil {
-						invalidRupiahAmountResponse(c)
-						return
+						return req, errInvalidRupiahAmountInput
 					}
 					line.Debit = amount
 				}
 				if creditRaw != "" {
 					amount, err := parseRupiahAmount(creditRaw)
 					if err != nil {
-						invalidRupiahAmountResponse(c)
-						return
+						return req, errInvalidRupiahAmountInput
 					}
 					line.Credit = amount
 				}
 				req.Lines = append(req.Lines, line)
 			}
 		} else {
-			respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_manual_cash_transaction"))
-			return
+			return req, errInvalidManualCashTransaction
 		}
 	} else if err := c.ShouldBind(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_manual_cash_transaction"))
+		return req, errInvalidManualCashTransaction
+	}
+	return req, nil
+}
+
+func manualCashEntryTypeFromPath(path string) string {
+	if strings.Contains(path, "/journals") {
+		return "journal"
+	}
+	return "cash"
+}
+
+func (s *Server) saveManualCashTransactionDraft(req manualCashTransactionRequest, entryType, recordedBy, draftID string) (gin.H, error) {
+	if entryType != "cash" && entryType != "journal" {
+		return nil, errInvalidManualCashTransaction
+	}
+	req.CategoryID = strings.TrimSpace(req.CategoryID)
+	req.Description = normalizeCashTransactionCategoryName(req.Description)
+	req.RecordDate = strings.TrimSpace(req.RecordDate)
+	req.ReferenceNo = strings.TrimSpace(req.ReferenceNo)
+	req.Note = strings.TrimSpace(req.Note)
+	if err := validateManualCashTransactionRequest(req); err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	if draftID == "" {
+		draftID = newID()
+		if _, err := s.db.Exec(`INSERT INTO manual_cash_transaction_drafts (id,entry_type,payload,status,recorded_by) VALUES ($1,$2,$3,'pending',$4)`, draftID, entryType, string(payload), recordedBy); err != nil {
+			return nil, err
+		}
+		return gin.H{"id": draftID, "entry_type": entryType, "status": "pending"}, nil
+	}
+	result, err := s.db.Exec(`UPDATE manual_cash_transaction_drafts SET payload=$1,status='pending',approved_by=NULL,transaction_id=NULL,approved_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND entry_type=$3 AND status='pending'`, string(payload), draftID, entryType)
+	if err != nil {
+		return nil, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if updated == 0 {
+		var status string
+		err := s.db.QueryRow(`SELECT status FROM manual_cash_transaction_drafts WHERE id=$1 AND entry_type=$2`, draftID, entryType).Scan(&status)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errManualCashTransactionDraftNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		return nil, errManualCashTransactionDraftNotPending
+	}
+	return gin.H{"id": draftID, "entry_type": entryType, "status": "pending"}, nil
+}
+
+func (s *Server) manualCashTransactionDraftsForAdmin(entryType string) ([]ManualCashTransactionDraftView, error) {
+	rows, err := s.db.Query(`SELECT d.id,d.payload,COALESCE(NULLIF(u.full_name,''),u.email,'') FROM manual_cash_transaction_drafts d LEFT JOIN users u ON u.id=d.recorded_by WHERE d.entry_type=$1 AND d.status='pending' ORDER BY d.created_at,d.id`, entryType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	drafts := make([]ManualCashTransactionDraftView, 0)
+	for rows.Next() {
+		var draft ManualCashTransactionDraftView
+		var payload string
+		if err := rows.Scan(&draft.ID, &payload, &draft.RecordedBy); err != nil {
+			return nil, err
+		}
+		var req manualCashTransactionRequest
+		if err := json.Unmarshal([]byte(payload), &req); err != nil {
+			return nil, err
+		}
+		draft.EntryType = entryType
+		draft.CategoryID = req.CategoryID
+		draft.TransactionDate = req.RecordDate
+		draft.ReferenceNo = req.ReferenceNo
+		draft.Description = req.Description
+		draft.Note = req.Note
+		draft.Lines = req.Lines
+		drafts = append(drafts, draft)
+	}
+	return drafts, rows.Err()
+}
+
+func (s *Server) manualCashTransactionDraftForAdmin(draftID, entryType string) (ManualCashTransactionDraftView, error) {
+	var draft ManualCashTransactionDraftView
+	var payload string
+	err := s.db.QueryRow(`SELECT d.id,d.payload,COALESCE(NULLIF(u.full_name,''),u.email,'') FROM manual_cash_transaction_drafts d LEFT JOIN users u ON u.id=d.recorded_by WHERE d.id=$1 AND d.entry_type=$2 AND d.status='pending'`, draftID, entryType).Scan(&draft.ID, &payload, &draft.RecordedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ManualCashTransactionDraftView{}, errManualCashTransactionDraftNotFound
+	}
+	if err != nil {
+		return ManualCashTransactionDraftView{}, err
+	}
+	var req manualCashTransactionRequest
+	if err := json.Unmarshal([]byte(payload), &req); err != nil {
+		return ManualCashTransactionDraftView{}, err
+	}
+	draft.EntryType = entryType
+	draft.CategoryID = req.CategoryID
+	draft.TransactionDate = req.RecordDate
+	draft.ReferenceNo = req.ReferenceNo
+	draft.Description = req.Description
+	draft.Note = req.Note
+	draft.Lines = req.Lines
+	return draft, nil
+}
+
+func (s *Server) updateManualCashTransactionDraft(c *gin.Context) {
+	entryType := manualCashEntryTypeFromPath(c.Request.URL.Path)
+	draftID := strings.TrimSpace(c.Param("id"))
+	req, parseErr := manualCashTransactionRequestFromContext(c)
+	if parseErr != nil {
+		if errors.Is(parseErr, errInvalidRupiahAmountInput) {
+			invalidRupiahAmountResponse(c)
+		} else {
+			respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_manual_cash_transaction"))
+		}
 		return
 	}
 	user, ok := currentUser(c)
@@ -186,7 +339,63 @@ func (s *Server) recordManualCashTransaction(c *gin.Context) {
 		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", translate(languageFromRequest(c), "error_authentication_required"))
 		return
 	}
-	record, err := s.insertManualCashTransaction(req, user.ID)
+	_, err := s.saveManualCashTransactionDraft(req, entryType, user.ID, draftID)
+	respondManualCashTransactionResult(c, entryType, gin.H{"id": draftID, "status": "pending"}, err)
+}
+
+func (s *Server) approveManualCashTransactionDraft(c *gin.Context) {
+	entryType := manualCashEntryTypeFromPath(c.Request.URL.Path)
+	draftID := strings.TrimSpace(c.Param("id"))
+	user, ok := currentUser(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", translate(languageFromRequest(c), "error_authentication_required"))
+		return
+	}
+	s.financialMu.Lock()
+	defer s.financialMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	var payload, recordedBy, status string
+	query := `SELECT payload,recorded_by,status FROM manual_cash_transaction_drafts WHERE id=$1 AND entry_type=$2` + rowLockClause(s.db)
+	err = tx.QueryRow(query, draftID, entryType).Scan(&payload, &recordedBy, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondManualCashTransactionResult(c, entryType, nil, errManualCashTransactionDraftNotFound)
+		return
+	}
+	if err != nil {
+		respondManualCashTransactionResult(c, entryType, nil, err)
+		return
+	}
+	if status != "pending" {
+		respondManualCashTransactionResult(c, entryType, nil, errManualCashTransactionDraftNotPending)
+		return
+	}
+	var req manualCashTransactionRequest
+	if err := json.Unmarshal([]byte(payload), &req); err != nil {
+		respondManualCashTransactionResult(c, entryType, nil, err)
+		return
+	}
+	posted, err := s.insertManualCashTransactionTx(tx, req, recordedBy)
+	if err != nil {
+		respondManualCashTransactionResult(c, entryType, nil, err)
+		return
+	}
+	if _, err := tx.Exec(`UPDATE manual_cash_transaction_drafts SET status='approved',approved_by=$1,transaction_id=$2,approved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$3 AND status='pending'`, user.ID, posted["id"], draftID); err != nil {
+		respondManualCashTransactionResult(c, entryType, nil, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		respondManualCashTransactionResult(c, entryType, nil, err)
+		return
+	}
+	respondManualCashTransactionResult(c, entryType, posted, nil)
+}
+
+func respondManualCashTransactionResult(c *gin.Context, entryType string, record gin.H, err error) {
 	switch {
 	case errors.Is(err, errInvalidManualCashTransaction):
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_manual_cash_transaction"))
@@ -208,14 +417,41 @@ func (s *Server) recordManualCashTransaction(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_invalid_transaction_coa"))
 	case isUniqueViolation(err):
 		respondError(c, http.StatusConflict, "DUPLICATE_DATA", translate(languageFromRequest(c), "error_cash_transaction_reference_exists"))
+	case errors.Is(err, errManualCashTransactionDraftNotFound):
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_manual_cash_draft_not_found"))
+	case errors.Is(err, errManualCashTransactionDraftNotPending):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_manual_cash_draft_not_pending"))
 	case err != nil:
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 	default:
-		respondCreatedOrHXRedirect(c, "/admin/transactions", record)
+		redirect := "/admin/transactions"
+		if entryType == "journal" {
+			redirect = "/admin/journals?view=journal"
+		}
+		respondCreatedOrHXRedirect(c, redirect, record)
 	}
 }
 
 func (s *Server) insertManualCashTransaction(req manualCashTransactionRequest, recordedBy string) (gin.H, error) {
+	s.financialMu.Lock()
+	defer s.financialMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	record, err := s.insertManualCashTransactionTx(tx, req, recordedBy)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return record, nil
+}
+
+func (s *Server) insertManualCashTransactionTx(tx *sql.Tx, req manualCashTransactionRequest, recordedBy string) (gin.H, error) {
+	var err error
 	req.CategoryID = strings.TrimSpace(req.CategoryID)
 	req.Description = normalizeCashTransactionCategoryName(req.Description)
 	req.RecordDate = strings.TrimSpace(req.RecordDate)
@@ -230,15 +466,6 @@ func (s *Server) insertManualCashTransaction(req manualCashTransactionRequest, r
 	if err := validateManualCashTransactionRequest(req); err != nil {
 		return nil, err
 	}
-
-	s.financialMu.Lock()
-	defer s.financialMu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	var totalDebits, totalCredits, cashBankDebits, cashBankCredits int64
 	journalLines := make([]accountingJournalLineInput, 0, len(req.Lines))
@@ -327,9 +554,6 @@ func (s *Server) insertManualCashTransaction(req manualCashTransactionRequest, r
 		Source: source, Amount: totalDebits, Lines: journalLines,
 		Description: req.Description, RecordedBy: recordedBy,
 	}); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return gin.H{"id": id, "transaction_date": req.RecordDate, "direction": accountingDirection, "category_id": req.CategoryID, "category": categoryName, "description": req.Description, "amount": amount, "reference_no": req.ReferenceNo, "note": req.Note, "recorded_by": recordedBy}, nil

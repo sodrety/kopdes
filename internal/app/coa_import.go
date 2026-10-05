@@ -33,6 +33,16 @@ type COAImportResult struct {
 	Rows    []coaImportRow `json:"rows"`
 }
 
+type COAImportBatchSummary struct {
+	ID         string
+	FileName   string
+	Status     string
+	UploadedBy string
+	CreatedAt  string
+	Valid      int
+	Invalid    int
+}
+
 var errInvalidCOAImport = errors.New("invalid coa import")
 
 func parseCOABoolean(value string, defaultValue bool) (bool, error) {
@@ -216,6 +226,10 @@ func (s *Server) importCOADraft(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
+	if wantsBrowserResponse(c) {
+		c.Redirect(http.StatusSeeOther, "/admin/coa/import/"+batchID)
+		return
+	}
 	if result.Invalid > 0 {
 		c.JSON(http.StatusUnprocessableEntity, result)
 		return
@@ -350,30 +364,40 @@ func (s *Server) activateCOADraft(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
+	if wantsBrowserResponse(c) {
+		c.Redirect(http.StatusSeeOther, "/admin/coa")
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"batch_id": batchID, "status": "activated"})
 }
 
 func (s *Server) coaImportBatch(c *gin.Context) {
 	batchID := strings.TrimSpace(c.Param("id"))
-	var result COAImportResult
-	if err := s.db.QueryRow(`SELECT id,status FROM coa_import_batches WHERE id=$1`, batchID).Scan(&result.BatchID, &result.Status); errors.Is(err, sql.ErrNoRows) {
+	result, err := s.coaImportResultForAdmin(batchID)
+	if errors.Is(err, sql.ErrNoRows) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_coa_import_not_found"))
 		return
 	} else if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) coaImportResultForAdmin(batchID string) (COAImportResult, error) {
+	var result COAImportResult
+	if err := s.db.QueryRow(`SELECT id,status FROM coa_import_batches WHERE id=$1`, batchID).Scan(&result.BatchID, &result.Status); err != nil {
+		return COAImportResult{}, err
+	}
 	rows, err := s.db.Query(`SELECT excel_row,code,name,parent_code,account_type,subtype,normal_balance,is_group,active,status,error_message FROM coa_import_rows WHERE batch_id=$1 ORDER BY excel_row`, batchID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
-		return
+		return COAImportResult{}, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var item coaImportRow
 		if err := rows.Scan(&item.ExcelRow, &item.Code, &item.Name, &item.ParentCode, &item.AccountType, &item.Subtype, &item.NormalBalance, &item.IsGroup, &item.Active, &item.Status, &item.ErrorMessage); err != nil {
-			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
-			return
+			return COAImportResult{}, err
 		}
 		result.Rows = append(result.Rows, item)
 		if item.Status == "valid" {
@@ -383,8 +407,36 @@ func (s *Server) coaImportBatch(c *gin.Context) {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
-		return
+		return COAImportResult{}, err
 	}
-	c.JSON(http.StatusOK, result)
+	return result, nil
+}
+
+func (s *Server) coaImportBatchesForAdmin() ([]COAImportBatchSummary, error) {
+	rows, err := s.db.Query(`SELECT b.id,b.file_name,b.status,COALESCE(NULLIF(u.full_name,''),u.email,''),CAST(b.created_at AS TEXT),
+		COALESCE(SUM(CASE WHEN r.status='valid' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN r.status<>'valid' THEN 1 ELSE 0 END),0)
+		FROM coa_import_batches b LEFT JOIN users u ON u.id=b.uploaded_by LEFT JOIN coa_import_rows r ON r.batch_id=b.id
+		GROUP BY b.id,u.full_name,u.email ORDER BY b.created_at DESC,b.id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	batches := make([]COAImportBatchSummary, 0)
+	for rows.Next() {
+		var batch COAImportBatchSummary
+		if err := rows.Scan(&batch.ID, &batch.FileName, &batch.Status, &batch.UploadedBy, &batch.CreatedAt, &batch.Valid, &batch.Invalid); err != nil {
+			return nil, err
+		}
+		batches = append(batches, batch)
+	}
+	return batches, rows.Err()
+}
+
+func (s *Server) coaImportBatchSummaryForAdmin(batchID string) (COAImportBatchSummary, error) {
+	var batch COAImportBatchSummary
+	err := s.db.QueryRow(`SELECT b.id,b.file_name,b.status,COALESCE(NULLIF(u.full_name,''),u.email,''),CAST(b.created_at AS TEXT),
+		(SELECT COUNT(*) FROM coa_import_rows r WHERE r.batch_id=b.id AND r.status='valid'),
+		(SELECT COUNT(*) FROM coa_import_rows r WHERE r.batch_id=b.id AND r.status<>'valid')
+		FROM coa_import_batches b LEFT JOIN users u ON u.id=b.uploaded_by WHERE b.id=$1`, batchID).Scan(&batch.ID, &batch.FileName, &batch.Status, &batch.UploadedBy, &batch.CreatedAt, &batch.Valid, &batch.Invalid)
+	return batch, err
 }

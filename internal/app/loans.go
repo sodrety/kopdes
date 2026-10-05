@@ -559,7 +559,7 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 }
 
 func (s *Server) disburseLoanRequestByID(requestID string, officer User, disbursementDate, description string) (LoanApprovalResult, error) {
-	if officer.Role != "bendahara" {
+	if !hasPermission(officer.Role, PermissionLoansManage) {
 		return LoanApprovalResult{}, errWrongApprovalStage
 	}
 	dateText := strings.TrimSpace(disbursementDate)

@@ -17,20 +17,32 @@ const (
 	PermissionSavingsView                 Permission = "savings.view"
 	PermissionSavingsRecord               Permission = "savings.record"
 	PermissionRequestsView                Permission = "requests.view"
+	PermissionRequestsManage              Permission = "requests.manage"
+	PermissionWithdrawalRequestsManage    Permission = "withdrawal_requests.manage"
 	PermissionRequestsDecide              Permission = "requests.decide"
 	PermissionRequestsOverride            Permission = "requests.override"
 	PermissionLoansView                   Permission = "loans.view"
+	PermissionLoansManage                 Permission = "loans.manage"
 	PermissionLoanReportsGenerate         Permission = "loan_reports.generate"
 	PermissionRepaymentsView              Permission = "repayments.view"
 	PermissionRepaymentsRecord            Permission = "repayments.record"
 	PermissionTransactionsView            Permission = "transactions.view"
 	PermissionTransactionsRecord          Permission = "transactions.record"
+	PermissionTransactionsApprove         Permission = "transactions.approve"
+	PermissionJournalsView                Permission = "journals.view"
+	PermissionJournalsManage              Permission = "journals.manage"
+	PermissionJournalsApprove             Permission = "journals.approve"
 	PermissionTransactionSourceEdit       Permission = "transaction_source.edit"
 	PermissionTransactionCategoriesManage Permission = "transaction_categories.manage"
+	PermissionCOAView                     Permission = "coa.view"
 	PermissionCOAManage                   Permission = "coa.manage"
-	PermissionAccountingMappingsManage  Permission = "accounting_mappings.manage"
-	PermissionAccountingCOAOverride     Permission = "accounting_coa.override"
+	PermissionCOAApprove                  Permission = "coa.approve"
+	PermissionAccountingMappingsManage    Permission = "accounting_mappings.manage"
+	PermissionAccountingCOAOverride       Permission = "accounting_coa.override"
 	PermissionOfficersManage              Permission = "officers.manage"
+	PermissionTagihanView                 Permission = "tagihan.view"
+	PermissionTagihanManage               Permission = "tagihan.manage"
+	PermissionSettingsManage              Permission = "settings.manage"
 	PermissionNotificationsView           Permission = "notifications.view"
 )
 
@@ -39,39 +51,48 @@ var officerPermissions = map[string]map[Permission]bool{
 		PermissionDashboardView: true, PermissionReportsView: true,
 		PermissionMembersView: true, PermissionMembersManage: true, PermissionMemberAccountsManage: true,
 		PermissionSavingsView: true, PermissionSavingsRecord: true,
-		PermissionRequestsView: true, PermissionRequestsDecide: true,
-		PermissionLoansView: true, PermissionLoanReportsGenerate: true, PermissionRepaymentsView: true,
-		PermissionRepaymentsRecord: true, PermissionOfficersManage: true,
-		PermissionTransactionsView: true, PermissionTransactionSourceEdit: true,
-		PermissionCOAManage:         true,
+		PermissionRequestsView: true, PermissionRequestsManage: true, PermissionWithdrawalRequestsManage: true,
+		PermissionLoansView: true, PermissionLoansManage: true, PermissionLoanReportsGenerate: true,
+		PermissionRepaymentsView: true, PermissionRepaymentsRecord: true, PermissionOfficersManage: true,
+		PermissionTransactionsView:         true,
 		PermissionAccountingMappingsManage: true, PermissionAccountingCOAOverride: true,
+		PermissionTransactionCategoriesManage: true, PermissionTagihanView: true, PermissionTagihanManage: true, PermissionSettingsManage: true,
 		PermissionNotificationsView: true,
 	},
 	"manager": {
 		PermissionDashboardView: true, PermissionReportsView: true,
-		PermissionMembersView: true, PermissionMembersManage: true, PermissionMemberAccountsManage: true,
+		PermissionMembersView: true, PermissionMembersManage: true,
 		PermissionSavingsView: true, PermissionSavingsRecord: true,
-		PermissionRequestsView: true, PermissionRequestsDecide: true,
-		PermissionLoansView: true, PermissionLoanReportsGenerate: true, PermissionRepaymentsView: true,
+		PermissionRequestsView: true, PermissionRequestsManage: true, PermissionWithdrawalRequestsManage: true, PermissionRequestsDecide: true,
+		PermissionLoansView: true, PermissionLoansManage: true, PermissionLoanReportsGenerate: true, PermissionRepaymentsView: true,
 		PermissionRepaymentsRecord: true, PermissionNotificationsView: true,
 		PermissionTransactionsView: true, PermissionTransactionsRecord: true,
-		PermissionTransactionCategoriesManage: true,
-		PermissionAccountingMappingsManage: true, PermissionAccountingCOAOverride: true,
+		PermissionJournalsView: true, PermissionCOAView: true, PermissionTagihanView: true, PermissionTagihanManage: true,
+		PermissionAccountingCOAOverride: true,
 	},
 	"bendahara": {
-		PermissionLoansView: true, PermissionLoanReportsGenerate: true,
+		PermissionDashboardView: true, PermissionReportsView: true,
+		PermissionMembersView: true, PermissionMembersManage: true,
+		PermissionSavingsView: true, PermissionSavingsRecord: true,
+		PermissionRequestsView: true, PermissionWithdrawalRequestsManage: true,
+		PermissionLoansView: true, PermissionLoansManage: true, PermissionLoanReportsGenerate: true,
+		PermissionRepaymentsView: true, PermissionRepaymentsRecord: true, PermissionTagihanView: true, PermissionTagihanManage: true,
 		PermissionTransactionsView: true, PermissionTransactionsRecord: true,
-		PermissionTransactionSourceEdit:       true,
-		PermissionTransactionCategoriesManage: true,
+		PermissionTransactionSourceEdit: true, PermissionJournalsView: true, PermissionJournalsManage: true,
+		PermissionCOAView: true, PermissionCOAManage: true,
 	},
-	"ketua_i":  officerOversightPermissions(),
-	"ketua_ii": officerOversightPermissions(),
-	"ketua_utama": func() map[Permission]bool {
+	"ketua_i": func() map[Permission]bool {
 		permissions := officerOversightPermissions()
-		permissions[PermissionOfficersManage] = true
-		permissions[PermissionMemberAccountsManage] = true
+		permissions[PermissionTransactionsRecord] = true
+		permissions[PermissionTransactionsApprove] = true
+		permissions[PermissionJournalsManage] = true
+		permissions[PermissionJournalsApprove] = true
+		permissions[PermissionCOAManage] = true
+		permissions[PermissionCOAApprove] = true
 		return permissions
 	}(),
+	"ketua_ii":    officerOversightPermissions(),
+	"ketua_utama": officerOversightPermissions(),
 }
 
 var allPermissions = []Permission{
@@ -83,30 +104,42 @@ var allPermissions = []Permission{
 	PermissionSavingsView,
 	PermissionSavingsRecord,
 	PermissionRequestsView,
+	PermissionRequestsManage,
+	PermissionWithdrawalRequestsManage,
 	PermissionRequestsDecide,
 	PermissionRequestsOverride,
 	PermissionLoansView,
+	PermissionLoansManage,
 	PermissionLoanReportsGenerate,
 	PermissionRepaymentsView,
 	PermissionRepaymentsRecord,
 	PermissionTransactionsView,
 	PermissionTransactionsRecord,
+	PermissionTransactionsApprove,
+	PermissionJournalsView,
+	PermissionJournalsManage,
+	PermissionJournalsApprove,
 	PermissionTransactionSourceEdit,
 	PermissionTransactionCategoriesManage,
+	PermissionCOAView,
 	PermissionCOAManage,
+	PermissionCOAApprove,
 	PermissionAccountingMappingsManage,
 	PermissionAccountingCOAOverride,
 	PermissionOfficersManage,
+	PermissionTagihanView,
+	PermissionTagihanManage,
+	PermissionSettingsManage,
 	PermissionNotificationsView,
 }
 
 func officerOversightPermissions() map[Permission]bool {
 	return map[Permission]bool{
 		PermissionDashboardView: true, PermissionReportsView: true,
-		PermissionMembersView: true, PermissionSavingsView: true,
+		PermissionMembersView: true, PermissionSavingsView: true, PermissionTagihanView: true,
 		PermissionRequestsView: true, PermissionRequestsDecide: true,
 		PermissionLoansView: true, PermissionRepaymentsView: true,
-		PermissionTransactionsView:  true,
+		PermissionTransactionsView: true, PermissionJournalsView: true, PermissionCOAView: true,
 		PermissionNotificationsView: true,
 	}
 }

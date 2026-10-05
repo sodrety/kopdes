@@ -117,7 +117,34 @@ func (s *Server) adminJournalsPage(c *gin.Context) {
 		data["Entries"] = entries
 	}
 	current, _ := currentUser(c)
-	data["CanRecord"] = hasPermission(current.Role, PermissionTransactionsRecord)
+	data["CanRecord"] = hasPermission(current.Role, PermissionJournalsManage)
+	data["CanApprove"] = hasPermission(current.Role, PermissionJournalsApprove)
+	data["JournalFormLines"] = []manualCashJournalLineRequest{{}, {}}
+	drafts, err := s.manualCashTransactionDraftsForAdmin("journal")
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	data["JournalDrafts"] = drafts
+	draftID := strings.TrimSpace(c.Query("draft"))
+	if draftID != "" && view == "journal" {
+		if !hasPermission(current.Role, PermissionJournalsManage) {
+			respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_manual_cash_draft_not_found"))
+			return
+		}
+		draft, err := s.manualCashTransactionDraftForAdmin(draftID, "journal")
+		if err != nil {
+			respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_manual_cash_draft_not_found"))
+			return
+		}
+		lines := draft.Lines
+		if len(lines) < 2 {
+			lines = append(lines, manualCashJournalLineRequest{})
+		}
+		data["JournalEditDraft"] = draft
+		data["JournalDraftID"] = draft.ID
+		data["JournalFormLines"] = lines
+	}
 	renderPage(c, "admin-journals", pageData(c, translate(languageFromRequest(c), "journals_page_title"), "journals", "journals", "journals_page_description", data))
 }
 

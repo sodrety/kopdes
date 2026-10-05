@@ -275,9 +275,6 @@ func (s *Server) insertOfficer(actor User, req createOfficerInput) (Officer, err
 	if memberID == "" || !validOfficerRole(role) {
 		return Officer{}, errInvalidOfficer
 	}
-	if role == "admin" && actor.Role != "super_admin" {
-		return Officer{}, errAdminRoleSuperAdminOnly
-	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Officer{}, err
@@ -343,9 +340,6 @@ func (s *Server) updateOfficerByID(actor User, id string, req updateOfficerInput
 	if !validOfficerRole(role) || req.Active == nil {
 		return Officer{}, errInvalidOfficer
 	}
-	if role == "admin" && actor.Role != "super_admin" {
-		return Officer{}, errAdminRoleSuperAdminOnly
-	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Officer{}, err
@@ -360,9 +354,6 @@ func (s *Server) updateOfficerByID(actor User, id string, req updateOfficerInput
 	}
 	if err != nil {
 		return Officer{}, err
-	}
-	if current.Role == "admin" && actor.Role != "super_admin" {
-		return Officer{}, errAdminRoleSuperAdminOnly
 	}
 	var memberStatus string
 	if err := tx.QueryRow(`SELECT status FROM members WHERE id=$1`, current.MemberID).Scan(&memberStatus); err != nil {

@@ -339,6 +339,7 @@
 
 {{define "admin-coa"}}
 {{template "admin-shell-start" .}}
+      {{if index .Permissions "coa.manage"}}
       <section class="panel">
         <h2>{{t .Lang "coa_import_draft"}}</h2>
         <p class="field-help">{{t .Lang "coa_import_description"}}</p>
@@ -346,6 +347,49 @@
           <label>{{t .Lang "xlsx_file"}} <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></label>
           <button type="submit">{{t .Lang "upload_coa_draft"}}</button>
         </form>
+      </section>
+      {{end}}
+      <section class="panel">
+        <h2>{{t .Lang "coa_import_batches"}}</h2>
+        {{if .COABatches}}
+{{template "table-open" .}}
+          <thead><tr><th>{{t $.Lang "file_name"}}</th><th>{{t $.Lang "submitted_by"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "valid_rows"}}</th><th>{{t $.Lang "invalid_rows"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
+          <tbody>{{range .COABatches}}<tr><td>{{.FileName}}</td><td>{{.UploadedBy}}</td><td>{{t $.Lang (printf "coa_import_status_%s" .Status)}}</td><td>{{.Valid}}</td><td>{{.Invalid}}</td><td><a class="button-link button-link-secondary" href="/admin/coa/import/{{.ID}}">{{t $.Lang "view_details"}}</a></td></tr>{{end}}</tbody>
+{{template "table-close" .}}
+        {{else}}{{template "empty-state" (t .Lang "no_coa_import_batches")}}{{end}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "coa_management"}}</h2>
+        {{if .COAAccounts}}
+{{template "table-open" .}}
+          <thead><tr><th>{{t $.Lang "account_code"}}</th><th>{{t $.Lang "account_name"}}</th><th>{{t $.Lang "account_type"}}</th><th>{{t $.Lang "normal_balance"}}</th><th>{{t $.Lang "status"}}</th></tr></thead>
+          <tbody>{{range .COAAccounts}}<tr><td>{{.Code}}</td><td>{{.Name}}</td><td>{{t $.Lang (printf "account_type_%s" .AccountType)}}</td><td>{{.NormalBalance}}</td><td>{{if .Active}}{{t $.Lang "active"}}{{else}}{{t $.Lang "inactive"}}{{end}}</td></tr>{{end}}</tbody>
+{{template "table-close" .}}
+        {{else}}{{template "empty-state" (t .Lang "no_coa_accounts")}}{{end}}
+      </section>
+{{template "admin-shell-end" .}}
+{{end}}
+
+{{define "admin-coa-batch"}}
+{{template "admin-shell-start" .}}
+      <section class="page-actions"><a class="button-link button-link-secondary" href="/admin/coa">{{t .Lang "coa_management"}}</a></section>
+      <section class="panel">
+        <h2>{{.Batch.FileName}}</h2>
+        <p>{{t .Lang "status"}}: {{t .Lang (printf "coa_import_status_%s" .Batch.Status)}}</p>
+        <p>{{t .Lang "submitted_by"}}: {{.Batch.UploadedBy}} · {{.Batch.CreatedAt}}</p>
+        <p>{{t .Lang "valid_rows"}}: {{.Batch.Valid}} · {{t .Lang "invalid_rows"}}: {{.Batch.Invalid}}</p>
+        {{if and (index .Permissions "coa.approve") (and (eq .Batch.Status "draft") (eq .Batch.Invalid 0))}}
+        <form method="post" action="/api/admin/coa/import/{{.Batch.ID}}/activate"><button type="submit">{{t .Lang "activate_coa_draft"}}</button></form>
+        {{end}}
+      </section>
+      <section class="panel">
+        <h2>{{t .Lang "coa_import_rows"}}</h2>
+        {{if .Import.Rows}}
+{{template "table-open" .}}
+          <thead><tr><th>{{t $.Lang "excel_row"}}</th><th>{{t $.Lang "account_code"}}</th><th>{{t $.Lang "account_name"}}</th><th>{{t $.Lang "parent_account"}}</th><th>{{t $.Lang "account_type"}}</th><th>{{t $.Lang "account_subtype"}}</th><th>{{t $.Lang "normal_balance"}}</th><th>{{t $.Lang "group_account"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "error"}}</th></tr></thead>
+          <tbody>{{range .Import.Rows}}<tr><td>{{.ExcelRow}}</td><td>{{.Code}}</td><td>{{.Name}}</td><td>{{.ParentCode}}</td><td>{{t $.Lang (printf "account_type_%s" .AccountType)}}</td><td>{{.Subtype}}</td><td>{{.NormalBalance}}</td><td>{{if .IsGroup}}{{t $.Lang "yes"}}{{else}}{{t $.Lang "no"}}{{end}}</td><td>{{.Status}}</td><td>{{.ErrorMessage}}</td></tr>{{end}}</tbody>
+{{template "table-close" .}}
+        {{else}}{{template "empty-state" (t .Lang "no_coa_import_rows")}}{{end}}
       </section>
 {{template "admin-shell-end" .}}
 {{end}}
@@ -412,22 +456,22 @@
       {{if eq .View "journal"}}
       {{if .CanRecord}}
       <section class="panel form-panel">
-        <h2>{{t .Lang "record_general_journal"}}</h2>
+        <h2>{{if .JournalDraftID}}{{t .Lang "edit_draft"}}{{else}}{{t .Lang "record_general_journal"}}{{end}}</h2>
         <p class="field-help">{{t .Lang "general_journal_form_help"}}</p>
-        <form method="post" action="/api/admin/transactions" hx-post="/api/admin/transactions" hx-target="#general-journal-error" hx-swap="innerHTML">
+        <form method="post" action="{{if .JournalDraftID}}/api/admin/journals/drafts/{{.JournalDraftID}}{{else}}/api/admin/journals{{end}}" hx-post="{{if .JournalDraftID}}/api/admin/journals/drafts/{{.JournalDraftID}}{{else}}/api/admin/journals{{end}}" hx-target="#general-journal-error" hx-swap="innerHTML">
           <div class="form-grid form-grid-two">
-            <label>{{t .Lang "date"}} <input name="transaction_date" type="date" value="{{.DefaultDate}}" max="{{.DefaultDate}}" required></label>
-            <label>{{t .Lang "reference_number"}} <input name="reference_no" maxlength="100"></label>
-            <label>{{t .Lang "description"}} <input name="description" maxlength="200" required></label>
-            <label>{{t .Lang "note"}} <input name="note" maxlength="500"></label>
+            <label>{{t .Lang "date"}} <input name="transaction_date" type="date" value="{{if .JournalDraftID}}{{.JournalEditDraft.TransactionDate}}{{else}}{{.DefaultDate}}{{end}}" max="{{.DefaultDate}}" required></label>
+            <label>{{t .Lang "reference_number"}} <input name="reference_no" maxlength="100" value="{{if .JournalDraftID}}{{.JournalEditDraft.ReferenceNo}}{{end}}"></label>
+            <label>{{t .Lang "description"}} <input name="description" maxlength="200" value="{{if .JournalDraftID}}{{.JournalEditDraft.Description}}{{end}}" required></label>
+            <label>{{t .Lang "note"}} <input name="note" maxlength="500" value="{{if .JournalDraftID}}{{.JournalEditDraft.Note}}{{end}}"></label>
           </div>
           <div class="table-scroll"><table class="data-table">
             <thead><tr><th>{{t .Lang "coa_account"}}</th><th>{{t .Lang "debit"}}</th><th>{{t .Lang "credit"}}</th><th>{{t .Lang "action"}}</th></tr></thead>
             <tbody data-journal-lines>
-              {{range .InitialJournalLines}}<tr data-journal-line>
-                <td><select name="line_coa_code" required><option value="">{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></td>
-                <td><input name="debit_amount" type="text" inputmode="numeric" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" aria-label="{{t $.Lang "debit"}}"></td>
-                <td><input name="credit_amount" type="text" inputmode="numeric" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" aria-label="{{t $.Lang "credit"}}"></td>
+              {{range $line := .JournalFormLines}}<tr data-journal-line>
+                <td><select name="line_coa_code" required><option value="">{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}" {{if eq .Code $line.COACode}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></td>
+                <td><input name="debit_amount" type="text" inputmode="numeric" value="{{$line.Debit}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" aria-label="{{t $.Lang "debit"}}"></td>
+                <td><input name="credit_amount" type="text" inputmode="numeric" value="{{$line.Credit}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" aria-label="{{t $.Lang "credit"}}"></td>
                 <td><button type="button" class="button-secondary" data-remove-journal-line>{{t $.Lang "remove_line"}}</button></td>
               </tr>{{end}}
             </tbody>
@@ -438,9 +482,22 @@
             <div><span>{{t .Lang "journal_difference"}}</span><strong>Rp <span data-journal-difference>0</span></strong></div>
             <p data-journal-balance-status>{{t .Lang "journal_unbalanced"}}</p>
           </div>
-          <div class="button-row"><button type="button" class="button-secondary" data-add-journal-line>{{t .Lang "add_journal_line"}}</button><button type="submit" data-journal-submit disabled>{{t .Lang "record_general_journal"}}</button></div>
+          <div class="button-row"><button type="button" class="button-secondary" data-add-journal-line>{{t .Lang "add_journal_line"}}</button><button type="submit" data-journal-submit disabled>{{t .Lang "submit_for_approval"}}</button></div>
         </form>
         {{template "form-error" (dict "ID" "general-journal-error")}}
+      </section>
+      {{end}}
+      {{if .JournalDrafts}}
+      <section class="panel">
+        <h2>{{t .Lang "entries_awaiting_approval"}}</h2>
+{{template "table-open" .}}
+        <thead><tr><th>{{t $.Lang "date"}}</th><th>{{t $.Lang "reference"}}</th><th>{{t $.Lang "description"}}</th><th>{{t $.Lang "submitted_by"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
+        <tbody>{{range .JournalDrafts}}<tr>
+          <td>{{.TransactionDate}}</td><td>{{if .ReferenceNo}}{{.ReferenceNo}}{{else}}—{{end}}</td><td>{{.Description}}</td><td>{{.RecordedBy}}</td><td>{{t $.Lang "pending_approval"}}</td>
+          <td>{{if $.CanRecord}}<a class="button-link button-link-secondary" href="/admin/journals?view=journal&amp;draft={{.ID}}">{{t $.Lang "edit_draft"}}</a>{{end}}{{if $.CanApprove}}<form method="post" action="/api/admin/journals/drafts/{{.ID}}/approve" hx-post="/api/admin/journals/drafts/{{.ID}}/approve" hx-target="#journal-approval-error" hx-swap="innerHTML"><button type="submit">{{t $.Lang "approve"}}</button></form>{{end}}</td>
+        </tr>{{end}}</tbody>
+{{template "table-close" .}}
+        {{template "form-error" (dict "ID" "journal-approval-error")}}
       </section>
       {{end}}
       <section class="panel">
@@ -1153,6 +1210,97 @@
 
 {{define "admin-transactions"}}
 {{template "admin-shell-start" .}}
+      {{if .CanRecord}}
+      <section class="panel form-panel">
+        <h2>{{if .CashDraftID}}{{t .Lang "edit_draft"}}{{else}}{{t .Lang "record_manual_cash_transaction"}}{{end}}</h2>
+        <p class="field-help">{{t .Lang "cash_transaction_form_help"}}</p>
+        <form method="post" action="{{if .CashDraftID}}/api/admin/transactions/drafts/{{.CashDraftID}}{{else}}/api/admin/transactions{{end}}" hx-post="{{if .CashDraftID}}/api/admin/transactions/drafts/{{.CashDraftID}}{{else}}/api/admin/transactions{{end}}" hx-target="#cash-transaction-error" hx-swap="innerHTML">
+          <div class="form-grid form-grid-two">
+            <label>{{t .Lang "cash_transaction_category"}}
+              <select name="category_id" required><option value="">{{t .Lang "select_transaction_category"}}</option>{{range .CashCategories}}{{if and .Active (not .IsGroup)}}<option value="{{.ID}}" {{if and $.CashDraftID (eq .ID $.CashEditDraft.CategoryID)}}selected{{end}}>{{.DisplayName}}</option>{{end}}{{end}}</select>
+            </label>
+            <label>{{t .Lang "date"}} <input name="transaction_date" type="date" value="{{if .CashDraftID}}{{.CashEditDraft.TransactionDate}}{{else}}{{.CurrentDate}}{{end}}" max="{{.CurrentDate}}" required></label>
+            <label>{{t .Lang "reference_number"}} <input name="reference_no" maxlength="100" value="{{if .CashDraftID}}{{.CashEditDraft.ReferenceNo}}{{end}}"></label>
+            <label>{{t .Lang "description"}} <input name="description" maxlength="200" value="{{if .CashDraftID}}{{.CashEditDraft.Description}}{{end}}" required></label>
+            <label>{{t .Lang "note"}} <input name="note" maxlength="500" value="{{if .CashDraftID}}{{.CashEditDraft.Note}}{{end}}"></label>
+          </div>
+          <div class="table-scroll"><table class="data-table">
+            <thead><tr><th>{{t .Lang "coa_account"}}</th><th>{{t .Lang "debit"}}</th><th>{{t .Lang "credit"}}</th><th>{{t .Lang "action"}}</th></tr></thead>
+            <tbody data-cash-journal-lines>
+              {{range $line := .CashFormLines}}<tr data-cash-journal-line>
+                <td><select name="line_coa_code" required><option value="">{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}" {{if eq .Code $line.COACode}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></td>
+                <td><input name="debit_amount" type="text" inputmode="numeric" value="{{$line.Debit}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" aria-label="{{t $.Lang "debit"}}"></td>
+                <td><input name="credit_amount" type="text" inputmode="numeric" value="{{$line.Credit}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" aria-label="{{t $.Lang "credit"}}"></td>
+                <td><button type="button" class="button-secondary" data-cash-remove-line>{{t $.Lang "remove_line"}}</button></td>
+              </tr>{{end}}
+            </tbody>
+          </table></div>
+          <div class="journal-balance-summary" data-cash-journal-balance data-balanced="false" data-group-separator="{{if eq .Lang "id"}}.{{else}},{{end}}" data-balanced-message="{{t .Lang "journal_balanced"}}" data-unbalanced-message="{{t .Lang "journal_unbalanced"}}" aria-live="polite">
+            <div><span>{{t .Lang "debit"}}</span><strong>Rp <span data-cash-debit-total>0</span></strong></div>
+            <div><span>{{t .Lang "credit"}}</span><strong>Rp <span data-cash-credit-total>0</span></strong></div>
+            <div><span>{{t .Lang "journal_difference"}}</span><strong>Rp <span data-cash-difference>0</span></strong></div>
+            <p data-cash-balance-status>{{t .Lang "journal_unbalanced"}}</p>
+          </div>
+          <div class="button-row"><button type="button" class="button-secondary" data-cash-add-line>{{t .Lang "add_journal_line"}}</button><button type="submit" data-cash-submit disabled>{{t .Lang "submit_for_approval"}}</button></div>
+        </form>
+        {{template "form-error" (dict "ID" "cash-transaction-error")}}
+      </section>
+      <script>
+      (function () {
+        var body = document.querySelector('[data-cash-journal-lines]');
+        var add = document.querySelector('[data-cash-add-line]');
+        var summary = document.querySelector('[data-cash-journal-balance]');
+        if (!body || !add || !summary) return;
+        var form = body.closest('form');
+        var submit = form.querySelector('[data-cash-submit]');
+        function parseAmount(value) { return Number(String(value || '').replace(/[^0-9]/g, '')) || 0; }
+        function recalculate() {
+          var debit = 0, credit = 0;
+          body.querySelectorAll('[data-cash-journal-line]').forEach(function (row) {
+            debit += parseAmount(row.querySelector('[name="debit_amount"]').value);
+            credit += parseAmount(row.querySelector('[name="credit_amount"]').value);
+          });
+          var difference = Math.abs(debit - credit);
+          summary.querySelector('[data-cash-debit-total]').textContent = debit.toLocaleString();
+          summary.querySelector('[data-cash-credit-total]').textContent = credit.toLocaleString();
+          summary.querySelector('[data-cash-difference]').textContent = difference.toLocaleString();
+          var balanced = debit > 0 && debit === credit;
+          summary.dataset.balanced = balanced ? 'true' : 'false';
+          summary.querySelector('[data-cash-balance-status]').textContent = balanced ? summary.dataset.balancedMessage : summary.dataset.unbalancedMessage;
+          submit.disabled = !balanced;
+        }
+        add.addEventListener('click', function () {
+          var row = body.querySelector('[data-cash-journal-line]').cloneNode(true);
+          row.querySelector('select').selectedIndex = 0;
+          row.querySelectorAll('input').forEach(function (input) { input.value = ''; });
+          body.appendChild(row);
+          recalculate();
+        });
+        body.addEventListener('click', function (event) {
+          if (event.target.matches('[data-cash-remove-line]') && body.querySelectorAll('[data-cash-journal-line]').length > 2) {
+            event.target.closest('[data-cash-journal-line]').remove();
+            recalculate();
+          }
+        });
+        body.addEventListener('input', recalculate);
+        body.addEventListener('change', recalculate);
+        recalculate();
+      })();
+      </script>
+      {{end}}
+      {{if .CashDrafts}}
+      <section class="panel">
+        <h2>{{t .Lang "entries_awaiting_approval"}}</h2>
+{{template "table-open" .}}
+        <thead><tr><th>{{t $.Lang "date"}}</th><th>{{t $.Lang "reference"}}</th><th>{{t $.Lang "description"}}</th><th>{{t $.Lang "submitted_by"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
+        <tbody>{{range .CashDrafts}}<tr>
+          <td>{{.TransactionDate}}</td><td>{{if .ReferenceNo}}{{.ReferenceNo}}{{else}}—{{end}}</td><td>{{.Description}}</td><td>{{.RecordedBy}}</td><td>{{t $.Lang "pending_approval"}}</td>
+          <td>{{if $.CanRecord}}<a class="button-link button-link-secondary" href="/admin/transactions?draft={{.ID}}">{{t $.Lang "edit_draft"}}</a>{{end}}{{if $.CanApprove}}<form method="post" action="/api/admin/transactions/drafts/{{.ID}}/approve" hx-post="/api/admin/transactions/drafts/{{.ID}}/approve" hx-target="#cash-approval-error" hx-swap="innerHTML"><button type="submit">{{t $.Lang "approve"}}</button></form>{{end}}</td>
+        </tr>{{end}}</tbody>
+{{template "table-close" .}}
+        {{template "form-error" (dict "ID" "cash-approval-error")}}
+      </section>
+      {{end}}
       <section class="cash-summary-section" aria-label="{{t .Lang "cash_transactions"}}">
         <div class="summary-grid cash-summary-primary">
 {{template "summary-card" (dict "Label" (t .Lang "total_cash_in") "Value" (nominal .Summary.TotalIncome) "Icon" "arrow-down-to-line")}}
@@ -1360,7 +1508,7 @@
       <section class="panel form-panel">
         <h2>{{t .Lang "tagihan_member_config"}}</h2>
         <p class="field-help">{{t .Lang "tagihan_member_config_description"}}</p>
-        {{if eq .Role "admin"}}
+        {{if index .Permissions "settings.manage"}}
         <form method="post" action="/api/admin/members/{{.Member.ID}}/tagihan-config" hx-post="/api/admin/members/{{.Member.ID}}/tagihan-config" hx-target="#member-tagihan-config-error" hx-swap="innerHTML">
           <label>{{t .Lang "simpanan_wajib"}} <input name="simpanan_wajib" type="number" min="0" step="1" inputmode="numeric" value="{{.TagihanConfig.SimpananWajib}}" required></label>
           <label>{{t .Lang "simpanan_manasuka"}} <input name="simpanan_manasuka" type="number" min="0" step="1" inputmode="numeric" value="{{.TagihanConfig.SimpananManasuka}}" required></label>
@@ -1418,7 +1566,7 @@
                 <option value="ketua_i" {{if eq .Member.OfficerRole "ketua_i"}}selected{{end}}>{{t $.Lang "role_ketua_i"}}</option>
                 <option value="ketua_ii" {{if eq .Member.OfficerRole "ketua_ii"}}selected{{end}}>{{t $.Lang "role_ketua_ii"}}</option>
                 <option value="ketua_utama" {{if eq .Member.OfficerRole "ketua_utama"}}selected{{end}}>{{t $.Lang "role_ketua_utama"}}</option>
-                {{if eq $.Role "super_admin"}}<option value="admin" {{if eq .Member.OfficerRole "admin"}}selected{{end}}>{{t $.Lang "role_admin"}}</option>{{end}}
+                {{if index $.Permissions "officers.manage"}}<option value="admin" {{if eq .Member.OfficerRole "admin"}}selected{{end}}>{{t $.Lang "role_admin"}}</option>{{end}}
               </select>
             </label>
             <label>{{t .Lang "status"}}
@@ -1446,7 +1594,7 @@
                 <option value="ketua_i">{{t $.Lang "role_ketua_i"}}</option>
                 <option value="ketua_ii">{{t $.Lang "role_ketua_ii"}}</option>
                 <option value="ketua_utama">{{t $.Lang "role_ketua_utama"}}</option>
-                {{if eq $.Role "super_admin"}}<option value="admin">{{t $.Lang "role_admin"}}</option>{{end}}
+                {{if index $.Permissions "officers.manage"}}<option value="admin">{{t $.Lang "role_admin"}}</option>{{end}}
               </select>
             </label>
             <button type="submit">{{t .Lang "assign_officer"}}</button>
@@ -1462,7 +1610,7 @@
                 <option value="ketua_i">{{t $.Lang "role_ketua_i"}}</option>
                 <option value="ketua_ii">{{t $.Lang "role_ketua_ii"}}</option>
                 <option value="ketua_utama">{{t $.Lang "role_ketua_utama"}}</option>
-                {{if eq $.Role "super_admin"}}<option value="admin">{{t $.Lang "role_admin"}}</option>{{end}}
+                {{if index $.Permissions "officers.manage"}}<option value="admin">{{t $.Lang "role_admin"}}</option>{{end}}
               </select>
             </label>
             <label>{{t .Lang "login_email"}} <input name="email" type="email" required autocomplete="off"></label>
@@ -1653,6 +1801,22 @@
       <section class="page-actions">
         <a class="button-link button-link-secondary" href="/api/admin/exports/withdrawal-requests.csv?status=pending">{{t .Lang "export_csv"}}</a>
       </section>
+      {{if .CanManage}}
+      <section class="panel form-panel">
+        <h2>{{t .Lang "officer_withdrawal_request_form_title"}}</h2>
+        <p class="field-help">{{t .Lang "officer_withdrawal_request_form_help"}}</p>
+        <form method="post" action="/api/admin/withdrawal-requests/on-behalf" hx-post="/api/admin/withdrawal-requests/on-behalf" hx-target="#officer-withdrawal-error" hx-swap="innerHTML">
+          <label>{{t .Lang "member"}}
+            <input name="member_no" list="withdrawal-request-members" autocomplete="off" required>
+            <datalist id="withdrawal-request-members">{{range .Members}}<option value="{{.MemberNo}}">{{.FullName}}</option>{{end}}</datalist>
+          </label>
+          <label>{{t .Lang "amount"}} <input name="amount" type="text" inputmode="numeric" data-rupiah-input data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" required></label>
+          <label>{{t .Lang "note"}} <input name="note" maxlength="500"></label>
+          <button type="submit">{{t .Lang "create_withdrawal_request"}}</button>
+        </form>
+        {{template "form-error" (dict "ID" "officer-withdrawal-error")}}
+      </section>
+      {{end}}
       <section class="panel">
         {{if .WithdrawalRequests}}
 {{template "table-open" .}}
@@ -1673,6 +1837,13 @@
               <td>{{.Note}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}{{if .CurrentApprovalStage}}<small>{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}</small>{{end}}</td>
               <td class="review-cell">
+                {{if and $.CanManage (eq .CreationSource "officer") (eq .Status "pending") (eq .CurrentApprovalStage "manager")}}
+                <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/update" hx-post="/api/admin/withdrawal-requests/{{.ID}}/update" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                  <label>{{t $.Lang "amount"}} <input name="amount" type="text" inputmode="numeric" value="{{nominal .Amount}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" required></label>
+                  <label>{{t $.Lang "note"}} <input name="note" maxlength="500" value="{{.Note}}"></label>
+                  <button class="button-secondary" type="submit">{{t $.Lang "save"}}</button>
+                </form>
+                {{end}}
                 {{if and (eq $.Role "super_admin") (index $.Permissions "requests.override") (eq .Status "pending")}}
                 <div class="table-actions">
                   <strong>{{t $.Lang "super_admin_override"}}</strong>
@@ -1891,7 +2062,7 @@
                     <p>{{t $.Lang "read_only"}}</p>
                     {{end}}
                     {{if and (eq .Status "pending") (eq .CreationSource "admin")}}
-                    {{if or (and (eq $.Role "admin") (eq .CreatedByID $.CurrentUser.ID)) (eq $.Role "super_admin")}}
+                    {{if and (index $.Permissions "requests.manage") (or (eq .CreatedByID $.CurrentUser.ID) (eq $.Role "super_admin"))}}
                     <form class="inline-rejection-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/cancel" hx-post="/api/admin/loan-requests/{{.ID}}/cancel" hx-target="#loan-review-error" hx-swap="innerHTML">
                       <label>{{t $.Lang "admin_loan_cancellation_reason"}} <input name="cancellation_reason" required></label>
                       <button class="button-secondary" type="submit">{{t $.Lang "cancel"}}</button>

@@ -502,6 +502,35 @@ var migrations = []migration{
 		Version: 35,
 		Name:    "fix_bendahara_loan_disbursement_guard",
 	},
+	{
+		Version: 36,
+		Name:    "manual_cash_transaction_drafts",
+		Statements: []string{
+			`CREATE TABLE manual_cash_transaction_drafts (
+				id TEXT PRIMARY KEY,
+				entry_type TEXT NOT NULL CHECK (entry_type IN ('cash','journal')),
+				payload TEXT NOT NULL,
+				status TEXT NOT NULL CHECK (status IN ('pending','approved')),
+				recorded_by TEXT NOT NULL REFERENCES users(id),
+				approved_by TEXT NULL REFERENCES users(id),
+				transaction_id TEXT NULL UNIQUE REFERENCES manual_cash_transactions(id),
+				created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				approved_at TIMESTAMP NULL,
+				CHECK ((status='pending' AND approved_by IS NULL AND transaction_id IS NULL AND approved_at IS NULL) OR (status='approved' AND approved_by IS NOT NULL AND transaction_id IS NOT NULL AND approved_at IS NOT NULL))
+			)`,
+			`CREATE INDEX idx_manual_cash_transaction_drafts_pending ON manual_cash_transaction_drafts(entry_type,status,created_at)`,
+			`ALTER TABLE manual_cash_transaction_drafts ENABLE ROW LEVEL SECURITY`,
+		},
+	},
+	{
+		Version: 37,
+		Name:    "officer_withdrawal_request_intake",
+		Statements: []string{
+			`ALTER TABLE withdrawal_requests ADD COLUMN created_by TEXT NULL REFERENCES users(id)`,
+			`ALTER TABLE withdrawal_requests ADD COLUMN creation_source TEXT NOT NULL DEFAULT 'member' CHECK (creation_source IN ('member','officer'))`,
+		},
+	},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -694,6 +723,9 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 		}
 	}
 	for _, statement := range migration.Statements {
+		if migration.Version == 36 && isSQLite && strings.Contains(statement, "ENABLE ROW LEVEL SECURITY") {
+			continue
+		}
 		if migration.Version == 32 && isSQLite {
 			// SQLite's legacy-term identity triggers already allow historical
 			// product types; this PostgreSQL constraint correction is not needed.

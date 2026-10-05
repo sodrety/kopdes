@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -265,9 +266,23 @@ func (s *Server) adminWithdrawalRequestsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
+	members, err := s.allMembers()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	activeMembers := members[:0]
+	for _, member := range members {
+		if member.Status == "active" {
+			activeMembers = append(activeMembers, member)
+		}
+	}
+	current, _ := currentUser(c)
 	renderPage(c, "admin-withdrawal-requests", pageData(c, "Penarikan review - KKSUK PD Dharma Jaya", "withdrawal-requests", "withdrawal_request_review", "inspect_pending_withdrawal_requests", gin.H{
 		"WithdrawalRequests": requests,
 		"COAAccounts":        coaAccounts,
+		"Members":            activeMembers,
+		"CanManage":          hasPermission(current.Role, PermissionWithdrawalRequestsManage),
 	}))
 }
 
@@ -352,7 +367,7 @@ func (s *Server) adminLoanRequestsPage(c *gin.Context) {
 	renderPage(c, "admin-loan-requests", pageData(c, "Loan request review - KKSUK PD Dharma Jaya", "loan-requests", "loan_request_review", "inspect_pending_loan_requests", gin.H{
 		"LoanRequests":         requests,
 		"Members":              activeMembers,
-		"AdminCanCreate":       current.Role == "admin",
+		"AdminCanCreate":       hasPermission(current.Role, PermissionRequestsManage),
 		"SingleIdempotencyKey": newID(),
 		"LoanRequestStatus":    status,
 		"LoanRequestSource":    c.Query("source"),
@@ -454,6 +469,36 @@ func (s *Server) adminTransactionsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
+	categories, err := s.cashTransactionCategoriesForAdmin(false)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	drafts, err := s.manualCashTransactionDraftsForAdmin("cash")
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	journalFormLines := []manualCashJournalLineRequest{{}, {}}
+	var editDraft ManualCashTransactionDraftView
+	draftID := strings.TrimSpace(c.Query("draft"))
+	if draftID != "" {
+		current, _ := currentUser(c)
+		if !hasPermission(current.Role, PermissionTransactionsRecord) {
+			respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_manual_cash_draft_not_found"))
+			return
+		}
+		draft, err := s.manualCashTransactionDraftForAdmin(draftID, "cash")
+		if err != nil {
+			respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_manual_cash_draft_not_found"))
+			return
+		}
+		journalFormLines = draft.Lines
+		if len(journalFormLines) < 2 {
+			journalFormLines = append(journalFormLines, manualCashJournalLineRequest{})
+		}
+		editDraft = draft
+	}
 	renderPage(c, "admin-transactions", pageData(c, translate(languageFromRequest(c), "cash_transactions_page_title"), "transactions", "cash_transactions", "review_cash_transactions", gin.H{
 		"Transactions":    transactions.Rows,
 		"Summary":         transactions.Summary,
@@ -461,6 +506,20 @@ func (s *Server) adminTransactionsPage(c *gin.Context) {
 		"ServerPaginated": true,
 		"Filters":         filters,
 		"COAAccounts":     coaAccounts,
+		"CashCategories":  categories,
+		"CashDrafts":      drafts,
+		"CashEditDraft":   editDraft,
+		"CashDraftID":     draftID,
+		"CashFormLines":   journalFormLines,
+		"CanRecord": func() bool {
+			current, _ := currentUser(c)
+			return hasPermission(current.Role, PermissionTransactionsRecord)
+		}(),
+		"CanApprove": func() bool {
+			current, _ := currentUser(c)
+			return hasPermission(current.Role, PermissionTransactionsApprove)
+		}(),
+		"CurrentDate": time.Now().In(jakartaLocation).Format("2006-01-02"),
 	}))
 }
 
@@ -470,8 +529,36 @@ func (s *Server) adminCOAPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
+	batches, err := s.coaImportBatchesForAdmin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
 	renderPage(c, "admin-coa", pageData(c, translate(languageFromRequest(c), "coa_management"), "coa", "coa_management", "coa_management_description", gin.H{
 		"COAAccounts": accounts,
+		"COABatches":  batches,
+	}))
+}
+
+func (s *Server) adminCOAImportBatchPage(c *gin.Context) {
+	batchID := strings.TrimSpace(c.Param("id"))
+	batch, err := s.coaImportBatchSummaryForAdmin(batchID)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_coa_import_not_found"))
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	result, err := s.coaImportResultForAdmin(batchID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	renderPage(c, "admin-coa-batch", pageData(c, translate(languageFromRequest(c), "coa_import_draft"), "coa", "coa_import_draft", "coa_import_description", gin.H{
+		"Batch":  batch,
+		"Import": result,
 	}))
 }
 

@@ -11,20 +11,21 @@ import (
 )
 
 type WithdrawalRequest struct {
-	ID                   string            `json:"id"`
-	MemberID             string            `json:"member_id"`
-	Amount               int64             `json:"amount"`
-	Note                 string            `json:"note"`
-	Status               string            `json:"status"`
-	CurrentApprovalStage string            `json:"current_approval_stage,omitempty"`
-	ReviewedAt           string            `json:"reviewed_at,omitempty"`
-	RejectionReason      string            `json:"rejection_reason,omitempty"`
-	SavingRecordID       string            `json:"saving_record_id,omitempty"`
-	LatestDecision       *ApprovalDecision `json:"latest_decision,omitempty"`
-	CreatedAt            string            `json:"created_at,omitempty"`
-	UpdatedAt            string            `json:"updated_at,omitempty"`
-	ProposedCashCOACode  string            `json:"-"`
-	ProposedSavingsCOACode string           `json:"-"`
+	ID                     string            `json:"id"`
+	MemberID               string            `json:"member_id"`
+	CreationSource         string            `json:"creation_source,omitempty"`
+	Amount                 int64             `json:"amount"`
+	Note                   string            `json:"note"`
+	Status                 string            `json:"status"`
+	CurrentApprovalStage   string            `json:"current_approval_stage,omitempty"`
+	ReviewedAt             string            `json:"reviewed_at,omitempty"`
+	RejectionReason        string            `json:"rejection_reason,omitempty"`
+	SavingRecordID         string            `json:"saving_record_id,omitempty"`
+	LatestDecision         *ApprovalDecision `json:"latest_decision,omitempty"`
+	CreatedAt              string            `json:"created_at,omitempty"`
+	UpdatedAt              string            `json:"updated_at,omitempty"`
+	ProposedCashCOACode    string            `json:"-"`
+	ProposedSavingsCOACode string            `json:"-"`
 }
 
 type AdminWithdrawalRequest struct {
@@ -42,15 +43,21 @@ type withdrawalRequestInput struct {
 	Note   string `json:"note" form:"note"`
 }
 
+type adminWithdrawalRequestInput struct {
+	MemberNo string `json:"member_no" form:"member_no"`
+	Amount   int64  `json:"amount" form:"amount"`
+	Note     string `json:"note" form:"note"`
+}
+
 type rejectWithdrawalInput struct {
 	RejectionReason string `json:"rejection_reason" form:"rejection_reason"`
 }
 
 type approveWithdrawalInput struct {
-	Source       string `json:"source" form:"source"`
-	COACode      string `json:"coa_code" form:"coa_code"`
-	CashCOACode  string `json:"cash_coa_code" form:"cash_coa_code"`
-	Note         string `json:"note" form:"note"`
+	Source      string `json:"source" form:"source"`
+	COACode     string `json:"coa_code" form:"coa_code"`
+	CashCOACode string `json:"cash_coa_code" form:"cash_coa_code"`
+	Note        string `json:"note" form:"note"`
 }
 
 var (
@@ -61,6 +68,7 @@ var (
 	errWithdrawalRequestNotPending     = errors.New("withdrawal request not pending")
 	errInvalidWithdrawalRejection      = errors.New("invalid withdrawal rejection")
 	errInvalidSavingWithdrawalCategory = errors.New("invalid saving withdrawal category")
+	errWithdrawalMemberNotFound        = errors.New("withdrawal member not found")
 )
 
 func (s *Server) submitWithdrawalRequest(c *gin.Context) {
@@ -101,6 +109,72 @@ func (s *Server) submitWithdrawalRequest(c *gin.Context) {
 	}
 
 	respondCreatedOrHXRedirect(c, "/member/withdrawal-requests", request)
+}
+
+func (s *Server) createAdminWithdrawalRequest(c *gin.Context) {
+	actor, ok := currentUser(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", translate(languageFromRequest(c), "error_authentication_required"))
+		return
+	}
+	var input adminWithdrawalRequestInput
+	if err := bindRequestWithRupiahAmount(c, &input, "amount"); errors.Is(err, errInvalidRupiahAmount) {
+		invalidRupiahAmountResponse(c)
+		return
+	} else if err != nil {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_withdrawal_request"))
+		return
+	}
+	var member Member
+	if err := s.db.QueryRow(`SELECT id,status FROM members WHERE member_no=$1`, strings.TrimSpace(input.MemberNo)).Scan(&member.ID, &member.Status); errors.Is(err, sql.ErrNoRows) {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_withdrawal_member_not_found"))
+		return
+	} else if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	request, err := s.insertWithdrawalRequestAs(member, withdrawalRequestInput{Amount: input.Amount, Note: input.Note}, actor.ID, "officer")
+	if err != nil {
+		respondWithdrawalRequestError(c, err)
+		return
+	}
+	respondCreatedOrHXRedirect(c, "/admin/withdrawal-requests", request)
+}
+
+func (s *Server) updateAdminWithdrawalRequest(c *gin.Context) {
+	var req withdrawalRequestInput
+	if err := bindRequestWithRupiahAmount(c, &req, "amount"); errors.Is(err, errInvalidRupiahAmount) {
+		invalidRupiahAmountResponse(c)
+		return
+	} else if err != nil {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_withdrawal_request"))
+		return
+	}
+	request, err := s.updateOfficerWithdrawalRequest(c.Param("id"), req)
+	if err != nil {
+		respondWithdrawalRequestError(c, err)
+		return
+	}
+	respondOKOrHXRedirect(c, "/admin/withdrawal-requests", request)
+}
+
+func respondWithdrawalRequestError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, errInvalidWithdrawalRequest):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_withdrawal_request"))
+	case errors.Is(err, errInactiveWithdrawalMember):
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_inactive_withdrawal_member"))
+	case errors.Is(err, errInsufficientSukarelaBalance):
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_amount_over_available"))
+	case errors.Is(err, errWithdrawalRequestNotFound):
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_withdrawal_request_not_found"))
+	case errors.Is(err, errWithdrawalRequestNotPending):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_request_not_editable"))
+	case isMonetaryAggregateCapacityError(err):
+		respondError(c, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_monetary_aggregate_capacity"))
+	case err != nil:
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+	}
 }
 
 func (s *Server) memberWithdrawalRequests(c *gin.Context) {
@@ -226,6 +300,10 @@ func (s *Server) rejectWithdrawalRequest(c *gin.Context) {
 }
 
 func (s *Server) insertWithdrawalRequest(member Member, req withdrawalRequestInput) (WithdrawalRequest, error) {
+	return s.insertWithdrawalRequestAs(member, req, "", "member")
+}
+
+func (s *Server) insertWithdrawalRequestAs(member Member, req withdrawalRequestInput, createdBy, creationSource string) (WithdrawalRequest, error) {
 	if req.Amount <= 0 {
 		return WithdrawalRequest{}, errInvalidWithdrawalRequest
 	}
@@ -258,17 +336,20 @@ func (s *Server) insertWithdrawalRequest(member Member, req withdrawalRequestInp
 	request := WithdrawalRequest{
 		ID:                   newID(),
 		MemberID:             member.ID,
+		CreationSource:       creationSource,
 		Amount:               req.Amount,
 		Note:                 strings.TrimSpace(req.Note),
 		Status:               "pending",
 		CurrentApprovalStage: approvalStageManager,
 	}
 	_, err = tx.Exec(
-		`INSERT INTO withdrawal_requests (id, member_id, amount, note, status, current_approval_stage) VALUES ($1, $2, $3, $4, 'pending', 'manager')`,
+		`INSERT INTO withdrawal_requests (id, member_id, amount, note, status, current_approval_stage,created_by,creation_source) VALUES ($1, $2, $3, $4, 'pending', 'manager',$5,$6)`,
 		request.ID,
 		request.MemberID,
 		request.Amount,
 		request.Note,
+		nullIfEmpty(createdBy),
+		creationSource,
 	)
 	if err != nil {
 		return WithdrawalRequest{}, err
@@ -283,6 +364,65 @@ func (s *Server) insertWithdrawalRequest(member Member, req withdrawalRequestInp
 		return WithdrawalRequest{}, err
 	}
 	return request, nil
+}
+
+func (s *Server) updateOfficerWithdrawalRequest(requestID string, req withdrawalRequestInput) (WithdrawalRequest, error) {
+	if req.Amount <= 0 {
+		return WithdrawalRequest{}, errInvalidWithdrawalRequest
+	}
+	s.financialMu.Lock()
+	defer s.financialMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var memberID, status, stage, source string
+	err = tx.QueryRow(`SELECT member_id,status,COALESCE(current_approval_stage,''),creation_source FROM withdrawal_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&memberID, &status, &stage, &source)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WithdrawalRequest{}, errWithdrawalRequestNotFound
+	}
+	if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if source != "officer" || status != "pending" || stage != approvalStageManager {
+		return WithdrawalRequest{}, errWithdrawalRequestNotPending
+	}
+	var decisionCount int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM withdrawal_request_approvals WHERE request_id=$1`, requestID).Scan(&decisionCount); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if decisionCount != 0 {
+		return WithdrawalRequest{}, errWithdrawalRequestNotPending
+	}
+	var memberStatus string
+	if err := tx.QueryRow(`SELECT status FROM members WHERE id=$1`+rowLockClause(s.db), memberID).Scan(&memberStatus); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if memberStatus != "active" {
+		return WithdrawalRequest{}, errInactiveWithdrawalMember
+	}
+	summary, err := savingSummary(tx, memberID)
+	if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	var reserved int64
+	if err := tx.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM withdrawal_reservations WHERE member_id=$1 AND status='active' AND request_id<>$2`, memberID, requestID).Scan(&reserved); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if req.Amount > availableWithdrawalAmountForSukarelaBalance(summary.SukarelaBalance, reserved) {
+		return WithdrawalRequest{}, errInsufficientSukarelaBalance
+	}
+	if _, err := tx.Exec(`UPDATE withdrawal_requests SET amount=$1,note=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$3 AND status='pending' AND current_approval_stage='manager'`, req.Amount, strings.TrimSpace(req.Note), requestID); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if _, err := tx.Exec(`UPDATE withdrawal_reservations SET amount=$1 WHERE request_id=$2 AND status='active'`, req.Amount, requestID); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	return s.withdrawalRequestByID(requestID)
 }
 
 func (s *Server) withdrawalRequestsByMember(memberID string) ([]WithdrawalRequest, error) {
@@ -322,7 +462,7 @@ func (s *Server) withdrawalRequestsByMember(memberID string) ([]WithdrawalReques
 
 func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalRequest, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT wr.id, wr.member_id, m.member_no, m.full_name, m.member_type, wr.amount, wr.note, wr.status, COALESCE(wr.current_approval_stage,''), COALESCE(CAST(wr.reviewed_at AS TEXT), ''), wr.rejection_reason, COALESCE(wr.saving_record_id, ''), wr.created_at, wr.updated_at
+	query := `SELECT wr.id, wr.member_id, m.member_no, m.full_name, m.member_type, wr.amount, wr.note, wr.status, COALESCE(wr.current_approval_stage,''), COALESCE(CAST(wr.reviewed_at AS TEXT), ''), wr.rejection_reason, COALESCE(wr.saving_record_id, ''), wr.created_at, wr.updated_at,wr.creation_source
 		FROM withdrawal_requests wr
 		INNER JOIN members m ON m.id = wr.member_id`
 	args := []any{}
@@ -339,7 +479,7 @@ func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalReq
 	var requests []AdminWithdrawalRequest
 	for rows.Next() {
 		var request AdminWithdrawalRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.MemberType, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.MemberType, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt, &request.CreationSource); err != nil {
 			return nil, err
 		}
 		request.MemberTypeLabel = memberTypeLabel(request.MemberType)
@@ -469,7 +609,7 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 			{Component: "cash_bank", Side: accountingDirectionCredit, Amount: request.Amount},
 		},
 		COAOverrides: map[string]string{"cash_bank": request.ProposedCashCOACode, "savings_liability": request.ProposedSavingsCOACode},
-		Description: "Penarikan sukarela", RecordedBy: officer.ID,
+		Description:  "Penarikan sukarela", RecordedBy: officer.ID,
 	}); err != nil {
 		return WithdrawalRequest{}, err
 	}

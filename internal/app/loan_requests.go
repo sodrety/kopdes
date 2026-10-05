@@ -64,7 +64,7 @@ type rejectLoanInput struct {
 	RejectionReason string `json:"rejection_reason" form:"rejection_reason"`
 }
 
-const ketuaUtamaLoanApprovalThreshold int64 = 20_000_000
+const ketuaUtamaLoanApprovalThreshold int64 = 25_000_000
 
 func maxLoanAmountForMemberSavings(memberType string, wajibBalance, sukarelaBalance int64) int64 {
 	multiplier := int64(0)
