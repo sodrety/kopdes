@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 func TestCashTransactionCategoryTemplateImportsMultiLevelTree(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
+	ketuaIToken := fixture.login(t, "ketua-i@coop.test", "password")
 	workbook := excelize.NewFile()
 	defer workbook.Close()
 	rows := [][]interface{}{
@@ -97,13 +99,26 @@ func TestCashTransactionCategoryTemplateImportsMultiLevelTree(t *testing.T) {
 		}
 	}
 
-	transactionRequest := httptest.NewRequest(http.MethodPost, "/api/admin/transactions", strings.NewReader(`{"direction":"cash_in","category_id":"`+rootID+`","description":"Group should fail","amount":1000,"transaction_date":"2026-06-16"}`))
+	transactionRequest := httptest.NewRequest(http.MethodPost, "/api/admin/transactions", strings.NewReader(`{"direction":"cash_in","category_id":"`+rootID+`","description":"Group should fail","amount":1000,"transaction_date":"2026-06-16","lines":[{"coa_code":"BANK","debit":1000},{"coa_code":"40101","credit":1000}]}`))
 	transactionRequest.Header.Set("Authorization", "Bearer "+adminToken)
 	transactionRequest.Header.Set("Content-Type", "application/json")
 	transactionRecorder := httptest.NewRecorder()
 	fixture.server.ServeHTTP(transactionRecorder, transactionRequest)
-	if transactionRecorder.Code != http.StatusBadRequest || !strings.Contains(transactionRecorder.Body.String(), "Group categories cannot be used directly") {
-		t.Fatalf("expected group category rejection, got %d: %s", transactionRecorder.Code, transactionRecorder.Body.String())
+	if transactionRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected group category draft, got %d: %s", transactionRecorder.Code, transactionRecorder.Body.String())
+	}
+	var draft struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(transactionRecorder.Body.Bytes(), &draft); err != nil || draft.ID == "" {
+		t.Fatalf("decode group category draft: %v %s", err, transactionRecorder.Body.String())
+	}
+	approvalRequest := httptest.NewRequest(http.MethodPost, "/api/admin/transactions/drafts/"+draft.ID+"/approve", nil)
+	approvalRequest.Header.Set("Authorization", "Bearer "+ketuaIToken)
+	approvalRecorder := httptest.NewRecorder()
+	fixture.server.ServeHTTP(approvalRecorder, approvalRequest)
+	if approvalRecorder.Code != http.StatusBadRequest || !strings.Contains(approvalRecorder.Body.String(), "Group categories cannot be used directly") {
+		t.Fatalf("expected group category rejection on approval, got %d: %s", approvalRecorder.Code, approvalRecorder.Body.String())
 	}
 }
 

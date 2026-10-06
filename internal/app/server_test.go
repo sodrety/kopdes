@@ -207,16 +207,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 35 {
-		t.Fatalf("expected thirty-five tracked migrations, got %d", migrationCount)
+	if migrationCount != 37 {
+		t.Fatalf("expected thirty-seven tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 35`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 37`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "fix_bendahara_loan_disbursement_guard" {
-		t.Fatalf("expected latest Bendahara disbursement guard migration, got %q", latestName)
+	if latestName != "officer_withdrawal_request_intake" {
+		t.Fatalf("expected latest Officer withdrawal intake migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -480,8 +480,10 @@ func TestAPIInvalidCookieAuthTokenStillReturnsJSONUnauthorized(t *testing.T) {
 func TestStatusFilterTreatsSQLInjectionPayloadAsLiteralValue(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
+	superToken := establishSuperAdmin(t, fixture)
+	_, memberAccountToken := provisionAdminOfficer(t, fixture, superToken, adminToken)
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-SQLI","full_name":"SQLI Check","join_date":"2026-06-17","status":"active"}`)
-	fixture.createMemberUser(t, adminToken, member.ID, "sqli-check@coop.test", "secret-password")
+	fixture.createMemberUser(t, memberAccountToken, member.ID, "sqli-check@coop.test", "secret-password")
 	memberToken := fixture.login(t, "sqli-check@coop.test", "secret-password")
 	fixture.createLoanRequest(t, memberToken, 1000000, 5)
 
@@ -585,8 +587,10 @@ func TestConcurrentWithdrawalsCannotOverdrawSavings(t *testing.T) {
 func TestConcurrentLoanRequestSubmissionsCreateOnlyOnePendingRequest(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
+	superToken := establishSuperAdmin(t, fixture)
+	_, memberAccountToken := provisionAdminOfficer(t, fixture, superToken, adminToken)
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-RACE-LOAN","full_name":"Loan Race","join_date":"2026-06-17","status":"active"}`)
-	fixture.createMemberUser(t, adminToken, member.ID, "loan-race@coop.test", "secret-password")
+	fixture.createMemberUser(t, memberAccountToken, member.ID, "loan-race@coop.test", "secret-password")
 	memberToken := fixture.login(t, "loan-race@coop.test", "secret-password")
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "wajib", 125_000, "RACE-LOAN-WAJIB", "Loan request capacity")
 	statuses := make(chan int, 2)
@@ -632,8 +636,10 @@ func TestConcurrentLoanRequestSubmissionsCreateOnlyOnePendingRequest(t *testing.
 func TestConcurrentRepaymentsCannotOverpayLoan(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
+	superToken := establishSuperAdmin(t, fixture)
+	_, memberAccountToken := provisionAdminOfficer(t, fixture, superToken, adminToken)
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-RACE-REPAY","full_name":"Repayment Race","join_date":"2026-06-17","status":"active"}`)
-	fixture.createMemberUser(t, adminToken, member.ID, "repay-race@coop.test", "secret-password")
+	fixture.createMemberUser(t, memberAccountToken, member.ID, "repay-race@coop.test", "secret-password")
 	memberToken := fixture.login(t, "repay-race@coop.test", "secret-password")
 	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 100000, 5), 100000, 5)
 
@@ -1504,11 +1510,13 @@ func TestAdminMemberPagesRenderListCreateAndDetailFlows(t *testing.T) {
 func TestAdminCanCreateMemberLoginAndMemberCanViewOwnProfile(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
+	superToken := establishSuperAdmin(t, fixture)
+	_, memberAccountToken := provisionAdminOfficer(t, fixture, superToken, adminToken)
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-0009","full_name":"Member Profile","phone":"0811111111","address":"Bandung","join_date":"2026-06-16","status":"active"}`)
 
 	accountReq := httptest.NewRequest(http.MethodPost, "/api/admin/members/"+member.ID+"/user", bytes.NewBufferString(`{"email":"profile@coop.test","password":"secret-password"}`))
 	accountReq.Header.Set("Content-Type", "application/json")
-	accountReq.Header.Set("Authorization", "Bearer "+adminToken)
+	accountReq.Header.Set("Authorization", "Bearer "+memberAccountToken)
 	accountRec := httptest.NewRecorder()
 
 	fixture.server.ServeHTTP(accountRec, accountReq)
@@ -1606,8 +1614,10 @@ func TestMemberProfileRequiresMemberRoleAndLinkedIdentity(t *testing.T) {
 func TestMemberCanUseBrowserLoginAndSeeProfilePage(t *testing.T) {
 	fixture := newTestFixture(t)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
+	superToken := establishSuperAdmin(t, fixture)
+	_, memberAccountToken := provisionAdminOfficer(t, fixture, superToken, adminToken)
 	member := fixture.createMember(t, adminToken, `{"member_no":"M-0010","full_name":"Browser Member","phone":"0822222222","address":"Surabaya","join_date":"2026-06-16","status":"active"}`)
-	fixture.createMemberUser(t, adminToken, member.ID, "browser-member@coop.test", "secret-password")
+	fixture.createMemberUser(t, memberAccountToken, member.ID, "browser-member@coop.test", "secret-password")
 
 	loginBody := strings.NewReader("email=browser-member%40coop.test&password=secret-password")
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody)
@@ -4201,10 +4211,8 @@ func TestAdminTransactionsPageShowsAggregateCashLedgerAndManualEntryForm(t *test
 	if journalRec.Code != http.StatusOK {
 		t.Fatalf("expected general journal page status 200, got %d: %s", journalRec.Code, journalRec.Body.String())
 	}
-	for _, text := range []string{`name="line_coa_code"`, `name="debit_amount"`, `name="credit_amount"`} {
-		if !strings.Contains(journalRec.Body.String(), text) {
-			t.Fatalf("expected general journal page to include %q, got %s", text, journalRec.Body.String())
-		}
+	if strings.Contains(journalRec.Body.String(), `name="line_coa_code"`) {
+		t.Fatalf("Manager should view general journals without the Bendahara entry form, got %s", journalRec.Body.String())
 	}
 
 	filterReq := httptest.NewRequest(http.MethodGet, "/admin/transactions?category=cash_in&type=repayment", nil)
@@ -4231,6 +4239,7 @@ func TestAdminTransactionsPageShowsAggregateCashLedgerAndManualEntryForm(t *test
 func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t *testing.T) {
 	fixture := newTestFixture(t)
 	managerToken := fixture.login(t, "admin@coop.test", "password")
+	ketuaIToken := fixture.login(t, "ketua-i@coop.test", "password")
 	if _, err := fixture.db.Exec(`INSERT INTO coa_accounts (id,code,name,account_type,subtype,normal_balance,is_group,active) VALUES
 		('test-manual-income','TEST-MANUAL-INCOME','Pendapatan Jasa','revenue','Laba Rugi','C',FALSE,TRUE),
 		('test-manual-expense','TEST-MANUAL-EXPENSE','ATK','expense','Laba Rugi','D',FALSE,TRUE)`); err != nil {
@@ -4246,16 +4255,34 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 		fixture.server.ServeHTTP(rec, req)
 		return rec
 	}
+	approveDraft := func(token, draftID string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/transactions/drafts/"+draftID+"/approve", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		fixture.server.ServeHTTP(rec, req)
+		return rec
+	}
 
 	incomeRec := record(t, managerToken, `{"category_id":"cash-in-pendapatan-jasa","description":"Pendapatan jasa administrasi","amount":125000,"transaction_date":"2026-06-17","note":"Setoran koreksi kas","lines":[{"coa_code":"BANK","debit":125000},{"coa_code":"TEST-MANUAL-INCOME","credit":125000}]}`)
 	if incomeRec.Code != http.StatusCreated {
 		t.Fatalf("expected manual cash-in status 201, got %d: %s", incomeRec.Code, incomeRec.Body.String())
 	}
+	var incomeDraft struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(incomeRec.Body.Bytes(), &incomeDraft); err != nil || incomeDraft.ID == "" || incomeDraft.Status != "pending" {
+		t.Fatalf("expected manual cash-in draft, got %+v err=%v", incomeDraft, err)
+	}
+	incomeApproval := approveDraft(ketuaIToken, incomeDraft.ID)
+	if incomeApproval.Code != http.StatusCreated {
+		t.Fatalf("expected manual cash-in approval status 201, got %d: %s", incomeApproval.Code, incomeApproval.Body.String())
+	}
 	var income struct {
 		ReferenceNo string `json:"reference_no"`
 		Category    string `json:"category"`
 	}
-	if err := json.Unmarshal(incomeRec.Body.Bytes(), &income); err != nil {
+	if err := json.Unmarshal(incomeApproval.Body.Bytes(), &income); err != nil {
 		t.Fatalf("decode manual cash-in: %v", err)
 	}
 	if income.ReferenceNo != "KAS-20260617-0001" || income.Category != "Pendapatan Jasa" {
@@ -4266,9 +4293,29 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 	if outcomeRec.Code != http.StatusCreated {
 		t.Fatalf("expected manual cash-out status 201, got %d: %s", outcomeRec.Code, outcomeRec.Body.String())
 	}
+	var outcomeDraft struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(outcomeRec.Body.Bytes(), &outcomeDraft); err != nil || outcomeDraft.ID == "" {
+		t.Fatalf("decode manual cash-out draft: %v %s", err, outcomeRec.Body.String())
+	}
+	outcomeApproval := approveDraft(ketuaIToken, outcomeDraft.ID)
+	if outcomeApproval.Code != http.StatusCreated {
+		t.Fatalf("expected manual cash-out approval status 201, got %d: %s", outcomeApproval.Code, outcomeApproval.Body.String())
+	}
 	duplicateRec := record(t, managerToken, `{"category_id":"cash-in-pendapatan-jasa","description":"Referensi duplikat","amount":1000,"transaction_date":"2026-06-19","reference_no":"KAS-KOREKSI-1","lines":[{"coa_code":"BANK","debit":1000},{"coa_code":"TEST-MANUAL-INCOME","credit":1000}]}`)
-	if duplicateRec.Code != http.StatusConflict {
-		t.Fatalf("expected duplicate reference status 409, got %d: %s", duplicateRec.Code, duplicateRec.Body.String())
+	if duplicateRec.Code != http.StatusCreated {
+		t.Fatalf("expected duplicate reference draft status 201, got %d: %s", duplicateRec.Code, duplicateRec.Body.String())
+	}
+	var duplicateDraft struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(duplicateRec.Body.Bytes(), &duplicateDraft); err != nil || duplicateDraft.ID == "" {
+		t.Fatalf("decode duplicate reference draft: %v %s", err, duplicateRec.Body.String())
+	}
+	duplicateApproval := approveDraft(ketuaIToken, duplicateDraft.ID)
+	if duplicateApproval.Code != http.StatusConflict {
+		t.Fatalf("expected duplicate reference approval status 409, got %d: %s", duplicateApproval.Code, duplicateApproval.Body.String())
 	}
 	futureRec := record(t, managerToken, `{"category_id":"cash-in-pendapatan-jasa","description":"Masa depan","amount":1000,"transaction_date":"2099-01-01","lines":[{"coa_code":"BANK","debit":1000},{"coa_code":"TEST-MANUAL-INCOME","credit":1000}]}`)
 	if futureRec.Code != http.StatusBadRequest {
@@ -4299,8 +4346,18 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 		t.Fatalf("expected category deactivate status 200, got %d: %s", categoryUpdate.Code, categoryUpdate.Body.String())
 	}
 	deactivatedRecord := record(t, managerToken, `{"category_id":"`+category.ID+`","description":"Kategori nonaktif","amount":1000,"transaction_date":"2026-06-20","lines":[{"coa_code":"TEST-MANUAL-EXPENSE","debit":1000},{"coa_code":"BANK","credit":1000}]}`)
-	if deactivatedRecord.Code != http.StatusBadRequest {
-		t.Fatalf("expected deactivated category status 400, got %d: %s", deactivatedRecord.Code, deactivatedRecord.Body.String())
+	if deactivatedRecord.Code != http.StatusCreated {
+		t.Fatalf("expected deactivated category draft status 201, got %d: %s", deactivatedRecord.Code, deactivatedRecord.Body.String())
+	}
+	var deactivatedDraft struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(deactivatedRecord.Body.Bytes(), &deactivatedDraft); err != nil || deactivatedDraft.ID == "" {
+		t.Fatalf("decode deactivated category draft: %v %s", err, deactivatedRecord.Body.String())
+	}
+	deactivatedApproval := approveDraft(ketuaIToken, deactivatedDraft.ID)
+	if deactivatedApproval.Code != http.StatusBadRequest {
+		t.Fatalf("expected deactivated category approval status 400, got %d: %s", deactivatedApproval.Code, deactivatedApproval.Body.String())
 	}
 	lockedUpdate := httptest.NewRecorder()
 	lockedUpdateReq := httptest.NewRequest(http.MethodPost, "/api/admin/transaction-categories/cash-in-pendapatan-jasa/update", strings.NewReader(`{"name":"Nama Baru","active":true}`))

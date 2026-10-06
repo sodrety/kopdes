@@ -96,7 +96,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	admin.POST("/withdrawal-requests/:id/override-approve", server.requirePermission(PermissionRequestsOverride), server.overrideWithdrawalRequest)
 	admin.POST("/withdrawal-requests/:id/override-reject", server.requirePermission(PermissionRequestsOverride), server.overrideWithdrawalRejection)
 	admin.GET("/loan-requests", server.requirePermission(PermissionRequestsView), server.adminLoanRequests)
-	admin.POST("/loan-requests/on-behalf", server.requirePermission(PermissionRequestsManage), server.createAdminLoanRequest)
+	admin.POST("/loan-requests/on-behalf", server.requirePermission(PermissionRequestsCreateOnBehalf), server.createAdminLoanRequest)
 	admin.GET("/loan-requests/template.xlsx", server.requirePermission(PermissionRequestsManage), server.downloadAdminLoanRequestTemplate)
 	admin.POST("/loan-requests/bulk/preview", server.requirePermission(PermissionRequestsManage), server.adminLoanRequestBatchPreview)
 	admin.POST("/loan-requests/bulk/:id/commit", server.requirePermission(PermissionRequestsManage), server.adminLoanRequestBatchCommit)

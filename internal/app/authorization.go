@@ -18,6 +18,7 @@ const (
 	PermissionSavingsRecord               Permission = "savings.record"
 	PermissionRequestsView                Permission = "requests.view"
 	PermissionRequestsManage              Permission = "requests.manage"
+	PermissionRequestsCreateOnBehalf      Permission = "requests.create_on_behalf"
 	PermissionWithdrawalRequestsManage    Permission = "withdrawal_requests.manage"
 	PermissionRequestsDecide              Permission = "requests.decide"
 	PermissionRequestsOverride            Permission = "requests.override"
@@ -52,11 +53,12 @@ var officerPermissions = map[string]map[Permission]bool{
 		PermissionMembersView: true, PermissionMembersManage: true, PermissionMemberAccountsManage: true,
 		PermissionSavingsView: true, PermissionSavingsRecord: true,
 		PermissionRequestsView: true, PermissionRequestsManage: true, PermissionWithdrawalRequestsManage: true,
+		PermissionRequestsDecide: true, PermissionRequestsCreateOnBehalf: true,
 		PermissionLoansView: true, PermissionLoansManage: true, PermissionLoanReportsGenerate: true,
 		PermissionRepaymentsView: true, PermissionRepaymentsRecord: true, PermissionOfficersManage: true,
 		PermissionTransactionsView:         true,
 		PermissionAccountingMappingsManage: true, PermissionAccountingCOAOverride: true,
-		PermissionTransactionCategoriesManage: true, PermissionTagihanView: true, PermissionTagihanManage: true, PermissionSettingsManage: true,
+		PermissionTagihanView: true, PermissionTagihanManage: true, PermissionSettingsManage: true,
 		PermissionNotificationsView: true,
 	},
 	"manager": {
@@ -68,15 +70,12 @@ var officerPermissions = map[string]map[Permission]bool{
 		PermissionRepaymentsRecord: true, PermissionNotificationsView: true,
 		PermissionTransactionsView: true, PermissionTransactionsRecord: true,
 		PermissionJournalsView: true, PermissionCOAView: true, PermissionTagihanView: true, PermissionTagihanManage: true,
-		PermissionAccountingCOAOverride: true,
+		PermissionAccountingCOAOverride: true, PermissionTransactionCategoriesManage: true,
 	},
 	"bendahara": {
-		PermissionDashboardView: true, PermissionReportsView: true,
-		PermissionMembersView: true, PermissionMembersManage: true,
-		PermissionSavingsView: true, PermissionSavingsRecord: true,
 		PermissionRequestsView: true, PermissionWithdrawalRequestsManage: true,
 		PermissionLoansView: true, PermissionLoansManage: true, PermissionLoanReportsGenerate: true,
-		PermissionRepaymentsView: true, PermissionRepaymentsRecord: true, PermissionTagihanView: true, PermissionTagihanManage: true,
+		PermissionRepaymentsView: true, PermissionRepaymentsRecord: true,
 		PermissionTransactionsView: true, PermissionTransactionsRecord: true,
 		PermissionTransactionSourceEdit: true, PermissionJournalsView: true, PermissionJournalsManage: true,
 		PermissionCOAView: true, PermissionCOAManage: true,
@@ -91,8 +90,13 @@ var officerPermissions = map[string]map[Permission]bool{
 		permissions[PermissionCOAApprove] = true
 		return permissions
 	}(),
-	"ketua_ii":    officerOversightPermissions(),
-	"ketua_utama": officerOversightPermissions(),
+	"ketua_ii": officerOversightPermissions(),
+	"ketua_utama": func() map[Permission]bool {
+		permissions := officerOversightPermissions()
+		permissions[PermissionMemberAccountsManage] = true
+		permissions[PermissionOfficersManage] = true
+		return permissions
+	}(),
 }
 
 var allPermissions = []Permission{
@@ -105,6 +109,7 @@ var allPermissions = []Permission{
 	PermissionSavingsRecord,
 	PermissionRequestsView,
 	PermissionRequestsManage,
+	PermissionRequestsCreateOnBehalf,
 	PermissionWithdrawalRequestsManage,
 	PermissionRequestsDecide,
 	PermissionRequestsOverride,
@@ -155,7 +160,7 @@ func validOfficerRole(role string) bool {
 
 func hasPermission(role string, permission Permission) bool {
 	if role == "super_admin" {
-		return true
+		return permission != PermissionSettingsManage
 	}
 	return officerPermissions[role][permission]
 }
@@ -164,7 +169,9 @@ func permissionSet(role string) map[string]bool {
 	result := map[string]bool{}
 	if role == "super_admin" {
 		for _, permission := range allPermissions {
-			result[string(permission)] = true
+			if hasPermission(role, permission) {
+				result[string(permission)] = true
+			}
 		}
 		return result
 	}

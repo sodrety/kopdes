@@ -275,6 +275,9 @@ func (s *Server) insertOfficer(actor User, req createOfficerInput) (Officer, err
 	if memberID == "" || !validOfficerRole(role) {
 		return Officer{}, errInvalidOfficer
 	}
+	if role == "admin" && actor.Role != "super_admin" {
+		return Officer{}, errAdminRoleSuperAdminOnly
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Officer{}, err
