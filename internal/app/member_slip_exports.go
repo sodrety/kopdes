@@ -234,6 +234,23 @@ func (s *Server) memberLoanSlipData(member Member, loanID string, period time.Ti
 	}
 
 	period = time.Date(period.Year(), period.Month(), 1, 0, 0, 0, 0, jakartaLocation)
+	var latestRepaymentDate sql.NullString
+	if err := s.db.QueryRow(
+		`SELECT MAX(record_date) FROM (`+repaymentHistoryQuery+`) history WHERE loan_id = $1`,
+		loan.ID,
+	).Scan(&latestRepaymentDate); err != nil {
+		return loanSlipData{}, err
+	}
+	if latestRepaymentDate.Valid {
+		latestDate, err := time.ParseInLocation("2006-01-02", latestRepaymentDate.String, jakartaLocation)
+		if err != nil {
+			return loanSlipData{}, err
+		}
+		latestPeriod := time.Date(latestDate.Year(), latestDate.Month(), 1, 0, 0, 0, 0, jakartaLocation)
+		if latestPeriod.Before(period) {
+			period = latestPeriod
+		}
+	}
 	if loan.FinalDueDate != "" {
 		finalDueDate, err := time.ParseInLocation("2006-01-02", loan.FinalDueDate, jakartaLocation)
 		if err != nil {
@@ -546,17 +563,17 @@ func drawSavingSlip(pdf *slipPDF, data savingSlipData, lang string) {
 	pdf.text(590, 358, 9, "F2", fmt.Sprintf("%s %s", totalLabel, voluntaryLabel))
 	pdf.line(50, 348, 790, 348, 1.5)
 
-	rows := make([]savingSlipMonth, 0, len(data.Months)+1)
+	monthsThroughPeriod := int(data.Period.Month())
+	if monthsThroughPeriod > len(data.Months) {
+		monthsThroughPeriod = len(data.Months)
+	}
+	rows := make([]savingSlipMonth, 0, monthsThroughPeriod+1)
 	rows = append(rows, savingSlipMonth{Month: time.December, Values: data.Opening})
-	rows = append(rows, data.Months...)
+	rows = append(rows, data.Months[:monthsThroughPeriod]...)
 	for index, row := range rows {
 		y := 332 - float64(index)*13
 		rowValues := row.Values
 		rowStored := row.Stored
-		if index > 0 && int(row.Month) > int(data.Period.Month()) {
-			rowValues = slipBalance{}
-			rowStored = slipBalance{}
-		}
 		rowYear := data.Period.Year()
 		if index == 0 {
 			rowYear--
@@ -601,39 +618,48 @@ func drawLoanSlip(pdf *slipPDF, data loanSlipData, lang string) {
 	pdf.textRight(790, 369, 10, "F2", slipAmount(data.Loan.TotalObligation))
 	pdf.line(50, 360, 790, 360, 1.5)
 
-	leftRows := make([]loanSlipMonth, 0, 7)
+	monthsThroughPeriod := int(data.Period.Month())
+	if monthsThroughPeriod > len(data.Months) {
+		monthsThroughPeriod = len(data.Months)
+	}
+	leftMonthCount := monthsThroughPeriod
+	if leftMonthCount > 6 {
+		leftMonthCount = 6
+	}
+	leftRows := make([]loanSlipMonth, 0, leftMonthCount+1)
 	leftRows = append(leftRows, loanSlipMonth{Month: time.December, Amount: data.Opening})
-	leftRows = append(leftRows, data.Months[:6]...)
-	rightRows := data.Months[6:]
-	for index := 0; index < 7; index++ {
+	leftRows = append(leftRows, data.Months[:leftMonthCount]...)
+	var rightRows []loanSlipMonth
+	if monthsThroughPeriod > 6 {
+		rightRows = data.Months[6:monthsThroughPeriod]
+	}
+	rowCount := len(leftRows)
+	if len(rightRows) > rowCount {
+		rowCount = len(rightRows)
+	}
+	for index := 0; index < rowCount; index++ {
 		y := 344 - float64(index)*17
-		left := leftRows[index]
-		leftLabel := fmt.Sprintf("S/D %s", slipMonthLabel(lang, left.Month))
-		if index > 0 {
-			leftLabel = fmt.Sprintf("- %s", slipMonthLabel(lang, left.Month))
+		if index < len(leftRows) {
+			left := leftRows[index]
+			leftLabel := fmt.Sprintf("S/D %s", slipMonthLabel(lang, left.Month))
+			if index > 0 {
+				leftLabel = fmt.Sprintf("- %s", slipMonthLabel(lang, left.Month))
+			}
+			rowYear := data.Period.Year()
+			if index == 0 {
+				rowYear--
+			}
+			pdf.text(50, y, 9, "F1", fmt.Sprintf("%s %d", leftLabel, rowYear))
+			pdf.text(270, y, 9, "F1", "Rp")
+			pdf.textRight(430, y, 9, "F1", slipAmount(left.Amount))
+			pdf.dashedLine(50, y-5, 430, y-5, 0.35)
 		}
-		leftAmount := left.Amount
-		if index > 0 && int(left.Month) > int(data.Period.Month()) {
-			leftAmount = 0
-		}
-		rowYear := data.Period.Year()
-		if index == 0 {
-			rowYear--
-		}
-		pdf.text(50, y, 9, "F1", fmt.Sprintf("%s %d", leftLabel, rowYear))
-		pdf.text(270, y, 9, "F1", "Rp")
-		pdf.textRight(430, y, 9, "F1", slipAmount(leftAmount))
-		pdf.dashedLine(50, y-5, 430, y-5, 0.35)
 
 		if index < len(rightRows) {
 			right := rightRows[index]
-			rightAmount := right.Amount
-			if int(right.Month) > int(data.Period.Month()) {
-				rightAmount = 0
-			}
 			pdf.text(440, y, 9, "F1", fmt.Sprintf("- %s", slipMonthLabel(lang, right.Month)))
 			pdf.text(660, y, 9, "F1", "Rp")
-			pdf.textRight(790, y, 9, "F1", slipAmount(rightAmount))
+			pdf.textRight(790, y, 9, "F1", slipAmount(right.Amount))
 			pdf.dashedLine(440, y-5, 790, y-5, 0.35)
 		}
 	}
