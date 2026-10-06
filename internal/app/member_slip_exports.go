@@ -236,8 +236,8 @@ func (s *Server) memberLoanSlipData(member Member, loanID string, period time.Ti
 	period = time.Date(period.Year(), period.Month(), 1, 0, 0, 0, 0, jakartaLocation)
 	var latestRepaymentDate sql.NullString
 	if err := s.db.QueryRow(
-		`SELECT MAX(record_date) FROM (`+repaymentHistoryQuery+`) history WHERE loan_id = $1`,
-		loan.ID,
+		`SELECT MAX(record_date) FROM (`+repaymentHistoryQuery+`) history WHERE member_id = $1`,
+		member.ID,
 	).Scan(&latestRepaymentDate); err != nil {
 		return loanSlipData{}, err
 	}
