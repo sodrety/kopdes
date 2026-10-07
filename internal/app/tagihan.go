@@ -32,6 +32,7 @@ type TagihanRow struct {
 	MemberID               string `json:"member_id"`
 	MemberNo               string `json:"member_no"`
 	FullName               string `json:"full_name"`
+	memberType             string
 	SimpananWajib          int64  `json:"simpanan_wajib"`
 	SimpananSukarela       int64  `json:"simpanan_sukarela"`
 	PinjamanReguler        int64  `json:"pinjaman_reguler"`
@@ -127,6 +128,14 @@ func (s *Server) exportTagihanXLSX(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	exportRows := rows[:0]
+	for _, row := range rows {
+		if row.memberType == memberTypeDailyWorker || row.memberType == memberTypeCustomer {
+			continue
+		}
+		exportRows = append(exportRows, row)
+	}
+	rows = exportRows
 	workbook, err := buildTagihanWorkbook(statementMonth, rows)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
@@ -228,14 +237,14 @@ func tagihanNote(statementMonth tagihanStatementMonth, memberID string) string {
 }
 
 func (s *Server) tagihanRows(statementMonth tagihanStatementMonth) ([]TagihanRow, error) {
-	rows, err := s.db.Query(`SELECT id, member_no, full_name FROM members WHERE status='active' ORDER BY member_no`)
+	rows, err := s.db.Query(`SELECT id, member_no, full_name, member_type FROM members WHERE status='active' ORDER BY member_no`)
 	if err != nil {
 		return nil, err
 	}
 	var members []TagihanRow
 	for rows.Next() {
 		var row TagihanRow
-		if err := rows.Scan(&row.MemberID, &row.MemberNo, &row.FullName); err != nil {
+		if err := rows.Scan(&row.MemberID, &row.MemberNo, &row.FullName, &row.memberType); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
