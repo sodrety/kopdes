@@ -452,6 +452,11 @@
         <a class="button-link {{if eq .View "trial_balance"}}button-link-primary{{else}}button-link-secondary{{end}}" href="/admin/journals?view=trial_balance">{{t .Lang "trial_balance"}}</a>
         {{if index .Permissions "accounting_mappings.manage"}}<a class="button-link button-link-secondary" href="/admin/accounting-mappings">{{t .Lang "accounting_mappings"}}</a>{{end}}
         {{if index .Permissions "transactions.view"}}<a class="button-link button-link-secondary" href="/admin/transactions">{{t .Lang "cash_transactions"}}</a>{{end}}
+        {{if index .Permissions "reports.view"}}<form class="balance-export-form" method="get" action="/admin/reports/balance">
+          <input type="hidden" name="export" value="xlsx">
+          <label>{{t .Lang "report_as_of_date"}} <input type="date" name="as_of" value="{{.DefaultDate}}" required></label>
+          <button class="button-link-secondary" type="submit">{{t .Lang "export_financial_statement"}}</button>
+        </form>{{end}}
       </section>
       {{if eq .View "journal"}}
       {{if .CanRecord}}
@@ -714,11 +719,6 @@
           <div class="balance-export-actions">
             <a class="button-link button-link-secondary" href="/admin/reports/balance?export=csv">{{t .Lang "export_csv"}}</a>
             <a class="button-link button-link-secondary" href="/admin/reports/balance?export=pdf">{{t .Lang "export_pdf"}}</a>
-            <form class="balance-export-form" method="get" action="/admin/reports/balance">
-              <input type="hidden" name="export" value="xlsx">
-              <label>{{t .Lang "report_as_of_date"}} <input type="date" name="as_of" value="{{.ReportAsOfDate}}" required></label>
-              <button class="button-link-secondary" type="submit">{{t .Lang "export_financial_statement"}}</button>
-            </form>
           </div>
         </header>
         <div class="balance-report-card-body">
