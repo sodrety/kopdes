@@ -32,6 +32,7 @@ type TagihanRow struct {
 	MemberID               string `json:"member_id"`
 	MemberNo               string `json:"member_no"`
 	FullName               string `json:"full_name"`
+	oldNPP                 string
 	memberType             string
 	SimpananWajib          int64  `json:"simpanan_wajib"`
 	SimpananSukarela       int64  `json:"simpanan_sukarela"`
@@ -136,7 +137,7 @@ func (s *Server) exportTagihanXLSX(c *gin.Context) {
 		exportRows = append(exportRows, row)
 	}
 	rows = exportRows
-	workbook, err := buildTagihanWorkbook(statementMonth, rows)
+	workbook, err := buildTagihanWorkbook(statementMonth, rows, languageFromRequest(c))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
@@ -237,14 +238,14 @@ func tagihanNote(statementMonth tagihanStatementMonth, memberID string) string {
 }
 
 func (s *Server) tagihanRows(statementMonth tagihanStatementMonth) ([]TagihanRow, error) {
-	rows, err := s.db.Query(`SELECT id, member_no, full_name, member_type FROM members WHERE status='active' ORDER BY member_no`)
+	rows, err := s.db.Query(`SELECT id, member_no, COALESCE(old_npp,''), full_name, member_type FROM members WHERE status='active' ORDER BY member_no`)
 	if err != nil {
 		return nil, err
 	}
 	var members []TagihanRow
 	for rows.Next() {
 		var row TagihanRow
-		if err := rows.Scan(&row.MemberID, &row.MemberNo, &row.FullName, &row.memberType); err != nil {
+		if err := rows.Scan(&row.MemberID, &row.MemberNo, &row.oldNPP, &row.FullName, &row.memberType); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -594,7 +595,7 @@ func (s *Server) recordTagihanRepaymentTx(tx *sql.Tx, loanID string, amount int6
 	})
 }
 
-func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRow) (*excelize.File, error) {
+func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRow, language string) (*excelize.File, error) {
 	const sheet = "Tagihan"
 	workbook := excelize.NewFile()
 	defaultSheet := workbook.GetSheetName(0)
@@ -602,13 +603,13 @@ func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRo
 		_ = workbook.Close()
 		return nil, err
 	}
-	headers := []interface{}{"Member ID", "NPP", "Nama", "Simpanan Wajib", "Simpanan Manasuka", "Pinjaman Reguler", "Pinjaman Barang Sekunder", "Pembelian Barang", "Total Tagihan", "Status"}
+	headers := []interface{}{"Member ID", "NPP", translate(language, "old_npp"), "Nama", "Simpanan Wajib", "Simpanan Manasuka", "Pinjaman Reguler", "Pinjaman Barang Sekunder", "Pembelian Barang", "Total Tagihan", "Status"}
 	if err := workbook.SetSheetRow(sheet, "A1", &headers); err != nil {
 		_ = workbook.Close()
 		return nil, err
 	}
 	for index, row := range rows {
-		values := []interface{}{row.MemberID, row.MemberNo, row.FullName, row.SimpananWajib, row.SimpananSukarela, row.PinjamanReguler, row.PinjamanBarangSekunder, row.PembelianBarang, row.Total, row.Status}
+		values := []interface{}{row.MemberID, row.MemberNo, row.oldNPP, row.FullName, row.SimpananWajib, row.SimpananSukarela, row.PinjamanReguler, row.PinjamanBarangSekunder, row.PembelianBarang, row.Total, row.Status}
 		cell, err := excelize.CoordinatesToCellName(1, index+2)
 		if err != nil {
 			_ = workbook.Close()
@@ -621,11 +622,11 @@ func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRo
 	}
 	style, err := workbook.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
 	if err == nil {
-		_ = workbook.SetCellStyle(sheet, "A1", "J1", style)
+		_ = workbook.SetCellStyle(sheet, "A1", "K1", style)
 	}
 	_ = workbook.SetColWidth(sheet, "A", "A", 28)
-	_ = workbook.SetColWidth(sheet, "B", "C", 22)
-	_ = workbook.SetColWidth(sheet, "D", "K", 18)
+	_ = workbook.SetColWidth(sheet, "B", "D", 22)
+	_ = workbook.SetColWidth(sheet, "E", "K", 18)
 	_ = workbook.SetDocProps(&excelize.DocProperties{
 		Title:   "Tagihan " + statementMonth.Value,
 		Subject: "KKSUK PD Dharma Jaya Tagihan",

@@ -531,6 +531,10 @@ var migrations = []migration{
 			`ALTER TABLE withdrawal_requests ADD COLUMN creation_source TEXT NOT NULL DEFAULT 'member' CHECK (creation_source IN ('member','officer'))`,
 		},
 	},
+	{
+		Version: 38,
+		Name:    "add_old_npp_to_members",
+	},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -842,6 +846,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 			return err
 		}
 	}
+	if migration.Version == 38 {
+		if err := addOldNPPColumnIfMissing(tx, isSQLite); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`,
 		migration.Version,
@@ -850,6 +859,22 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 		return err
 	}
 	return tx.Commit()
+}
+
+func addOldNPPColumnIfMissing(tx *sql.Tx, isSQLite bool) error {
+	var columnCount int
+	query := `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='members' AND column_name='old_npp'`
+	if isSQLite {
+		query = `SELECT COUNT(*) FROM pragma_table_info('members') WHERE name='old_npp'`
+	}
+	if err := tx.QueryRow(query).Scan(&columnCount); err != nil {
+		return err
+	}
+	if columnCount != 0 {
+		return nil
+	}
+	_, err := tx.Exec(`ALTER TABLE members ADD COLUMN old_npp TEXT`)
+	return err
 }
 
 func accountingMigrationStatementApplicable(tx *sql.Tx, statement string, isSQLite bool) (bool, error) {

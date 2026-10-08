@@ -2256,14 +2256,14 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	if tagihanExcelRow == 0 {
 		t.Fatalf("expected Tagihan row for member %s, got %#v", member.ID, rows)
 	}
-	expectedHeaders := "Member ID|NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Status"
+	expectedHeaders := "Member ID|NPP|Old NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Status"
 	if strings.Join(rows[0], "|") != expectedHeaders {
 		t.Fatalf("unexpected Tagihan headers: %#v", rows[0])
 	}
-	if tagihanRow[1] != "K-TAG-001" || tagihanRow[3] != "100000" || tagihanRow[4] != "50000" || tagihanRow[5] != "210000" || tagihanRow[6] != "120000" || tagihanRow[7] != "210000" || tagihanRow[8] != "690000" {
+	if tagihanRow[1] != "K-TAG-001" || tagihanRow[4] != "100000" || tagihanRow[5] != "50000" || tagihanRow[6] != "210000" || tagihanRow[7] != "120000" || tagihanRow[8] != "210000" || tagihanRow[9] != "690000" {
 		t.Fatalf("unexpected Tagihan row: %#v, loan=%+v", tagihanRow, loan)
 	}
-	statusCell, err := excelize.CoordinatesToCellName(10, tagihanExcelRow)
+	statusCell, err := excelize.CoordinatesToCellName(11, tagihanExcelRow)
 	if err != nil {
 		t.Fatalf("find status cell: %v", err)
 	}
