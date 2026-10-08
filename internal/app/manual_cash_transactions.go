@@ -379,12 +379,14 @@ func (s *Server) approveManualCashTransactionDraft(c *gin.Context) {
 		respondManualCashTransactionResult(c, entryType, nil, err)
 		return
 	}
-	posted, err := s.insertManualCashTransactionTx(tx, req, recordedBy)
+	posted, err := s.insertManualCashTransactionTx(tx, req, recordedBy, entryType)
 	if err != nil {
 		respondManualCashTransactionResult(c, entryType, nil, err)
 		return
 	}
-	if _, err := tx.Exec(`UPDATE manual_cash_transaction_drafts SET status='approved',approved_by=$1,transaction_id=$2,approved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$3 AND status='pending'`, user.ID, posted["id"], draftID); err != nil {
+	draftTransactionID := posted["draft_transaction_id"]
+	delete(posted, "draft_transaction_id")
+	if _, err := tx.Exec(`UPDATE manual_cash_transaction_drafts SET status='approved',approved_by=$1,transaction_id=$2,approved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$3 AND status='pending'`, user.ID, draftTransactionID, draftID); err != nil {
 		respondManualCashTransactionResult(c, entryType, nil, err)
 		return
 	}
@@ -440,17 +442,18 @@ func (s *Server) insertManualCashTransaction(req manualCashTransactionRequest, r
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	record, err := s.insertManualCashTransactionTx(tx, req, recordedBy)
+	record, err := s.insertManualCashTransactionTx(tx, req, recordedBy, "cash")
 	if err != nil {
 		return nil, err
 	}
+	delete(record, "draft_transaction_id")
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return record, nil
 }
 
-func (s *Server) insertManualCashTransactionTx(tx *sql.Tx, req manualCashTransactionRequest, recordedBy string) (gin.H, error) {
+func (s *Server) insertManualCashTransactionTx(tx *sql.Tx, req manualCashTransactionRequest, recordedBy, entryType string) (gin.H, error) {
 	var err error
 	req.CategoryID = strings.TrimSpace(req.CategoryID)
 	req.Description = normalizeCashTransactionCategoryName(req.Description)
@@ -503,7 +506,7 @@ func (s *Server) insertManualCashTransactionTx(tx *sql.Tx, req manualCashTransac
 		return nil, errUnbalancedFinancialJournal
 	}
 	cashNet := cashBankDebits - cashBankCredits
-	if cashNet == 0 {
+	if cashNet == 0 && entryType != "journal" {
 		return nil, errZeroManualCashMovement
 	}
 	legacyDirection := "cash_in"
@@ -546,8 +549,14 @@ func (s *Server) insertManualCashTransactionTx(tx *sql.Tx, req manualCashTransac
 	}
 
 	id := newID()
-	if _, err := tx.Exec(`INSERT INTO manual_cash_transactions (id,transaction_date,direction,source,coa_code,accounting_direction,category_id,description,amount,reference_no,note,recorded_by) VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9,$10,$11)`, id, req.RecordDate, legacyDirection, source, accountingDirection, nullIfEmpty(req.CategoryID), req.Description, amount, req.ReferenceNo, req.Note, recordedBy); err != nil {
-		return nil, err
+	var draftTransactionID any = id
+	if cashNet == 0 {
+		// A non-cash general journal has no cash transaction row to link to.
+		draftTransactionID = nil
+	} else {
+		if _, err := tx.Exec(`INSERT INTO manual_cash_transactions (id,transaction_date,direction,source,coa_code,accounting_direction,category_id,description,amount,reference_no,note,recorded_by) VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9,$10,$11)`, id, req.RecordDate, legacyDirection, source, accountingDirection, nullIfEmpty(req.CategoryID), req.Description, amount, req.ReferenceNo, req.Note, recordedBy); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
 		ReferenceNo: req.ReferenceNo, TransactionID: id, TransactionType: "manual", TransactionDate: req.RecordDate,
@@ -556,7 +565,7 @@ func (s *Server) insertManualCashTransactionTx(tx *sql.Tx, req manualCashTransac
 	}); err != nil {
 		return nil, err
 	}
-	return gin.H{"id": id, "transaction_date": req.RecordDate, "direction": accountingDirection, "category_id": req.CategoryID, "category": categoryName, "description": req.Description, "amount": amount, "reference_no": req.ReferenceNo, "note": req.Note, "recorded_by": recordedBy}, nil
+	return gin.H{"id": id, "draft_transaction_id": draftTransactionID, "transaction_date": req.RecordDate, "direction": accountingDirection, "category_id": req.CategoryID, "category": categoryName, "description": req.Description, "amount": amount, "reference_no": req.ReferenceNo, "note": req.Note, "recorded_by": recordedBy}, nil
 }
 
 func (s *Server) nextManualCashReference(tx *sql.Tx, transactionDate string) (string, error) {

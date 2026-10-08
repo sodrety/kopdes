@@ -535,6 +535,10 @@ var migrations = []migration{
 		Version: 38,
 		Name:    "add_old_npp_to_members",
 	},
+	{
+		Version: 39,
+		Name:    "allow_non_cash_general_journal_approval",
+	},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -851,6 +855,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 			return err
 		}
 	}
+	if migration.Version == 39 {
+		if err := allowNonCashGeneralJournalApproval(tx, isSQLite); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`,
 		migration.Version,
@@ -859,6 +868,52 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 		return err
 	}
 	return tx.Commit()
+}
+
+func allowNonCashGeneralJournalApproval(tx *sql.Tx, isSQLite bool) error {
+	const approvedDraftCheck = `
+		(status='pending' AND approved_by IS NULL AND transaction_id IS NULL AND approved_at IS NULL)
+		OR
+		(status='approved' AND approved_by IS NOT NULL AND approved_at IS NOT NULL
+			AND (entry_type='journal' OR transaction_id IS NOT NULL))`
+	if !isSQLite {
+		if _, err := tx.Exec(`ALTER TABLE manual_cash_transaction_drafts DROP CONSTRAINT IF EXISTS manual_cash_transaction_drafts_check`); err != nil {
+			return fmt.Errorf("drop manual cash draft approval constraint: %w", err)
+		}
+		if _, err := tx.Exec(`ALTER TABLE manual_cash_transaction_drafts ADD CONSTRAINT manual_cash_transaction_drafts_approval_state_check CHECK (` + approvedDraftCheck + `)`); err != nil {
+			return fmt.Errorf("allow non-cash journal draft approval: %w", err)
+		}
+		return nil
+	}
+
+	statements := []string{
+		`CREATE TABLE manual_cash_transaction_drafts_v39 (
+			id TEXT PRIMARY KEY,
+			entry_type TEXT NOT NULL CHECK (entry_type IN ('cash','journal')),
+			payload TEXT NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('pending','approved')),
+			recorded_by TEXT NOT NULL REFERENCES users(id),
+			approved_by TEXT NULL REFERENCES users(id),
+			transaction_id TEXT NULL UNIQUE REFERENCES manual_cash_transactions(id),
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			approved_at TIMESTAMP NULL,
+			CONSTRAINT manual_cash_transaction_drafts_approval_state_check CHECK (` + approvedDraftCheck + `)
+		)`,
+		`INSERT INTO manual_cash_transaction_drafts_v39
+			(id,entry_type,payload,status,recorded_by,approved_by,transaction_id,created_at,updated_at,approved_at)
+			SELECT id,entry_type,payload,status,recorded_by,approved_by,transaction_id,created_at,updated_at,approved_at
+			FROM manual_cash_transaction_drafts`,
+		`DROP TABLE manual_cash_transaction_drafts`,
+		`ALTER TABLE manual_cash_transaction_drafts_v39 RENAME TO manual_cash_transaction_drafts`,
+		`CREATE INDEX idx_manual_cash_transaction_drafts_pending ON manual_cash_transaction_drafts(entry_type,status,created_at)`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return fmt.Errorf("rebuild manual cash transaction drafts: %w", err)
+		}
+	}
+	return nil
 }
 
 func addOldNPPColumnIfMissing(tx *sql.Tx, isSQLite bool) error {
