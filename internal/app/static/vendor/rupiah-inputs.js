@@ -264,8 +264,10 @@
       if (parameters && typeof parameters.delete === "function" && typeof parameters.append === "function") {
         parameters.delete(name);
         values.forEach(function (value) { parameters.append(name, value); });
+      } else if (parameters && typeof parameters.set === "function") {
+        parameters.set(name, values.length === 1 ? values[0] : values);
       } else if (parameters) {
-        parameters[name] = values;
+        parameters[name] = values.length === 1 ? values[0] : values;
       }
     });
   }
