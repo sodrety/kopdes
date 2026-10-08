@@ -246,15 +246,26 @@
   }
 
   function normalizeParameters(parameters, form) {
+    var valuesByName = Object.create(null);
     rupiahFields(form).forEach(function (field) {
-      var digits = validateRupiah(field);
-      if (digits === null || !field.name) {
+      if (!field.name) {
         return;
       }
-      if (parameters && typeof parameters.set === "function") {
-        parameters.set(field.name, digits);
+      var digits = validateRupiah(field);
+      if (!valuesByName[field.name]) {
+        valuesByName[field.name] = [];
+      }
+      // Keep one value for every same-named input, including blank debit or
+      // credit cells, so each amount remains aligned with its journal row.
+      valuesByName[field.name].push(digits === null ? field.value : digits);
+    });
+    Object.keys(valuesByName).forEach(function (name) {
+      var values = valuesByName[name];
+      if (parameters && typeof parameters.delete === "function" && typeof parameters.append === "function") {
+        parameters.delete(name);
+        values.forEach(function (value) { parameters.append(name, value); });
       } else if (parameters) {
-        parameters[field.name] = digits;
+        parameters[name] = values;
       }
     });
   }
