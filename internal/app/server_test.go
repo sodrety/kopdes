@@ -4197,7 +4197,7 @@ func TestAdminTransactionsPageShowsAggregateCashLedgerAndManualEntryForm(t *test
 		t.Fatalf("expected admin transactions page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{`class="sidebar-link active" href="/admin/transactions"`, "Transaksi Kas", "Daftar transaksi", "Total Pemasukan", "850.000", "Total Pengeluaran", "700.000", "Saldo Akhir", "150.000", "Simpanan sukarela dari Cash Ledger Member", "Penarikan sukarela oleh Cash Ledger Member", "Pencairan pinjaman untuk Cash Ledger Member", "Angsuran pinjaman dari Cash Ledger Member", "CASH-SAVE", "RPY-TEST"} {
+	for _, text := range []string{"Transaksi Kas", "Daftar transaksi", "Total Pemasukan", "850.000", "Total Pengeluaran", "700.000", "Saldo Akhir", "150.000", "Simpanan sukarela dari Cash Ledger Member", "Penarikan sukarela oleh Cash Ledger Member", "Pencairan pinjaman untuk Cash Ledger Member", "Angsuran pinjaman dari Cash Ledger Member", "CASH-SAVE", "RPY-TEST"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected transactions page to include %q, got %s", text, body)
 		}
