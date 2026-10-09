@@ -847,6 +847,10 @@ button:disabled {
   color: var(--negative);
   font-weight: 700;
 }
+.journal-balance-summary[data-idle="true"] {
+  border-color: var(--line);
+  background: var(--canvas-soft);
+}
 .journal-balance-summary[data-balanced="true"] {
   border-color: #16a34a;
   background: #f0fdf4;
@@ -1560,6 +1564,17 @@ button:disabled {
 	font-weight: 700;
   color: #5a5c69;
 }
+.page-shell .summary-grid .summary-card {
+  min-width: 0;
+}
+.page-shell .summary-grid .summary-card strong {
+  min-width: 0;
+  max-width: 100%;
+  font-size: clamp(14px, 1.15vw, 17px);
+  line-height: 1.3;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
 .summary-grid .summary-card:nth-child(2) {
   border-left-color: #1cc88a;
 }
@@ -1733,6 +1748,45 @@ a {
 }
 .narrow-panel {
   max-width: 560px;
+}
+.page-shell > .panel.form-panel:not(:has(.table-scroll)) {
+  max-width: 760px;
+}
+.page-shell > .accounting-mapping-form-panel {
+  max-width: 760px;
+}
+.tagihan-saving-source {
+  display: grid;
+  gap: 4px;
+}
+.accounting-mapping-table select[name="transaction_type"] {
+  min-width: 150px;
+}
+.accounting-mapping-table select[name="component"] {
+  min-width: 240px;
+}
+.accounting-mapping-table select[name="category"] {
+  min-width: 160px;
+}
+.accounting-mapping-table select[name="loan_type"] {
+  min-width: 245px;
+}
+.accounting-mapping-table select[name="coa_code"] {
+  min-width: 240px;
+}
+.accounting-mapping-table input[type="date"] {
+  min-width: 140px;
+}
+.reference-value {
+  display: inline-block;
+  max-width: min(28vw, 320px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+.dashboard-activity-card .reference-value {
+  display: block;
 }
 h2 {
   margin: 0;
@@ -2757,28 +2811,30 @@ td:nth-child(n+2):not(.review-cell) {
     display: inline;
   }
   .sidebar-nav {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     min-width: 0;
     max-width: 100%;
-    overflow-x: auto;
-    padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible;
+    padding: 0;
   }
   .sidebar-nav-group {
-    display: flex;
+    display: contents;
     gap: 8px;
   }
   .sidebar-group-label {
     display: none;
   }
 	  .sidebar-link {
-	    flex: 0 0 auto;
+	    min-width: 0;
 	    gap: 8px;
 	    padding: 8px 10px;
 	    border-radius: var(--radius-md);
 	    font-size: 13px;
 	    line-height: 18px;
+	    white-space: normal;
+	    overflow-wrap: anywhere;
 	  }
   .sidebar-icon {
     width: 18px;
@@ -2792,7 +2848,40 @@ td:nth-child(n+2):not(.review-cell) {
     padding: 24px 16px 40px;
   }
   .admin-topbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
     margin-bottom: 24px;
+    margin-left: -12px;
+    margin-right: -12px;
+    padding: 12px;
+  }
+  .admin-topbar > .button-link {
+    flex: 1 1 140px;
+    min-width: 0;
+    justify-content: center;
+    text-align: center;
+    white-space: normal;
+  }
+  .admin-topbar .language-form {
+    flex: 1 1 170px;
+    min-width: 0;
+  }
+  .admin-topbar .language-form label {
+    display: grid;
+    gap: 4px;
+  }
+  .admin-topbar .language-form select {
+    width: 100%;
+    min-width: 0;
+  }
+  .admin-topbar .logout-form {
+    margin-left: auto;
+  }
+  .admin-topbar .logout-form button {
+    white-space: nowrap;
   }
   .page-header {
     margin-bottom: 16px;
@@ -2861,6 +2950,9 @@ td:nth-child(n+2):not(.review-cell) {
 	  .page-shell .summary-card {
 	    border-radius: var(--radius-lg);
 	    padding: 14px;
+	  }
+	  .page-shell .summary-grid .summary-card {
+	    padding-right: 68px;
 	  }
   .inline-approval-form,
   .inline-rejection-form,

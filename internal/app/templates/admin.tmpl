@@ -32,7 +32,7 @@
               <tr>
                 <td>{{.RecordDate}}</td>
                 <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
-                <td>{{.FullName}} - {{.ReferenceNo}}</td>
+                <td>{{.FullName}}{{if .ReferenceNo}}<span class="reference-value" title="{{.ReferenceNo}}">{{.ReferenceNo}}</span>{{end}}</td>
                 <td>{{nominal .Amount}}</td>
               </tr>
               {{end}}
@@ -396,14 +396,47 @@
 
 {{define "admin-accounting-mappings"}}
 {{template "admin-shell-start" .}}
-      <section class="panel">
+      <section class="panel accounting-mapping-form-panel">
         <h2>{{t .Lang "accounting_mapping"}}</h2>
         <p class="field-help">{{t .Lang "accounting_mapping_description"}}</p>
         <form class="filter-form" method="post" action="/api/admin/accounting-mappings">
-          <label>{{t .Lang "transaction_type"}} <input name="transaction_type" required></label>
-          <label>{{t .Lang "component"}} <input name="component" required></label>
-          <label>{{t .Lang "category"}} <input name="category"></label>
-          <label>{{t .Lang "loan_type"}} <input name="loan_type"></label>
+          <label>{{t .Lang "transaction_type"}}
+            <select name="transaction_type" required>
+              <option value="">{{t .Lang "select_transaction_type"}}</option>
+              <option value="savings">{{t .Lang "transaction_type_savings"}}</option>
+              <option value="withdrawal">{{t .Lang "transaction_type_withdrawal"}}</option>
+              <option value="loan">{{t .Lang "transaction_type_loan"}}</option>
+              <option value="repayment">{{t .Lang "transaction_type_repayment"}}</option>
+              <option value="manual">{{t .Lang "transaction_type_manual"}}</option>
+            </select>
+          </label>
+          <label>{{t .Lang "component"}}
+            <select name="component" required>
+              <option value="">{{t .Lang "select_component"}}</option>
+              <option value="cash_bank">{{t .Lang "mapping_component_cash_bank"}}</option>
+              <option value="savings_liability">{{t .Lang "mapping_component_savings_liability"}}</option>
+              <option value="loan_receivable">{{t .Lang "mapping_component_loan_receivable"}}</option>
+              <option value="admin_fee_income">{{t .Lang "mapping_component_admin_fee_income"}}</option>
+            </select>
+          </label>
+          <label>{{t .Lang "category"}}
+            <select name="category">
+              <option value="">{{t .Lang "all_categories"}}</option>
+              <option value="pokok">{{t .Lang "simpanan_pokok"}}</option>
+              <option value="wajib">{{t .Lang "simpanan_wajib"}}</option>
+              <option value="sukarela">{{t .Lang "simpanan_sukarela"}}</option>
+              <option value="shu">{{t .Lang "simpanan_shu"}}</option>
+              <option value="khusus">{{t .Lang "simpanan_khusus"}}</option>
+            </select>
+          </label>
+          <label>{{t .Lang "loan_type"}}
+            <select name="loan_type">
+              <option value="">{{t .Lang "all_loan_types"}}</option>
+              <option value="regular">{{t .Lang "loan_type_regular"}}</option>
+              <option value="secondary_goods">{{t .Lang "loan_type_secondary_goods"}}</option>
+              <option value="goods_purchase_paylater">{{t .Lang "loan_type_goods_purchase_paylater"}}</option>
+            </select>
+          </label>
           <label>{{t .Lang "coa_account"}}
             <select name="coa_code" required>
               <option value="">{{t .Lang "select_coa_account"}}</option>
@@ -419,15 +452,42 @@
       <section class="panel">
         <h2>{{t .Lang "accounting_mappings"}}</h2>
         {{if .Mappings}}
-{{template "table-open" .}}
+        <div class="table-scroll accounting-mapping-table"><table data-enhanced-table{{if .ServerPaginated}} data-server-paginated{{end}} data-page-label="{{t $.Lang "table_page_status"}}" data-previous-label="{{t $.Lang "previous_page"}}" data-next-label="{{t $.Lang "next_page"}}">
           <thead><tr><th>{{t $.Lang "transaction_type"}}</th><th>{{t $.Lang "component"}}</th><th>{{t $.Lang "category"}}</th><th>{{t $.Lang "loan_type"}}</th><th>{{t $.Lang "coa_account"}}</th><th>{{t $.Lang "effective_from"}}</th><th>{{t $.Lang "effective_to"}}</th><th>{{t $.Lang "active"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
           <tbody>
             {{range $mapping := .Mappings}}
             <tr>
-              <td><input form="mapping-{{$mapping.ID}}" name="transaction_type" value="{{$mapping.TransactionType}}" required></td>
-              <td><input form="mapping-{{$mapping.ID}}" name="component" value="{{$mapping.Component}}" required></td>
-              <td><input form="mapping-{{$mapping.ID}}" name="category" value="{{$mapping.Category}}"></td>
-              <td><input form="mapping-{{$mapping.ID}}" name="loan_type" value="{{$mapping.LoanType}}"></td>
+              <td><select form="mapping-{{$mapping.ID}}" name="transaction_type" required>
+                <option value="savings" {{if eq $mapping.TransactionType "savings"}}selected{{end}}>{{t $.Lang "transaction_type_savings"}}</option>
+                <option value="withdrawal" {{if eq $mapping.TransactionType "withdrawal"}}selected{{end}}>{{t $.Lang "transaction_type_withdrawal"}}</option>
+                <option value="loan" {{if eq $mapping.TransactionType "loan"}}selected{{end}}>{{t $.Lang "transaction_type_loan"}}</option>
+                <option value="repayment" {{if eq $mapping.TransactionType "repayment"}}selected{{end}}>{{t $.Lang "transaction_type_repayment"}}</option>
+                <option value="manual" {{if eq $mapping.TransactionType "manual"}}selected{{end}}>{{t $.Lang "transaction_type_manual"}}</option>
+                {{if not (or (eq $mapping.TransactionType "savings") (eq $mapping.TransactionType "withdrawal") (eq $mapping.TransactionType "loan") (eq $mapping.TransactionType "repayment") (eq $mapping.TransactionType "manual"))}}<option value="{{$mapping.TransactionType}}" selected>{{t $.Lang "mapping_unknown_value"}}</option>{{end}}
+              </select></td>
+              <td><select form="mapping-{{$mapping.ID}}" name="component" required>
+                <option value="cash_bank" {{if eq $mapping.Component "cash_bank"}}selected{{end}}>{{t $.Lang "mapping_component_cash_bank"}}</option>
+                <option value="savings_liability" {{if eq $mapping.Component "savings_liability"}}selected{{end}}>{{t $.Lang "mapping_component_savings_liability"}}</option>
+                <option value="loan_receivable" {{if eq $mapping.Component "loan_receivable"}}selected{{end}}>{{t $.Lang "mapping_component_loan_receivable"}}</option>
+                <option value="admin_fee_income" {{if eq $mapping.Component "admin_fee_income"}}selected{{end}}>{{t $.Lang "mapping_component_admin_fee_income"}}</option>
+                {{if not (or (eq $mapping.Component "cash_bank") (eq $mapping.Component "savings_liability") (eq $mapping.Component "loan_receivable") (eq $mapping.Component "admin_fee_income"))}}<option value="{{$mapping.Component}}" selected>{{t $.Lang "mapping_unknown_value"}}</option>{{end}}
+              </select></td>
+              <td><select form="mapping-{{$mapping.ID}}" name="category">
+                <option value="" {{if eq $mapping.Category ""}}selected{{end}}>{{t $.Lang "all_categories"}}</option>
+                <option value="pokok" {{if eq $mapping.Category "pokok"}}selected{{end}}>{{t $.Lang "simpanan_pokok"}}</option>
+                <option value="wajib" {{if eq $mapping.Category "wajib"}}selected{{end}}>{{t $.Lang "simpanan_wajib"}}</option>
+                <option value="sukarela" {{if eq $mapping.Category "sukarela"}}selected{{end}}>{{t $.Lang "simpanan_sukarela"}}</option>
+                <option value="shu" {{if eq $mapping.Category "shu"}}selected{{end}}>{{t $.Lang "simpanan_shu"}}</option>
+                <option value="khusus" {{if eq $mapping.Category "khusus"}}selected{{end}}>{{t $.Lang "simpanan_khusus"}}</option>
+                {{if not (or (eq $mapping.Category "") (eq $mapping.Category "pokok") (eq $mapping.Category "wajib") (eq $mapping.Category "sukarela") (eq $mapping.Category "shu") (eq $mapping.Category "khusus"))}}<option value="{{$mapping.Category}}" selected>{{t $.Lang "mapping_unknown_value"}}</option>{{end}}
+              </select></td>
+              <td><select form="mapping-{{$mapping.ID}}" name="loan_type">
+                <option value="" {{if eq $mapping.LoanType ""}}selected{{end}}>{{t $.Lang "all_loan_types"}}</option>
+                <option value="regular" {{if eq $mapping.LoanType "regular"}}selected{{end}}>{{t $.Lang "loan_type_regular"}}</option>
+                <option value="secondary_goods" {{if eq $mapping.LoanType "secondary_goods"}}selected{{end}}>{{t $.Lang "loan_type_secondary_goods"}}</option>
+                <option value="goods_purchase_paylater" {{if eq $mapping.LoanType "goods_purchase_paylater"}}selected{{end}}>{{t $.Lang "loan_type_goods_purchase_paylater"}}</option>
+                {{if not (or (eq $mapping.LoanType "") (eq $mapping.LoanType "regular") (eq $mapping.LoanType "secondary_goods") (eq $mapping.LoanType "goods_purchase_paylater"))}}<option value="{{$mapping.LoanType}}" selected>{{t $.Lang "mapping_unknown_value"}}</option>{{end}}
+              </select></td>
               <td><select form="mapping-{{$mapping.ID}}" name="coa_code" required>{{range $.COAAccounts}}<option value="{{.Code}}" {{if eq .Code $mapping.COACode}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></td>
               <td><input form="mapping-{{$mapping.ID}}" type="date" name="effective_from" value="{{$mapping.EffectiveFrom}}"></td>
               <td><input form="mapping-{{$mapping.ID}}" type="date" name="effective_to" value="{{$mapping.EffectiveTo}}"></td>
@@ -481,11 +541,11 @@
               </tr>{{end}}
             </tbody>
           </table></div>
-          <div class="journal-balance-summary" data-journal-balance data-balanced="false" data-group-separator="{{if eq .Lang "id"}}.{{else}},{{end}}" data-balanced-message="{{t .Lang "journal_balanced"}}" data-unbalanced-message="{{t .Lang "journal_unbalanced"}}" aria-live="polite">
+          <div class="journal-balance-summary" data-journal-balance data-balanced="false" data-idle="true" data-group-separator="{{if eq .Lang "id"}}.{{else}},{{end}}" data-balanced-message="{{t .Lang "journal_balanced"}}" data-unbalanced-message="{{t .Lang "journal_unbalanced"}}" aria-live="polite">
             <div><span>{{t .Lang "debit"}}</span><strong>Rp <span data-journal-debit-total>0</span></strong></div>
             <div><span>{{t .Lang "credit"}}</span><strong>Rp <span data-journal-credit-total>0</span></strong></div>
             <div><span>{{t .Lang "journal_difference"}}</span><strong>Rp <span data-journal-difference>0</span></strong></div>
-            <p data-journal-balance-status>{{t .Lang "journal_unbalanced"}}</p>
+            <p data-journal-balance-status hidden>{{t .Lang "journal_unbalanced"}}</p>
           </div>
           <div class="button-row"><button type="button" class="button-secondary" data-add-journal-line>{{t .Lang "add_journal_line"}}</button><button type="submit" data-journal-submit disabled>{{t .Lang "submit_for_approval"}}</button></div>
         </form>
@@ -604,7 +664,11 @@
             creditOutput.textContent = credit === null ? '—' : formattedAmount(credit);
             differenceOutput.textContent = difference === null ? '—' : formattedAmount(difference);
             var balanced = validTotals && debit > 0n && debit === credit;
+            var hasAmounts = Array.from(body.querySelectorAll('[name="debit_amount"], [name="credit_amount"]')).some(function (input) { return input.value.trim() !== ''; });
+            var showStatus = hasAmounts || !validTotals;
             summary.dataset.balanced = balanced ? 'true' : 'false';
+            summary.dataset.idle = showStatus ? 'false' : 'true';
+            statusOutput.hidden = !showStatus;
             statusOutput.textContent = balanced ? summary.dataset.balancedMessage : summary.dataset.unbalancedMessage;
             submit.disabled = !balanced;
           }
@@ -648,7 +712,7 @@
       <section class="panel">
         <h2>{{t .Lang "tagihan_saving_configuration"}}</h2>
         <div class="form-grid form-grid-two">
-          <div><span>{{t .Lang "tagihan_saving_source"}}</span><strong>{{t .Lang "tagihan_saving_source_latest_member"}}</strong></div>
+          <div class="tagihan-saving-source"><span>{{t .Lang "tagihan_saving_source"}}</span><strong>{{t .Lang "tagihan_saving_source_latest_member"}}</strong></div>
         </div>
         <p>{{t .Lang "tagihan_saving_configuration_description"}}</p>
         {{if .TagihanConfig.ReadOnly}}<p>{{t .Lang "read_only"}}</p>{{end}}
@@ -1150,7 +1214,7 @@
               <td>{{t $.Lang (printf "simpanan_%s" .Category)}}</td>
               <td>{{t $.Lang .Type}}</td>
               <td>{{nominal .Amount}}</td>
-              <td>{{.ReferenceNo}}</td>
+              <td><span class="reference-value" title="{{.ReferenceNo}}">{{.ReferenceNo}}</span></td>
             </tr>
             {{end}}
           </tbody>
@@ -1235,11 +1299,11 @@
               </tr>{{end}}
             </tbody>
           </table></div>
-          <div class="journal-balance-summary" data-cash-journal-balance data-balanced="false" data-group-separator="{{if eq .Lang "id"}}.{{else}},{{end}}" data-balanced-message="{{t .Lang "journal_balanced"}}" data-unbalanced-message="{{t .Lang "journal_unbalanced"}}" aria-live="polite">
+          <div class="journal-balance-summary" data-cash-journal-balance data-balanced="false" data-idle="true" data-group-separator="{{if eq .Lang "id"}}.{{else}},{{end}}" data-balanced-message="{{t .Lang "journal_balanced"}}" data-unbalanced-message="{{t .Lang "journal_unbalanced"}}" aria-live="polite">
             <div><span>{{t .Lang "debit"}}</span><strong>Rp <span data-cash-debit-total>0</span></strong></div>
             <div><span>{{t .Lang "credit"}}</span><strong>Rp <span data-cash-credit-total>0</span></strong></div>
             <div><span>{{t .Lang "journal_difference"}}</span><strong>Rp <span data-cash-difference>0</span></strong></div>
-            <p data-cash-balance-status>{{t .Lang "journal_unbalanced"}}</p>
+            <p data-cash-balance-status hidden>{{t .Lang "journal_unbalanced"}}</p>
           </div>
           <div class="button-row"><button type="button" class="button-secondary" data-cash-add-line>{{t .Lang "add_journal_line"}}</button><button type="submit" data-cash-submit disabled>{{t .Lang "submit_for_approval"}}</button></div>
         </form>
@@ -1265,8 +1329,12 @@
           summary.querySelector('[data-cash-credit-total]').textContent = credit.toLocaleString();
           summary.querySelector('[data-cash-difference]').textContent = difference.toLocaleString();
           var balanced = debit > 0 && debit === credit;
+          var hasAmounts = Array.from(body.querySelectorAll('[name="debit_amount"], [name="credit_amount"]')).some(function (input) { return input.value.trim() !== ''; });
+          var status = summary.querySelector('[data-cash-balance-status]');
           summary.dataset.balanced = balanced ? 'true' : 'false';
-          summary.querySelector('[data-cash-balance-status]').textContent = balanced ? summary.dataset.balancedMessage : summary.dataset.unbalancedMessage;
+          summary.dataset.idle = hasAmounts ? 'false' : 'true';
+          status.hidden = !hasAmounts;
+          status.textContent = balanced ? summary.dataset.balancedMessage : summary.dataset.unbalancedMessage;
           submit.disabled = !balanced;
         }
         add.addEventListener('click', function () {
@@ -1713,7 +1781,7 @@
               <td>{{t $.Lang (printf "simpanan_%s" .Category)}}</td>
               <td>{{t $.Lang .Type}}</td>
               <td>{{nominal .Amount}}</td>
-              <td>{{.ReferenceNo}}</td>
+              <td><span class="reference-value" title="{{.ReferenceNo}}">{{.ReferenceNo}}</span></td>
               <td>{{.Note}}</td>
             </tr>
             {{end}}
@@ -2321,7 +2389,7 @@
               <td>{{template "member-table-cell" .}}</td>
               <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
               <td>{{nominal .Amount}}</td>
-              <td>{{.ReferenceNo}}</td>
+              <td><span class="reference-value" title="{{.ReferenceNo}}">{{.ReferenceNo}}</span></td>
               <td>{{.Note}}</td>
               {{if $.CanCorrect}}
               <td>
