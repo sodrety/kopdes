@@ -248,6 +248,7 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 		MemberID                string
 		LoanType                string
 		RequestedAmount         int64
+		RequestedAdminFee       *int64
 		RequestedDurationMonths int
 		Status                  string
 		Stage                   string
@@ -263,7 +264,7 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 		ProposedLoanCOACode     string
 		ProposedAdminFeeCOACode string
 	}
-	err = tx.QueryRow(`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,'') FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode)
+	err = tx.QueryRow(`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),requested_admin_fee FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.RequestedAdminFee)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
@@ -336,6 +337,12 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 		case "secondary_goods":
 			calc, err = calculateSecondaryGoodsLoanSchedule(amount, duration, startDate)
 			adminFeePolicy = secondaryGoodsAdminFeePolicy
+		case "voucher":
+			if request.RequestedAdminFee == nil {
+				return LoanApprovalResult{}, errInvalidLoanApproval
+			}
+			calc, err = calculateVoucherLoanSchedule(amount, *request.RequestedAdminFee, duration, startDate)
+			adminFeePolicy = voucherAdminFeePolicy
 		case "goods_purchase_paylater":
 			calc, err = calculatePaylaterLoanSchedule(amount, duration, startDate)
 			adminFeePolicy = paylaterAdminFeePolicy
@@ -354,7 +361,7 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 			snapshotMonthlyAdminFee = &monthlyAdminFee
 		}
 		request.ProposedMonthlyAdminFee = snapshotMonthlyAdminFee
-		if adminFeePolicy == secondaryGoodsAdminFeePolicy || adminFeePolicy == paylaterAdminFeePolicy {
+		if adminFeePolicy == secondaryGoodsAdminFeePolicy || adminFeePolicy == paylaterAdminFeePolicy || adminFeePolicy == voucherAdminFeePolicy {
 			request.ProposedMonthlyAdminFee = nil
 		}
 		request.ProposedTotalAdminFee = calc.TotalAdminFee
@@ -378,7 +385,7 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 	if request.ProposedAdminFeePolicy == secondaryGoodsAdminFeePolicy {
 		maxDuration = maxSecondaryGoodsDuration
 	}
-	if request.ProposedAdminFeePolicy == paylaterAdminFeePolicy {
+	if request.ProposedAdminFeePolicy == paylaterAdminFeePolicy || request.ProposedAdminFeePolicy == voucherAdminFeePolicy {
 		maxDuration = 1
 	}
 	calc, err = buildLoanScheduleFromObligation(request.ProposedTotalObligation, request.ProposedDurationMonths, request.ProposedStartDate, maxDuration)

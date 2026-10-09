@@ -231,6 +231,21 @@ test("Anggota loan preview shows monthly installment instead of monthly admin fe
   assert.equal(browser.output.textContent, "Monthly installment: Rp 1,575,000 · Total admin fee: Rp 7,800,000 · Total obligation: Rp 37,800,000");
 });
 
+test("Voucher preview preserves the nominal fee when principal changes and fixes tenor", () => {
+  for (const fee of ["12,345", "0"]) {
+    const browser = loanPreviewHarness({ type: "voucher", amount: "Rp 100,000", duration: "9" });
+    browser.form.dataset.voucherAdminFee = fee;
+    browser.form.dispatch("input");
+    assert.equal(browser.durationField.value, "1");
+    assert.equal(browser.durationField.max, "1");
+    browser.amountField.value = "Rp 120,000";
+    browser.form.dispatch("input");
+    assert.equal(browser.output.textContent, fee === "0"
+      ? "Total admin fee: Rp 0 · Total obligation: Rp 120,000"
+      : "Total admin fee: Rp 12,345 · Total obligation: Rp 132,345");
+  }
+});
+
 test("Anggota loan preview includes monthly installment for one-time-fee loans", () => {
   const browser = loanPreviewHarness({
     type: "secondary_goods",

@@ -16,6 +16,7 @@ const (
 	regularLoanAdminFeePolicy    = "regular_tiered_monthly_v1"
 	secondaryGoodsAdminFeePolicy = "secondary_goods_one_time_v1"
 	paylaterAdminFeePolicy       = "goods_purchase_paylater_one_time_v1"
+	voucherAdminFeePolicy        = "voucher_nominal_one_time_v1"
 	regularLoanFirstTierLimit    = int64(25_000_000)
 )
 
@@ -97,6 +98,10 @@ func validateLoanFeeSnapshot(policy string, principal int64, durationMonths int,
 		if err != nil || monthlyAdminFee != nil || durationMonths != 1 || totalAdminFee != expectedFee {
 			return errors.New("invalid Paylater Loan fee snapshot")
 		}
+	case voucherAdminFeePolicy:
+		if monthlyAdminFee != nil || durationMonths != 1 {
+			return errors.New("invalid Voucher Loan fee snapshot")
+		}
 	case "legacy_flat_monthly":
 		// Historical monthly rates were not snapshotted reliably. The preserved
 		// total is authoritative; no derived monthly value may be invented.
@@ -107,6 +112,15 @@ func validateLoanFeeSnapshot(policy string, principal int64, durationMonths int,
 		return fmt.Errorf("unknown admin fee policy %q", policy)
 	}
 	return nil
+}
+
+func calculateVoucherLoanSchedule(principal, adminFee int64, durationMonths int, startDate string) (LoanScheduleCalculation, error) {
+	if principal <= 0 || adminFee < 0 || principal > math.MaxInt64-adminFee || durationMonths != 1 {
+		return LoanScheduleCalculation{}, errors.New("invalid voucher loan terms")
+	}
+	calc, err := buildLoanScheduleFromObligation(principal+adminFee, 1, startDate, 1)
+	calc.TotalAdminFee = adminFee
+	return calc, err
 }
 
 func calculatePercentAdminFee(principal int64, percent int64) (int64, error) {

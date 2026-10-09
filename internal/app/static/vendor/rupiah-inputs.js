@@ -151,7 +151,7 @@
   }
 
   function loanTypeMaxDuration(type) {
-    if (type === "goods_purchase_paylater") {
+    if (type === "goods_purchase_paylater" || type === "voucher") {
       return 1;
     }
     if (type === "secondary_goods") {
@@ -170,7 +170,7 @@
     var type = formLoanType(form);
     var maxDuration = loanTypeMaxDuration(type);
     durationField.max = String(maxDuration);
-    if (type === "goods_purchase_paylater") {
+    if (type === "goods_purchase_paylater" || type === "voucher") {
       durationField.value = "1";
     } else if (Number(durationField.value || "0") > maxDuration) {
       durationField.value = String(maxDuration);
@@ -184,6 +184,10 @@
     }
     var amount = BigInt(canonicalDigits(digits));
     var fee = adminFeeFor(type, amount, duration);
+    if (type === "voucher") {
+      var nominalDigits = rupiahDigits(form.dataset.voucherAdminFee || "");
+      fee = nominalDigits === null || nominalDigits === "" ? null : {monthly: null, total: BigInt(canonicalDigits(nominalDigits))};
+    }
     if (!fee) {
       output.hidden = true;
       output.textContent = "";

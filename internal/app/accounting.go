@@ -293,6 +293,10 @@ func (s *Server) createFinancialJournalTx(tx *sql.Tx, input accountingJournalInp
 }
 
 func (s *Server) accountingMappingCOACodeTx(tx *sql.Tx, transactionType, component, category, loanType, transactionDate string) (string, error) {
+	// Voucher uses the same Primer receivable and admin-fee income as Paylater.
+	if loanType == "voucher" {
+		loanType = "goods_purchase_paylater"
+	}
 	var code string
 	err := tx.QueryRow(`SELECT COALESCE(coa_code,'') FROM accounting_mappings
 		WHERE transaction_type=$1 AND component=$2 AND active=TRUE

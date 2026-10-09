@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -18,7 +19,7 @@ import (
 )
 
 const (
-	adminLoanRequestTemplateVersion = "1"
+	adminLoanRequestTemplateVersion = "2"
 	adminLoanRequestHeaderRow       = 4
 	adminLoanRequestMaxRows         = 1000
 	adminLoanRequestMaxFileBytes    = 12 << 20
@@ -30,15 +31,18 @@ var adminLoanRequestHeaders = []string{
 	"Jumlah Pengajuan",
 	"Tenor (Bulan)",
 	"Tujuan",
+	"Biaya Admin (Nominal)",
 }
 
 var adminLoanTypeLabels = map[string]string{
+	"Voucher":                   "voucher",
 	"Reguler":                   "regular",
 	"Barang Sekunder":           "secondary_goods",
 	"Pembelian Barang/Paylater": "goods_purchase_paylater",
 }
 
 var adminLoanTypeCodes = map[string]string{
+	"voucher":                 "Voucher",
 	"regular":                 "Reguler",
 	"secondary_goods":         "Barang Sekunder",
 	"goods_purchase_paylater": "Pembelian Barang/Paylater",
@@ -58,6 +62,7 @@ var (
 )
 
 type adminLoanRequestInput struct {
+	AdminFee            *int64 `json:"admin_fee" form:"admin_fee"`
 	MemberNo            string `json:"member_no" form:"member_no"`
 	LoanType            string `json:"loan_type" form:"loan_type"`
 	RequestedAmount     int64  `json:"requested_amount" form:"requested_amount"`
@@ -68,6 +73,7 @@ type adminLoanRequestInput struct {
 }
 
 type adminLoanRequestRow struct {
+	AdminFee        *int64
 	ExcelRow        int
 	MemberNo        string
 	FullName        string
@@ -81,6 +87,7 @@ type adminLoanRequestRow struct {
 }
 
 type AdminLoanRequestBatchRow struct {
+	AdminFee        *int64   `json:"admin_fee"`
 	ID              string   `json:"id"`
 	ExcelRow        int      `json:"excel_row"`
 	MemberNo        string   `json:"member_no"`
@@ -128,7 +135,7 @@ func maxLoanDurationForType(loanType string) int {
 		return maxRegularLoanDurationMonths
 	case "secondary_goods":
 		return maxSecondaryGoodsDuration
-	case "goods_purchase_paylater":
+	case "goods_purchase_paylater", "voucher":
 		return 1
 	default:
 		return 0
@@ -184,18 +191,23 @@ func parseAdminLoanWorkbook(data []byte) ([]adminLoanRequestRow, error) {
 	if inputErr != nil || guideErr != nil || inputSheet < 0 || guideSheet < 0 {
 		return nil, errInvalidAdminLoanWorkbook
 	}
-	if cellValue(workbook, "Petunjuk", "B1") != adminLoanRequestTemplateVersion {
+	version := cellValue(workbook, "Petunjuk", "B1")
+	if version != adminLoanRequestTemplateVersion && version != "1" {
 		return nil, errInvalidAdminLoanWorkbook
 	}
-	rows, err := workbook.GetRows("Pengajuan Pinjaman")
+	rows, err := workbook.GetRows("Pengajuan Pinjaman", excelize.Options{RawCellValue: true})
 	if err != nil || len(rows) < adminLoanRequestHeaderRow {
 		return nil, errInvalidAdminLoanWorkbook
 	}
 	headers := rows[adminLoanRequestHeaderRow-1]
-	if len(headers) != len(adminLoanRequestHeaders) {
+	expectedHeaders := adminLoanRequestHeaders
+	if version == "1" {
+		expectedHeaders = expectedHeaders[:5]
+	}
+	if len(headers) != len(expectedHeaders) {
 		return nil, errInvalidAdminLoanWorkbook
 	}
-	for index, expected := range adminLoanRequestHeaders {
+	for index, expected := range expectedHeaders {
 		if headers[index] != expected {
 			return nil, errInvalidAdminLoanWorkbook
 		}
@@ -211,7 +223,7 @@ func parseAdminLoanWorkbook(data []byte) ([]adminLoanRequestRow, error) {
 			}
 		}
 		extraValue := false
-		for _, value := range values[len(adminLoanRequestHeaders):] {
+		for _, value := range values[minInt(len(values), len(expectedHeaders)):] {
 			if strings.TrimSpace(value) != "" {
 				extraValue = true
 				break
@@ -228,6 +240,14 @@ func parseAdminLoanWorkbook(data []byte) ([]adminLoanRequestRow, error) {
 			continue
 		}
 		row := adminLoanRequestRow{ExcelRow: excelRow, MemberNo: cells[0], FullName: "", Purpose: cells[4]}
+		if cells[5] != "" {
+			fee, parseErr := strconv.ParseInt(cells[5], 10, 64)
+			if parseErr != nil || fee < 0 {
+				row.Errors = append(row.Errors, "admin_issue_voucher_fee")
+			} else {
+				row.AdminFee = &fee
+			}
+		}
 		if extraValue {
 			row.Errors = append(row.Errors, "admin_issue_extra_column")
 		}
@@ -294,6 +314,10 @@ func adminLoanIssueMessage(key string) string {
 
 func (s *Server) validateAdminLoanRow(tx *sql.Tx, row *adminLoanRequestRow, lock bool) (string, []string, error) {
 	if len(row.Errors) > 0 {
+		return "", nil, nil
+	}
+	if (row.LoanType == "voucher" && (row.AdminFee == nil || *row.AdminFee < 0 || row.RequestedAmount > math.MaxInt64-*row.AdminFee)) || (row.LoanType != "voucher" && row.AdminFee != nil) {
+		row.Errors = append(row.Errors, "admin_issue_voucher_fee")
 		return "", nil, nil
 	}
 	if err := validateLoanRequestInput(loanRequestInput{LoanType: row.LoanType, RequestedAmount: row.RequestedAmount, DurationMonths: row.DurationMonths, Purpose: row.Purpose}); err != nil {
@@ -437,7 +461,7 @@ func (s *Server) persistAdminLoanBatch(actor User, fileName, fileHash string, ro
 		} else if len(row.Warnings) > 0 {
 			rowStatus = "warning"
 		}
-		if _, err := tx.Exec(`INSERT INTO loan_request_batch_rows (id,batch_id,excel_row,member_no,full_name,loan_type,requested_amount,duration_months,purpose,status,errors,warnings) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, newID(), batchID, row.ExcelRow, row.MemberNo, row.FullName, row.LoanType, nullableInt64(row.RequestedAmount), nullableInt(row.DurationMonths), row.Purpose, rowStatus, joinAdminLoanIssues(row.Errors), joinAdminLoanIssues(row.Warnings)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO loan_request_batch_rows (id,batch_id,excel_row,member_no,full_name,loan_type,requested_amount,duration_months,purpose,status,errors,warnings,admin_fee) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, newID(), batchID, row.ExcelRow, row.MemberNo, row.FullName, row.LoanType, nullableInt64(row.RequestedAmount), nullableInt(row.DurationMonths), row.Purpose, rowStatus, joinAdminLoanIssues(row.Errors), joinAdminLoanIssues(row.Warnings), row.AdminFee); err != nil {
 			return AdminLoanRequestBatch{}, err
 		}
 	}
@@ -611,6 +635,9 @@ type adminLoanCreateResult struct {
 }
 
 func (s *Server) createAdminLoanRequestFor(actor User, input adminLoanRequestInput) (adminLoanCreateResult, error) {
+	if strings.TrimSpace(input.LoanType) == "voucher" {
+		return adminLoanCreateResult{}, errInvalidLoanRequest
+	}
 	input.MemberNo = strings.TrimSpace(input.MemberNo)
 	input.LoanType = strings.TrimSpace(input.LoanType)
 	input.Purpose = strings.TrimSpace(input.Purpose)
@@ -629,7 +656,7 @@ func (s *Server) createAdminLoanRequestFor(actor User, input adminLoanRequestInp
 		return adminLoanCreateResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	row := adminLoanRequestRow{MemberNo: input.MemberNo, LoanType: input.LoanType, RequestedAmount: input.RequestedAmount, DurationMonths: input.DurationMonths, Purpose: input.Purpose}
+	row := adminLoanRequestRow{MemberNo: input.MemberNo, LoanType: input.LoanType, RequestedAmount: input.RequestedAmount, DurationMonths: input.DurationMonths, Purpose: input.Purpose, AdminFee: input.AdminFee}
 	memberID, _, err := s.validateAdminLoanRow(tx, &row, true)
 	if err != nil {
 		return adminLoanCreateResult{}, err
@@ -673,6 +700,9 @@ type adminLoanRowError []string
 func (e adminLoanRowError) Error() string { return strings.Join(e, ",") }
 
 func (s *Server) insertAdminLoanRequestTx(tx *sql.Tx, actor User, memberID string, input adminLoanRequestInput, batchID string) (LoanRequest, error) {
+	if strings.TrimSpace(input.LoanType) == "voucher" && strings.TrimSpace(batchID) == "" {
+		return LoanRequest{}, errInvalidLoanRequest
+	}
 	pendingDeactivation, err := hasPendingMemberDeactivation(tx, memberID)
 	if err != nil {
 		return LoanRequest{}, err
@@ -680,8 +710,8 @@ func (s *Server) insertAdminLoanRequestTx(tx *sql.Tx, actor User, memberID strin
 	if pendingDeactivation {
 		return LoanRequest{}, adminLoanRowError{"admin_issue_deactivation_pending"}
 	}
-	request := LoanRequest{ID: newID(), MemberID: memberID, RequestedAmount: input.RequestedAmount, DurationMonths: input.DurationMonths, Purpose: strings.TrimSpace(input.Purpose), Status: "pending", LoanType: strings.TrimSpace(input.LoanType), CurrentApprovalStage: approvalStageManager}
-	_, err = tx.Exec(`INSERT INTO loan_requests (id,member_id,requested_amount,duration_months,purpose,status,loan_type,current_approval_stage,created_by,creation_source,batch_id,creation_idempotency_key) VALUES ($1,$2,$3,$4,$5,'pending',$6,'manager',$7,'admin',$8,$9)`, request.ID, request.MemberID, request.RequestedAmount, request.DurationMonths, request.Purpose, request.LoanType, actor.ID, nullableString(batchID), nullableString(input.IdempotencyKey))
+	request := LoanRequest{ID: newID(), MemberID: memberID, RequestedAmount: input.RequestedAmount, DurationMonths: input.DurationMonths, Purpose: strings.TrimSpace(input.Purpose), Status: "pending", LoanType: strings.TrimSpace(input.LoanType), RequestedAdminFee: input.AdminFee, CurrentApprovalStage: approvalStageManager}
+	_, err = tx.Exec(`INSERT INTO loan_requests (id,member_id,requested_amount,duration_months,purpose,status,loan_type,current_approval_stage,created_by,creation_source,batch_id,creation_idempotency_key,requested_admin_fee) VALUES ($1,$2,$3,$4,$5,'pending',$6,'manager',$7,'admin',$8,$9,$10)`, request.ID, request.MemberID, request.RequestedAmount, request.DurationMonths, request.Purpose, request.LoanType, actor.ID, nullableString(batchID), nullableString(input.IdempotencyKey), input.AdminFee)
 	if err != nil {
 		return LoanRequest{}, err
 	}
@@ -798,7 +828,7 @@ func (s *Server) commitAdminLoanRequestBatch(actor User, batchID string, acknowl
 	}
 	validationRows := make([]adminLoanRequestRow, len(rows))
 	for index, row := range rows {
-		validationRows[index] = adminLoanRequestRow{ExcelRow: row.ExcelRow, MemberNo: row.MemberNo, FullName: row.FullName, LoanType: row.LoanType, RequestedAmount: row.RequestedAmount, DurationMonths: row.DurationMonths, Purpose: row.Purpose, Warnings: row.Warnings}
+		validationRows[index] = adminLoanRequestRow{ExcelRow: row.ExcelRow, MemberNo: row.MemberNo, FullName: row.FullName, LoanType: row.LoanType, RequestedAmount: row.RequestedAmount, DurationMonths: row.DurationMonths, Purpose: row.Purpose, AdminFee: row.AdminFee, Warnings: row.Warnings}
 	}
 	noApprover, err := s.activeManagerApproverWarning(tx)
 	if err != nil {
@@ -866,7 +896,7 @@ func (s *Server) commitAdminLoanRequestBatch(actor User, batchID string, acknowl
 	}
 	created := 0
 	for index, row := range validationRows {
-		input := adminLoanRequestInput{MemberNo: row.MemberNo, LoanType: row.LoanType, RequestedAmount: row.RequestedAmount, DurationMonths: row.DurationMonths, Purpose: row.Purpose, AcknowledgeWarnings: acknowledge}
+		input := adminLoanRequestInput{MemberNo: row.MemberNo, LoanType: row.LoanType, RequestedAmount: row.RequestedAmount, DurationMonths: row.DurationMonths, Purpose: row.Purpose, AdminFee: row.AdminFee, AcknowledgeWarnings: acknowledge}
 		memberID, _, err := s.validateAdminLoanRow(tx, &row, true)
 		if err != nil {
 			return AdminLoanRequestBatch{}, err
@@ -902,7 +932,7 @@ func parseDBTime(value string) time.Time {
 }
 
 func adminLoanBatchRowsTx(tx *sql.Tx, batchID string) ([]AdminLoanRequestBatchRow, error) {
-	rows, err := tx.Query(`SELECT id,excel_row,member_no,full_name,loan_type,COALESCE(requested_amount,0),COALESCE(duration_months,0),purpose,status,errors,warnings,COALESCE(request_id,'') FROM loan_request_batch_rows WHERE batch_id=$1 ORDER BY excel_row`, batchID)
+	rows, err := tx.Query(`SELECT id,excel_row,member_no,full_name,loan_type,COALESCE(requested_amount,0),COALESCE(duration_months,0),purpose,status,errors,warnings,COALESCE(request_id,''),admin_fee FROM loan_request_batch_rows WHERE batch_id=$1 ORDER BY excel_row`, batchID)
 	if err != nil {
 		return nil, err
 	}
@@ -911,7 +941,7 @@ func adminLoanBatchRowsTx(tx *sql.Tx, batchID string) ([]AdminLoanRequestBatchRo
 	for rows.Next() {
 		var row AdminLoanRequestBatchRow
 		var errorsText, warningsText string
-		if err := rows.Scan(&row.ID, &row.ExcelRow, &row.MemberNo, &row.FullName, &row.LoanType, &row.RequestedAmount, &row.DurationMonths, &row.Purpose, &row.Status, &errorsText, &warningsText, &row.RequestID); err != nil {
+		if err := rows.Scan(&row.ID, &row.ExcelRow, &row.MemberNo, &row.FullName, &row.LoanType, &row.RequestedAmount, &row.DurationMonths, &row.Purpose, &row.Status, &errorsText, &warningsText, &row.RequestID, &row.AdminFee); err != nil {
 			return nil, err
 		}
 		row.Errors = splitAdminLoanIssues(errorsText)
@@ -946,7 +976,7 @@ func (s *Server) adminLoanBatchByID(batchID string) (AdminLoanRequestBatch, erro
 		batch.ConfirmedAt = confirmedAt.String
 	}
 	batch.Rows, err = func() ([]AdminLoanRequestBatchRow, error) {
-		rows, queryErr := s.db.Query(`SELECT id,excel_row,member_no,full_name,loan_type,COALESCE(requested_amount,0),COALESCE(duration_months,0),purpose,status,errors,warnings,COALESCE(request_id,'') FROM loan_request_batch_rows WHERE batch_id=$1 ORDER BY excel_row`, batchID)
+		rows, queryErr := s.db.Query(`SELECT id,excel_row,member_no,full_name,loan_type,COALESCE(requested_amount,0),COALESCE(duration_months,0),purpose,status,errors,warnings,COALESCE(request_id,''),admin_fee FROM loan_request_batch_rows WHERE batch_id=$1 ORDER BY excel_row`, batchID)
 		if queryErr != nil {
 			return nil, queryErr
 		}
@@ -955,7 +985,7 @@ func (s *Server) adminLoanBatchByID(batchID string) (AdminLoanRequestBatch, erro
 		for rows.Next() {
 			var row AdminLoanRequestBatchRow
 			var errorsText, warningsText string
-			if scanErr := rows.Scan(&row.ID, &row.ExcelRow, &row.MemberNo, &row.FullName, &row.LoanType, &row.RequestedAmount, &row.DurationMonths, &row.Purpose, &row.Status, &errorsText, &warningsText, &row.RequestID); scanErr != nil {
+			if scanErr := rows.Scan(&row.ID, &row.ExcelRow, &row.MemberNo, &row.FullName, &row.LoanType, &row.RequestedAmount, &row.DurationMonths, &row.Purpose, &row.Status, &errorsText, &warningsText, &row.RequestID, &row.AdminFee); scanErr != nil {
 				return nil, scanErr
 			}
 			row.Errors = splitAdminLoanIssues(errorsText)
@@ -1011,20 +1041,23 @@ func (s *Server) exportAdminLoanRequestBatch(c *gin.Context) {
 	workbook := excelize.NewFile()
 	sheet := workbook.GetSheetName(0)
 	_ = workbook.SetSheetName(sheet, "Hasil")
-	headers := []string{"Baris Excel", "NPP Koperasi", "Nama Anggota", "Jenis Pinjaman", "Jumlah Pengajuan", "Tenor (Bulan)", "Tujuan", "Status", "Kesalahan", "Peringatan", "ID Permintaan"}
+	headers := []string{"Baris Excel", "NPP Koperasi", "Nama Anggota", "Jenis Pinjaman", "Jumlah Pengajuan", "Tenor (Bulan)", "Tujuan", "Status", "Kesalahan", "Peringatan", "ID Permintaan", translate(languageFromRequest(c), "voucher_admin_fee_nominal")}
 	for column, header := range headers {
 		cell, _ := excelize.CoordinatesToCellName(column+1, 1)
 		_ = workbook.SetCellValue("Hasil", cell, header)
 	}
 	for index, row := range batch.Rows {
-		values := []any{row.ExcelRow, row.MemberNo, row.FullName, adminLoanTypeCodes[row.LoanType], row.RequestedAmount, row.DurationMonths, row.Purpose, row.Status, strings.Join(row.Errors, "; "), strings.Join(row.Warnings, "; "), row.RequestID}
+		values := []any{row.ExcelRow, row.MemberNo, row.FullName, adminLoanTypeCodes[row.LoanType], row.RequestedAmount, row.DurationMonths, row.Purpose, row.Status, strings.Join(row.Errors, "; "), strings.Join(row.Warnings, "; "), row.RequestID, ""}
+		if row.AdminFee != nil {
+			values[len(values)-1] = *row.AdminFee
+		}
 		for column, value := range values {
 			cell, _ := excelize.CoordinatesToCellName(column+1, index+2)
 			_ = workbook.SetCellValue("Hasil", cell, value)
 		}
 	}
 	_ = workbook.SetColWidth("Hasil", "A", "A", 12)
-	_ = workbook.SetColWidth("Hasil", "B", "K", 24)
+	_ = workbook.SetColWidth("Hasil", "B", "L", 24)
 	var output bytes.Buffer
 	if err := workbook.Write(&output); err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "error_internal_server")

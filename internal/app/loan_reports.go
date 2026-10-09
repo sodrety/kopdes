@@ -495,6 +495,8 @@ func loanApprovalDecisionLabel(decision string) string {
 
 func loanReportTypeLabel(loanType string) string {
 	switch loanType {
+	case "voucher":
+		return translate(bahasaLanguage, "loan_type_voucher")
 	case "regular":
 		return "Pinjaman uang"
 	case "secondary_goods":

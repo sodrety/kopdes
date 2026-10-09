@@ -207,16 +207,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 42 {
-		t.Fatalf("expected forty-two tracked migrations, got %d", migrationCount)
+	if migrationCount != 43 {
+		t.Fatalf("expected forty-three tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 42`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 43`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "member_deactivation_requests" {
-		t.Fatalf("expected latest member deactivation migration, got %q", latestName)
+	if latestName != "add_voucher_loans" {
+		t.Fatalf("expected latest Voucher migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -2256,7 +2256,7 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	if tagihanExcelRow == 0 {
 		t.Fatalf("expected Tagihan row for member %s, got %#v", member.ID, rows)
 	}
-	expectedHeaders := "Member ID|NPP|Old NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Status"
+	expectedHeaders := "Member ID|NPP|Old NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Status|Voucher"
 	if strings.Join(rows[0], "|") != expectedHeaders {
 		t.Fatalf("unexpected Tagihan headers: %#v", rows[0])
 	}

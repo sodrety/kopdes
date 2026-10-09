@@ -612,6 +612,7 @@ var migrations = []migration{
 			`ALTER TABLE member_deactivation_approvals ENABLE ROW LEVEL SECURITY`,
 		},
 	},
+	{Version: 43, Name: "add_voucher_loans"},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -723,7 +724,7 @@ func migrationApplied(db *sql.DB, version int) (bool, error) {
 
 func applyMigration(db *sql.DB, migration migration) error {
 	isSQLite := strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
-	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19 || migration.Version == 22 || migration.Version == 23 || migration.Version == 26 || migration.Version == 28 || migration.Version == 29 || migration.Version == 30 || migration.Version == 31) {
+	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19 || migration.Version == 22 || migration.Version == 23 || migration.Version == 26 || migration.Version == 28 || migration.Version == 29 || migration.Version == 30 || migration.Version == 31 || migration.Version == 43) {
 		conn, err := db.Conn(context.Background())
 		if err != nil {
 			return err
@@ -945,6 +946,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 	}
 	if migration.Version == 42 {
 		if err := allowUndisbursedLoanRequestCancellation(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 43 {
+		if err := addVoucherLoans(tx, isSQLite); err != nil {
 			return err
 		}
 	}
