@@ -47,6 +47,13 @@ type AdminLoanRepayment struct {
 	IncludedInTotals bool   `json:"included_in_totals"`
 }
 
+type AdminRepaymentLoanOption struct {
+	ID               string
+	MemberNo         string
+	FullName         string
+	RemainingBalance int64
+}
+
 type repaymentInput struct {
 	Amount      int64  `json:"amount" form:"amount"`
 	Source      string `json:"source" form:"source"`
@@ -160,6 +167,10 @@ func (s *Server) memberRepayments(c *gin.Context) {
 }
 
 func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (LoanRepayment, error) {
+	return s.recordRepaymentWithAudit(loanID, adminID, req, "")
+}
+
+func (s *Server) recordRepaymentWithAudit(loanID, adminID string, req repaymentInput, auditReason string) (LoanRepayment, error) {
 	recordDate := strings.TrimSpace(req.RecordDate)
 	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
 	if (strings.TrimSpace(req.COACode) != "" || strings.TrimSpace(req.CashCOACode) != "") && !hasPermission(req.Role, PermissionAccountingCOAOverride) {
@@ -305,15 +316,40 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 			{Component: "loan_receivable", Side: accountingDirectionCredit, Amount: repayment.Amount},
 		},
 		COAOverrides: map[string]string{"cash_bank": strings.TrimSpace(req.CashCOACode), "loan_receivable": repayment.COACode},
-		Description: "Angsuran pinjaman", RecordedBy: repayment.RecordedBy,
+		Description:  "Angsuran pinjaman", RecordedBy: repayment.RecordedBy,
 	}); err != nil {
 		return LoanRepayment{}, err
+	}
+	if auditReason != "" {
+		if err := insertRepaymentAddedAudit(tx, newID(), repayment, auditReason, adminID); err != nil {
+			return LoanRepayment{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return LoanRepayment{}, err
 	}
 
 	return s.repaymentByID(repayment.ID)
+}
+
+func (s *Server) repaymentLoansForAdmin() ([]AdminRepaymentLoanOption, error) {
+	rows, err := s.db.Query(`SELECT l.id,m.member_no,m.full_name,l.remaining_balance
+		FROM loans l JOIN members m ON m.id=l.member_id
+		WHERE l.status IN ('active','adjustment_due') AND l.remaining_balance>0
+		ORDER BY m.full_name,l.created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	loans := make([]AdminRepaymentLoanOption, 0)
+	for rows.Next() {
+		var loan AdminRepaymentLoanOption
+		if err := rows.Scan(&loan.ID, &loan.MemberNo, &loan.FullName, &loan.RemainingBalance); err != nil {
+			return nil, err
+		}
+		loans = append(loans, loan)
+	}
+	return loans, rows.Err()
 }
 
 func (s *Server) repaymentByID(id string) (LoanRepayment, error) {

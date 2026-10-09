@@ -124,14 +124,15 @@ func (s *Server) cashTransactionsQuery(filters CashTransactionFilters) (string, 
 	}
 	query := strings.Builder{}
 	query.WriteString(`WITH cash_movement AS (
-		SELECT e.transaction_id,e.transaction_type,e.id AS journal_id,e.status,
-			COALESCE(SUM(CASE WHEN a.account_type='asset' AND (COALESCE(a.subtype,'') IN ('cash','bank') OR COALESCE(a.system_key,'') IN ('CASH','BANK'))
+		SELECT e.transaction_id,e.transaction_type,
+			CASE WHEN MAX(CASE WHEN e.status='posted' THEN 1 ELSE 0 END)=1 THEN 'posted' ELSE 'pending_mapping' END AS status,
+			COALESCE(SUM(CASE WHEN e.status='posted' AND a.account_type='asset' AND (COALESCE(a.subtype,'') IN ('cash','bank') OR COALESCE(a.system_key,'') IN ('CASH','BANK'))
 				THEN CASE WHEN l.side='debit' THEN l.amount ELSE -l.amount END ELSE 0 END),0) AS net_amount,
 			COALESCE(` + stringAgg + `,'') AS coa_codes
 		FROM financial_journal_entries e
 		LEFT JOIN financial_journal_lines l ON l.journal_id=e.id
 		LEFT JOIN coa_accounts a ON a.code=l.coa_code
-		GROUP BY e.id
+		GROUP BY e.transaction_id,e.transaction_type
 	)
 	SELECT id,transaction_date,member_no,full_name,direction,transaction_type,category_id,description,category_name,source,coa_code,income,expense,amount,reference_no,recorded_by,created_at
 	FROM (

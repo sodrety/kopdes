@@ -446,9 +446,27 @@ func (s *Server) adminRepaymentsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	audits, err := s.repaymentAuditsForAdmin(filters)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	user, _ := currentUser(c)
+	canCorrect := isSuperAdmin(user)
+	var repaymentLoans []AdminRepaymentLoanOption
+	if canCorrect {
+		repaymentLoans, err = s.repaymentLoansForAdmin()
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+			return
+		}
+	}
 	renderPage(c, "admin-repayments", pageData(c, "Repayments - KKSUK PD Dharma Jaya", "repayments", "repayments", "review_repayments", gin.H{
-		"Repayments": repayments,
-		"Filters":    filters,
+		"Repayments":      repayments,
+		"RepaymentAudits": audits,
+		"CanCorrect":      canCorrect,
+		"RepaymentLoans":  repaymentLoans,
+		"Filters":         filters,
 	}))
 }
 
