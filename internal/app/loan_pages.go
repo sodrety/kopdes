@@ -77,7 +77,17 @@ func (s *Server) adminLoanDetailPage(c *gin.Context) {
 	}
 	lang := languageFromRequest(c)
 	eligibleStatus := loan.Status == "active" || loan.Status == "adjustment_due"
-	renderPage(c, "admin-loan-detail", pageData(c, translate(lang, "loan_detail")+" - KKSUK PD Dharma Jaya", "loans", "loan_detail", loan.ID, gin.H{"Loan": loan, "Installments": installments, "Audits": audits, "CanCorrectStartDate": repaymentCount == 0 && eligibleStatus}))
+	repayments, err := s.repaymentsByLoanForMember(loan.ID, loan.MemberID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
+		return
+	}
+	user, _ := currentUser(c)
+	renderPage(c, "admin-loan-detail", pageData(c, translate(lang, "loan_detail")+" - KKSUK PD Dharma Jaya", "loans", "loan_detail", loan.ID, gin.H{
+		"Loan": loan, "Installments": installments, "Audits": audits,
+		"CanCorrectStartDate": repaymentCount == 0 && eligibleStatus,
+		"Repayments":          repayments, "CanCorrect": isSuperAdmin(user),
+	}))
 }
 
 func (s *Server) exportLoanPDF(c *gin.Context) {

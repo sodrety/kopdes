@@ -222,7 +222,14 @@ func respondRepaymentCorrectionSuccess(c *gin.Context, message string, body any)
 			c.Header("HX-Trigger", string(trigger))
 		}
 	}
-	respondOKOrHXRedirect(c, "/admin/repayments", body)
+	redirect := "/admin/repayments"
+	returnTo := c.PostForm("return_to")
+	const loanDetailPrefix = "/admin/loans/"
+	loanID := strings.TrimPrefix(returnTo, loanDetailPrefix)
+	if strings.HasPrefix(returnTo, loanDetailPrefix) && loanID != "" && !strings.ContainsAny(loanID, "/\\?#%") && loanID != "." && loanID != ".." {
+		redirect = returnTo
+	}
+	respondOKOrHXRedirect(c, redirect, body)
 }
 
 func respondRepaymentCorrectionError(c *gin.Context, err error) {

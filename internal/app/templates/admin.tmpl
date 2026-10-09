@@ -1833,6 +1833,38 @@
         <h2>{{t .Lang "installment_schedule"}}</h2>
         {{if .Installments}}{{template "table-open" .}}<thead><tr><th>#</th><th>{{t $.Lang "due_date"}}</th><th>{{t $.Lang "scheduled_amount"}}</th><th>{{t $.Lang "paid_amount"}}</th><th>{{t $.Lang "unpaid_amount"}}</th></tr></thead><tbody>{{range .Installments}}<tr><td>{{.InstallmentNo}}</td><td>{{.DueDate}}</td><td>{{nominal .ScheduledAmount}}</td><td>{{nominal .PaidAmount}}</td><td>{{nominal (sub .ScheduledAmount .PaidAmount)}}</td></tr>{{end}}</tbody>{{template "table-close" .}}{{else}}{{template "empty-state" (t .Lang "no_installments")}}{{end}}
       </section>
+      <section class="panel">
+        <h2>{{t .Lang "repayment_history"}}</h2>
+        {{if .Repayments}}
+{{template "table-open" .}}
+          <thead><tr>
+            <th>{{t .Lang "date"}}</th>
+            <th>{{t .Lang "repayment_type"}}</th>
+            <th>{{t .Lang "amount"}}</th>
+            <th>{{t .Lang "reference"}}</th>
+            <th>{{t .Lang "note"}}</th>
+            {{if .CanCorrect}}<th>{{t .Lang "repayment_audit_action"}}</th>{{end}}
+          </tr></thead>
+          <tbody>{{range .Repayments}}<tr>
+            <td>{{.RecordDate}}</td>
+            <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
+            <td>{{nominal .Amount}}</td>
+            <td>{{.ReferenceNo}}</td>
+            <td>{{.Note}}</td>
+            {{if $.CanCorrect}}<td>{{if eq .Type "repayment"}}<a class="button-link button-link-secondary" href="#repayment-edit-{{.ID}}">{{t $.Lang "edit_repayment"}}</a>{{else}}—{{end}}</td>{{end}}
+          </tr>{{end}}</tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_repayments")}}
+        {{end}}
+      </section>
+      {{if .CanCorrect}}
+      {{range .Repayments}}
+      {{if eq .Type "repayment"}}
+      {{template "repayment-edit-modal" (dict "Lang" $.Lang "Repayment" . "ReturnTo" (printf "/admin/loans/%s" $.Loan.ID))}}
+      {{end}}
+      {{end}}
+      {{end}}
 {{template "admin-shell-end" .}}
 {{end}}
 
@@ -2264,31 +2296,6 @@
       <section class="page-actions">
         <a class="button-link button-link-secondary" href="/api/admin/exports/repayments.csv">{{t .Lang "export_csv"}}</a>
       </section>
-      {{if .CanCorrect}}
-      <section class="panel">
-        <h2>{{t .Lang "add_repayment_manually"}}</h2>
-        {{if .RepaymentLoans}}
-        <form method="post" action="/api/admin/repayments">
-          <label>{{t .Lang "loan"}}
-            <select name="loan_id" required>
-              <option value="">{{t .Lang "select_loan"}}</option>
-              {{range .RepaymentLoans}}
-              <option value="{{.ID}}">{{.MemberNo}} · {{.FullName}} — {{t $.Lang "remaining_balance"}}: {{nominal .RemainingBalance}}</option>
-              {{end}}
-            </select>
-          </label>
-          <label>{{t .Lang "repayment_amount"}} <input name="amount" type="text" inputmode="numeric" placeholder="{{t .Lang "rupiah_placeholder"}}" data-rupiah-input data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" title="{{t .Lang "rupiah_input_hint"}}" required></label>
-          <label>{{t .Lang "repayment_date"}} <input name="record_date" type="date" value="{{.CurrentDate}}" required></label>
-          <label>{{t .Lang "reference"}} <input name="reference_no"></label>
-          <label>{{t .Lang "note"}} <input name="note"></label>
-          <label>{{t .Lang "manual_repayment_reason"}} <input name="reason" maxlength="500" required></label>
-          <button type="submit">{{t .Lang "record_repayment"}}</button>
-        </form>
-        {{else}}
-        <p>{{t .Lang "no_eligible_repayment_loans"}}</p>
-        {{end}}
-      </section>
-      {{end}}
       <section class="panel">
         <form class="filter-form" method="get" action="/admin/repayments">
           <label>{{t .Lang "search_member"}} <input name="search" value="{{.Filters.Search}}" placeholder="{{t .Lang "member"}}"></label>
@@ -2319,21 +2326,10 @@
               {{if $.CanCorrect}}
               <td>
                 {{if eq .Type "repayment"}}
-                <details>
-                  <summary>{{t $.Lang "edit_repayment"}}</summary>
-                  <form method="post" action="/api/admin/repayments/{{.ID}}/update">
-                    <label>{{t $.Lang "amount"}} <input name="amount" type="text" inputmode="numeric" value="{{nominal .Amount}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $.Lang "error_invalid_rupiah_amount"}}" required></label>
-                    <label>{{t $.Lang "date"}} <input name="record_date" type="date" value="{{.RecordDate}}" required></label>
-                    <label>{{t $.Lang "reference"}} <input name="reference_no" value="{{.ReferenceNo}}"></label>
-                    <label>{{t $.Lang "note"}} <input name="note" value="{{.Note}}"></label>
-                    <label>{{t $.Lang "correction_reason"}} <input name="reason" maxlength="500" required></label>
-                    <button type="submit">{{t $.Lang "save_repayment_changes"}}</button>
-                  </form>
-                </details>
-                <form method="post" action="/api/admin/repayments/{{.ID}}/remove" onsubmit="return confirm('{{t $.Lang "confirm_remove_repayment"}}')">
-                  <label>{{t $.Lang "correction_reason"}} <input name="reason" maxlength="500" required></label>
-                  <button type="submit" class="button-link-secondary">{{t $.Lang "remove_repayment"}}</button>
-                </form>
+                <div class="button-row">
+                  <a class="button-link button-link-secondary" href="#repayment-edit-{{.ID}}">{{t $.Lang "edit_repayment"}}</a>
+                  <a class="button-link button-link-secondary" href="#repayment-remove-{{.ID}}">{{t $.Lang "remove_repayment"}}</a>
+                </div>
                 {{else}}—{{end}}
               </td>
               {{end}}
@@ -2345,6 +2341,31 @@
 {{template "empty-state" (t .Lang "no_repayments")}}
         {{end}}
       </section>
+      {{if .CanCorrect}}
+      {{range .Repayments}}
+      {{if eq .Type "repayment"}}
+      {{template "repayment-edit-modal" (dict "Lang" $.Lang "Repayment" . "ReturnTo" "/admin/repayments")}}
+      <div id="repayment-remove-{{.ID}}" class="review-modal" role="dialog" aria-modal="true" aria-labelledby="repayment-remove-title-{{.ID}}">
+        <a class="review-modal-backdrop" href="#" aria-label="{{t $.Lang "close"}}"></a>
+        <div class="review-modal-card">
+          <header class="review-modal-header">
+            <h2 id="repayment-remove-title-{{.ID}}">{{t $.Lang "remove_repayment"}}</h2>
+            <a class="review-modal-close" href="#" aria-label="{{t $.Lang "close"}}">×</a>
+          </header>
+          <p>{{.FullName}} · {{.MemberNo}} · {{.RecordDate}} · Rp {{nominal .Amount}}</p>
+          <p>{{t $.Lang "confirm_remove_repayment"}}</p>
+          <form method="post" action="/api/admin/repayments/{{.ID}}/remove">
+            <label>{{t $.Lang "correction_reason"}} <input name="reason" maxlength="500" required></label>
+            <div class="button-row">
+              <button type="submit">{{t $.Lang "remove_repayment"}}</button>
+              <a class="button-link button-link-secondary" href="#">{{t $.Lang "cancel"}}</a>
+            </div>
+          </form>
+        </div>
+      </div>
+      {{end}}
+      {{end}}
+      {{end}}
       <section class="panel">
         <h2>{{t .Lang "repayment_audit_history"}}</h2>
         {{if .RepaymentAudits}}
@@ -2381,4 +2402,33 @@
         {{end}}
       </section>
 {{template "admin-shell-end" .}}
+{{end}}
+
+{{define "repayment-edit-modal"}}
+{{$lang := .Lang}}
+{{$returnTo := .ReturnTo}}
+{{with .Repayment}}
+      <div id="repayment-edit-{{.ID}}" class="review-modal" role="dialog" aria-modal="true" aria-labelledby="repayment-edit-title-{{.ID}}">
+        <a class="review-modal-backdrop" href="#" aria-label="{{t $lang "close"}}"></a>
+        <div class="review-modal-card">
+          <header class="review-modal-header">
+            <h2 id="repayment-edit-title-{{.ID}}">{{t $lang "edit_repayment"}}</h2>
+            <a class="review-modal-close" href="#" aria-label="{{t $lang "close"}}">×</a>
+          </header>
+          <p>{{.RecordDate}} · Rp {{nominal .Amount}}</p>
+          <form method="post" action="/api/admin/repayments/{{.ID}}/update">
+            <input type="hidden" name="return_to" value="{{$returnTo}}">
+            <label>{{t $lang "amount"}} <input name="amount" type="text" inputmode="numeric" value="{{nominal .Amount}}" data-rupiah-input data-rupiah-group="{{if eq $lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $lang "error_invalid_rupiah_amount"}}" required></label>
+            <label>{{t $lang "date"}} <input name="record_date" type="date" value="{{.RecordDate}}" required></label>
+            <label>{{t $lang "reference"}} <input name="reference_no" value="{{.ReferenceNo}}"></label>
+            <label>{{t $lang "note"}} <input name="note" value="{{.Note}}"></label>
+            <label>{{t $lang "correction_reason"}} <input name="reason" maxlength="500" required></label>
+            <div class="button-row">
+              <button type="submit">{{t $lang "save_repayment_changes"}}</button>
+              <a class="button-link button-link-secondary" href="#">{{t $lang "cancel"}}</a>
+            </div>
+          </form>
+        </div>
+      </div>
+{{end}}
 {{end}}
