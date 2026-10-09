@@ -319,6 +319,13 @@ func (s *Server) validateAdminLoanRow(tx *sql.Tx, row *adminLoanRequestRow, lock
 	if status != "active" {
 		row.Errors = append(row.Errors, "admin_issue_inactive_member")
 	}
+	pendingDeactivation, err := hasPendingMemberDeactivation(tx, memberID)
+	if err != nil {
+		return "", nil, err
+	}
+	if pendingDeactivation {
+		row.Errors = append(row.Errors, "admin_issue_deactivation_pending")
+	}
 	if strings.TrimSpace(bankName) == "" || strings.TrimSpace(bankAccount) == "" {
 		row.Errors = append(row.Errors, "admin_issue_bank_details")
 	}
@@ -666,8 +673,15 @@ type adminLoanRowError []string
 func (e adminLoanRowError) Error() string { return strings.Join(e, ",") }
 
 func (s *Server) insertAdminLoanRequestTx(tx *sql.Tx, actor User, memberID string, input adminLoanRequestInput, batchID string) (LoanRequest, error) {
+	pendingDeactivation, err := hasPendingMemberDeactivation(tx, memberID)
+	if err != nil {
+		return LoanRequest{}, err
+	}
+	if pendingDeactivation {
+		return LoanRequest{}, adminLoanRowError{"admin_issue_deactivation_pending"}
+	}
 	request := LoanRequest{ID: newID(), MemberID: memberID, RequestedAmount: input.RequestedAmount, DurationMonths: input.DurationMonths, Purpose: strings.TrimSpace(input.Purpose), Status: "pending", LoanType: strings.TrimSpace(input.LoanType), CurrentApprovalStage: approvalStageManager}
-	_, err := tx.Exec(`INSERT INTO loan_requests (id,member_id,requested_amount,duration_months,purpose,status,loan_type,current_approval_stage,created_by,creation_source,batch_id,creation_idempotency_key) VALUES ($1,$2,$3,$4,$5,'pending',$6,'manager',$7,'admin',$8,$9)`, request.ID, request.MemberID, request.RequestedAmount, request.DurationMonths, request.Purpose, request.LoanType, actor.ID, nullableString(batchID), nullableString(input.IdempotencyKey))
+	_, err = tx.Exec(`INSERT INTO loan_requests (id,member_id,requested_amount,duration_months,purpose,status,loan_type,current_approval_stage,created_by,creation_source,batch_id,creation_idempotency_key) VALUES ($1,$2,$3,$4,$5,'pending',$6,'manager',$7,'admin',$8,$9)`, request.ID, request.MemberID, request.RequestedAmount, request.DurationMonths, request.Purpose, request.LoanType, actor.ID, nullableString(batchID), nullableString(input.IdempotencyKey))
 	if err != nil {
 		return LoanRequest{}, err
 	}

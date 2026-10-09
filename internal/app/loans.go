@@ -368,6 +368,15 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		return LoanApprovalResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	var memberForLock string
+	if err := tx.QueryRow(`SELECT member_id FROM loan_requests WHERE id=$1`, requestID).Scan(&memberForLock); errors.Is(err, sql.ErrNoRows) {
+		return LoanApprovalResult{}, errLoanRequestNotFound
+	} else if err != nil {
+		return LoanApprovalResult{}, err
+	}
+	if _, err := tx.Exec(`UPDATE members SET updated_at=updated_at WHERE id=$1`, memberForLock); err != nil {
+		return LoanApprovalResult{}, err
+	}
 
 	var request struct {
 		MemberID                string
@@ -579,6 +588,15 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 		return LoanApprovalResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	var memberForLock string
+	if err := tx.QueryRow(`SELECT member_id FROM loan_requests WHERE id=$1`, requestID).Scan(&memberForLock); errors.Is(err, sql.ErrNoRows) {
+		return LoanApprovalResult{}, errLoanRequestNotFound
+	} else if err != nil {
+		return LoanApprovalResult{}, err
+	}
+	if _, err := tx.Exec(`UPDATE members SET updated_at=updated_at WHERE id=$1`, memberForLock); err != nil {
+		return LoanApprovalResult{}, err
+	}
 
 	var request struct {
 		MemberID                string

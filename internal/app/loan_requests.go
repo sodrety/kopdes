@@ -113,6 +113,10 @@ func (s *Server) submitLoanRequest(c *gin.Context) {
 	}
 
 	loanRequest, err := s.insertLoanRequest(member, req)
+	if errors.Is(err, errMemberDeactivationPending) {
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_member_deactivation_pending"))
+		return
+	}
 	if errors.Is(err, errInvalidLoanRequest) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_request_fields"))
 		return
@@ -240,6 +244,13 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 	}
 	if memberStatus != "active" {
 		return LoanRequest{}, errInactiveLoanMember
+	}
+	pendingDeactivation, err := hasPendingMemberDeactivation(tx, member.ID)
+	if err != nil {
+		return LoanRequest{}, err
+	}
+	if pendingDeactivation {
+		return LoanRequest{}, errMemberDeactivationPending
 	}
 	if strings.TrimSpace(bankName) == "" || strings.TrimSpace(bankAccount) == "" {
 		return LoanRequest{}, errMemberBankDetailsRequired

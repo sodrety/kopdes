@@ -1505,6 +1505,46 @@
         <div><span>{{t .Lang "member_type"}}</span><strong>{{.Member.MemberTypeLabel}}</strong></div>
         <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang .Member.Status}}</strong></div>
       </section>
+      {{if .DeactivationRequest.ID}}
+      <section class="panel">
+        <h2>{{t .Lang "member_deactivation_title"}}</h2>
+        <div class="detail-grid">
+          <div><span>{{t .Lang "status"}}</span><strong>{{t .Lang (printf "status_%s" .DeactivationRequest.Status)}}</strong></div>
+          {{if .DeactivationRequest.CurrentApprovalStage}}<div><span>{{t .Lang "approval_stage"}}</span><strong>{{t .Lang (printf "role_%s" .DeactivationRequest.CurrentApprovalStage)}}</strong></div>{{end}}
+          <div><span>{{t .Lang "member_deactivation_reason"}}</span><strong>{{.DeactivationRequest.Reason}}</strong></div>
+          <div><span>{{t .Lang "member_deactivation_payout_total"}}</span><strong>{{nominal .DeactivationRequest.TotalPayout}}</strong></div>
+          <div><span>{{t .Lang "outstanding_loan"}}</span><strong>{{nominal .DeactivationRequest.OutstandingLoan}}</strong></div>
+          {{if .DeactivationRequest.PayoutSource}}<div><span>{{t .Lang "member_deactivation_payout_method"}}</span><strong>{{t .Lang .DeactivationRequest.PayoutSource}}</strong></div>{{end}}
+        </div>
+        <ul class="compact-list">
+          {{range .DeactivationRequest.Balances}}<li>{{t $.Lang (printf "simpanan_%s" .Category)}}: {{nominal .Amount}}</li>{{end}}
+        </ul>
+        {{if .DeactivationRequest.RejectionReason}}<p>{{t .Lang "member_deactivation_rejection_reason"}}: {{.DeactivationRequest.RejectionReason}}</p>{{end}}
+        {{if .DeactivationRequest.CanCancel}}
+        <form method="post" action="/api/admin/member-deactivation-requests/{{.DeactivationRequest.ID}}/cancel" hx-post="/api/admin/member-deactivation-requests/{{.DeactivationRequest.ID}}/cancel" hx-target="#member-deactivation-error" hx-swap="innerHTML" onsubmit="return window.confirm(this.dataset.confirm)" data-confirm="{{t .Lang "member_deactivation_cancel_confirm"}}">
+          <button class="button-secondary" type="submit">{{t .Lang "member_deactivation_cancel"}}</button>
+        </form>
+        {{end}}
+        {{template "form-error" (dict "ID" "member-deactivation-error")}}
+      </section>
+      {{end}}
+      {{if .CanStartDeactivation}}
+      <section class="panel form-panel">
+        <h2>{{t .Lang "member_deactivation_title"}}</h2>
+        <p class="field-help">{{t .Lang "member_deactivation_description"}}</p>
+        <div class="detail-grid">
+          {{range .DeactivationBalances}}<div><span>{{t $.Lang (printf "simpanan_%s" .Category)}}</span><strong>{{nominal .Amount}}</strong></div>{{end}}
+          <div><span>{{t .Lang "member_deactivation_payout_total"}}</span><strong>{{nominal .DeactivationTotal}}</strong></div>
+          <div><span>{{t .Lang "outstanding_loan"}}</span><strong>{{nominal .OutstandingLoanBalance}}</strong></div>
+        </div>
+        <p class="field-help">{{t .Lang "member_deactivation_loan_separate"}}</p>
+        <form method="post" action="/api/admin/members/{{.Member.ID}}/deactivation-requests" hx-post="/api/admin/members/{{.Member.ID}}/deactivation-requests" hx-target="#member-deactivation-error" hx-swap="innerHTML" onsubmit="return window.confirm(this.dataset.confirm)" data-confirm="{{t .Lang "member_deactivation_confirm"}}">
+          <label>{{t .Lang "member_deactivation_reason"}} <textarea name="reason" rows="3" maxlength="1000" required></textarea></label>
+          <button type="submit">{{t .Lang "member_deactivation_request_button"}}</button>
+        </form>
+        {{template "form-error" (dict "ID" "member-deactivation-error")}}
+      </section>
+      {{end}}
       <section class="panel form-panel">
         <h2>{{t .Lang "tagihan_member_config"}}</h2>
         <p class="field-help">{{t .Lang "tagihan_member_config_description"}}</p>
@@ -1817,6 +1857,54 @@
         {{template "form-error" (dict "ID" "officer-withdrawal-error")}}
       </section>
       {{end}}
+      <section class="panel">
+        <h2>{{t .Lang "member_deactivation_requests_title"}}</h2>
+        {{if .DeactivationRequests}}
+        <div class="content-grid">
+          {{range .DeactivationRequests}}
+          <article class="panel form-panel">
+            <h3><a href="/admin/members/{{.MemberID}}">{{.MemberNo}} · {{.FullName}}</a></h3>
+            <p>{{t $.Lang "member_deactivation_reason"}}: {{.Reason}}</p>
+            <div class="detail-grid">
+              <div><span>{{t $.Lang "member_deactivation_payout_total"}}</span><strong>{{nominal .TotalPayout}}</strong></div>
+              <div><span>{{t $.Lang "outstanding_loan"}}</span><strong>{{nominal .OutstandingLoan}}</strong></div>
+              {{if .PayoutSource}}<div><span>{{t $.Lang "member_deactivation_payout_method"}}</span><strong>{{t $.Lang .PayoutSource}}</strong></div>{{end}}
+            </div>
+            <ul class="compact-list">{{range .Balances}}<li>{{t $.Lang (printf "simpanan_%s" .Category)}}: {{nominal .Amount}}</li>{{end}}</ul>
+            <p class="field-help">{{t $.Lang "member_deactivation_loan_separate"}}</p>
+            {{if .CanDecide}}
+            <div class="table-actions">
+              <form method="post" action="/api/admin/member-deactivation-requests/{{.ID}}/approve" hx-post="/api/admin/member-deactivation-requests/{{.ID}}/approve" hx-target="#member-deactivation-review-error" hx-swap="innerHTML">
+                {{if eq .CurrentApprovalStage "manager"}}
+                <fieldset>
+                  <legend>{{t $.Lang "member_deactivation_payout_method"}}</legend>
+                  <label><input type="radio" name="payout_source" value="cash" required> {{t $.Lang "cash"}}</label>
+                  {{if and .BankName .BankAccount}}<label><input type="radio" name="payout_source" value="bank" required> {{t $.Lang "bank"}} · {{.BankName}} · {{.BankAccount}}</label>{{end}}
+                  {{if not (and .BankName .BankAccount)}}<p class="field-help">{{t $.Lang "member_deactivation_bank_details_missing"}}</p>{{end}}
+                </fieldset>
+                {{end}}
+                <label>{{t $.Lang "approval_note_optional"}} <input name="note" maxlength="500"></label>
+                <button type="submit">{{t $.Lang "approve"}}</button>
+              </form>
+              <form class="inline-rejection-form" method="post" action="/api/admin/member-deactivation-requests/{{.ID}}/reject" hx-post="/api/admin/member-deactivation-requests/{{.ID}}/reject" hx-target="#member-deactivation-review-error" hx-swap="innerHTML">
+                <label>{{t $.Lang "member_deactivation_rejection_reason"}} <input name="reason" maxlength="1000" required></label>
+                <button class="button-secondary" type="submit">{{t $.Lang "reject"}}</button>
+              </form>
+            </div>
+            {{else}}
+            <p>{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}</p>
+            {{end}}
+            {{if .ApprovalHistory}}
+            <details><summary>{{t $.Lang "approval_history"}}</summary><ul class="compact-list">{{range .ApprovalHistory}}<li>{{t $.Lang (printf "role_%s" .Stage)}} · {{t $.Lang .Decision}} · {{.OfficerName}}{{if .Reason}}: {{.Reason}}{{end}}</li>{{end}}</ul></details>
+            {{end}}
+          </article>
+          {{end}}
+        </div>
+        {{else}}
+        {{template "empty-state" (t .Lang "member_deactivation_no_requests")}}
+        {{end}}
+        {{template "form-error" (dict "ID" "member-deactivation-review-error")}}
+      </section>
       <section class="panel">
         {{if .WithdrawalRequests}}
 {{template "table-open" .}}

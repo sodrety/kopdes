@@ -87,6 +87,10 @@ func (s *Server) submitWithdrawalRequest(c *gin.Context) {
 	}
 
 	request, err := s.insertWithdrawalRequest(member, req)
+	if errors.Is(err, errMemberDeactivationPending) {
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_member_deactivation_pending"))
+		return
+	}
 	if errors.Is(err, errInvalidWithdrawalRequest) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Withdrawal amount must be greater than zero")
 		return
@@ -164,6 +168,8 @@ func respondWithdrawalRequestError(c *gin.Context, err error) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_withdrawal_request"))
 	case errors.Is(err, errInactiveWithdrawalMember):
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_inactive_withdrawal_member"))
+	case errors.Is(err, errMemberDeactivationPending):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_member_deactivation_pending"))
 	case errors.Is(err, errInsufficientSukarelaBalance):
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_amount_over_available"))
 	case errors.Is(err, errWithdrawalRequestNotFound):
@@ -317,9 +323,19 @@ func (s *Server) insertWithdrawalRequestAs(member Member, req withdrawalRequestI
 		return WithdrawalRequest{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var lockedMemberID string
-	if err := tx.QueryRow(`SELECT id FROM members WHERE id=$1`+rowLockClause(s.db), member.ID).Scan(&lockedMemberID); err != nil {
+	var lockedMemberID, lockedMemberStatus string
+	if err := tx.QueryRow(`SELECT id,status FROM members WHERE id=$1`+rowLockClause(s.db), member.ID).Scan(&lockedMemberID, &lockedMemberStatus); err != nil {
 		return WithdrawalRequest{}, err
+	}
+	if lockedMemberStatus != "active" {
+		return WithdrawalRequest{}, errInactiveWithdrawalMember
+	}
+	pendingDeactivation, err := hasPendingMemberDeactivation(tx, member.ID)
+	if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if pendingDeactivation {
+		return WithdrawalRequest{}, errMemberDeactivationPending
 	}
 	summary, err := savingSummary(tx, member.ID)
 	if err != nil {
@@ -514,6 +530,15 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 		return WithdrawalRequest{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	var memberForLock string
+	if err := tx.QueryRow(`SELECT member_id FROM withdrawal_requests WHERE id=$1`, requestID).Scan(&memberForLock); errors.Is(err, sql.ErrNoRows) {
+		return WithdrawalRequest{}, errWithdrawalRequestNotFound
+	} else if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if _, err := tx.Exec(`UPDATE members SET updated_at=updated_at WHERE id=$1`, memberForLock); err != nil {
+		return WithdrawalRequest{}, err
+	}
 
 	var request WithdrawalRequest
 	if err := tx.QueryRow(

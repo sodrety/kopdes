@@ -278,11 +278,20 @@ func (s *Server) adminWithdrawalRequestsPage(c *gin.Context) {
 		}
 	}
 	current, _ := currentUser(c)
+	deactivationRequests, err := s.memberDeactivationRequestsForAdmin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	for index := range deactivationRequests {
+		deactivationRequests[index].CanDecide = hasPermission(current.Role, PermissionRequestsDecide) && deactivationRequests[index].Status == "pending" && deactivationRequests[index].CurrentApprovalStage == approvalStageForOfficer(current.Role)
+	}
 	renderPage(c, "admin-withdrawal-requests", pageData(c, "Penarikan review - KKSUK PD Dharma Jaya", "withdrawal-requests", "withdrawal_request_review", "inspect_pending_withdrawal_requests", gin.H{
-		"WithdrawalRequests": requests,
-		"COAAccounts":        coaAccounts,
-		"Members":            activeMembers,
-		"CanManage":          hasPermission(current.Role, PermissionWithdrawalRequestsManage),
+		"WithdrawalRequests":   requests,
+		"DeactivationRequests": deactivationRequests,
+		"COAAccounts":          coaAccounts,
+		"Members":              activeMembers,
+		"CanManage":            hasPermission(current.Role, PermissionWithdrawalRequestsManage),
 	}))
 }
 
@@ -316,6 +325,33 @@ func (s *Server) adminMemberDetailPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	deactivationBalances, deactivationTotal, err := memberDeactivationBalances(s.db, member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	deactivationRequest, err := s.latestMemberDeactivationRequest(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	current, _ := currentUser(c)
+	canStartDeactivation := member.Status == "active" && (deactivationRequest.ID == "" || deactivationRequest.Status == "rejected" || deactivationRequest.Status == "cancelled") && hasPermission(current.Role, PermissionMembersManage)
+	if canStartDeactivation && member.OfficerActive && member.OfficerRole == approvalStageKetuaUtama {
+		var activeKetuaUtama int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM officer_appointments oa JOIN members m ON m.id=oa.member_id WHERE oa.role='ketua_utama' AND oa.active=TRUE AND m.status='active'`).Scan(&activeKetuaUtama); err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+			return
+		}
+		canStartDeactivation = activeKetuaUtama > 1
+	}
+	var outstandingLoanBalance int64
+	for _, loan := range outstandingLoans {
+		if loan.RemainingBalance > 0 {
+			outstandingLoanBalance += loan.RemainingBalance
+		}
+	}
+	deactivationRequest.CanCancel = deactivationRequest.Status == "pending" && deactivationRequest.RequestedBy == current.ID && hasPermission(current.Role, PermissionMembersManage)
 	repayments, err := s.repaymentsByMember(member.ID)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
@@ -327,13 +363,18 @@ func (s *Server) adminMemberDetailPage(c *gin.Context) {
 		return
 	}
 	renderPage(c, "admin-member-detail", pageData(c, "Member detail - KKSUK PD Dharma Jaya", "members", "member_detail", member.FullName, gin.H{
-		"Member":           member,
-		"TagihanConfig":    tagihanConfig,
-		"Summary":          summary,
-		"Savings":          savings,
-		"LoanRequests":     requests,
-		"OutstandingLoans": outstandingLoans,
-		"Repayments":       repayments,
+		"Member":                 member,
+		"TagihanConfig":          tagihanConfig,
+		"Summary":                summary,
+		"Savings":                savings,
+		"LoanRequests":           requests,
+		"OutstandingLoans":       outstandingLoans,
+		"Repayments":             repayments,
+		"DeactivationBalances":   deactivationBalances,
+		"DeactivationTotal":      deactivationTotal,
+		"DeactivationRequest":    deactivationRequest,
+		"OutstandingLoanBalance": outstandingLoanBalance,
+		"CanStartDeactivation":   canStartDeactivation,
 	}))
 }
 

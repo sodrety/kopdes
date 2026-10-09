@@ -473,6 +473,19 @@ func (s *Server) recordPaidTagihanRowTx(tx *sql.Tx, memberID string, statementMo
 	note := tagihanNote(statementMonth, memberID)
 	savingsCreated := 0
 	messages := []string{}
+	var memberStatus string
+	if err := tx.QueryRow(`SELECT status FROM members WHERE id=$1`+rowLockClause(s.db), memberID).Scan(&memberStatus); err != nil {
+		return 0, 0, nil, err
+	}
+	pendingDeactivation, err := hasPendingMemberDeactivation(tx, memberID)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	if pendingDeactivation {
+		messages = append(messages, translate(language, "tagihan_saving_member_deactivation_pending"))
+	} else if memberStatus != "active" {
+		messages = append(messages, translate(language, "tagihan_saving_member_inactive"))
+	}
 	for _, saving := range []struct {
 		category string
 		amount   int64
@@ -481,6 +494,9 @@ func (s *Server) recordPaidTagihanRowTx(tx *sql.Tx, memberID string, statementMo
 		{"sukarela", savingAmounts.Manasuka},
 	} {
 		if saving.amount <= 0 {
+			continue
+		}
+		if pendingDeactivation || memberStatus != "active" {
 			continue
 		}
 		var existing int
@@ -497,7 +513,7 @@ func (s *Server) recordPaidTagihanRowTx(tx *sql.Tx, memberID string, statementMo
 		}
 		if err := s.createFinancialJournalTx(tx, accountingJournalInput{
 			ReferenceNo: reference, TransactionID: id, TransactionType: "savings", TransactionDate: recordDate, Source: source, Amount: saving.amount, Category: saving.category,
-			Components: []accountingJournalComponent{{Component: "cash_bank", Side: accountingDirectionDebit, Amount: saving.amount}, {Component: "savings_liability", Side: accountingDirectionCredit, Amount: saving.amount}},
+			Components:  []accountingJournalComponent{{Component: "cash_bank", Side: accountingDirectionDebit, Amount: saving.amount}, {Component: "savings_liability", Side: accountingDirectionCredit, Amount: saving.amount}},
 			Description: "Tagihan Simpanan " + saving.category, RecordedBy: recordedBy, BatchID: reference,
 		}); err != nil {
 			return 0, 0, nil, err
@@ -589,9 +605,9 @@ func (s *Server) recordTagihanRepaymentTx(tx *sql.Tx, loanID string, amount int6
 	}
 	return s.createFinancialJournalTx(tx, accountingJournalInput{
 		ReferenceNo: reference, TransactionID: id, TransactionType: "repayment", TransactionDate: recordDate, Source: source, Amount: amount, LoanType: loan.LoanType,
-		Components: []accountingJournalComponent{{Component: "cash_bank", Side: accountingDirectionDebit, Amount: amount}, {Component: "loan_receivable", Side: accountingDirectionCredit, Amount: amount}},
+		Components:   []accountingJournalComponent{{Component: "cash_bank", Side: accountingDirectionDebit, Amount: amount}, {Component: "loan_receivable", Side: accountingDirectionCredit, Amount: amount}},
 		COAOverrides: map[string]string{"loan_receivable": strings.TrimSpace(coaCode)},
-		Description: "Tagihan Angsuran", RecordedBy: recordedBy, BatchID: reference,
+		Description:  "Tagihan Angsuran", RecordedBy: recordedBy, BatchID: reference,
 	})
 }
 

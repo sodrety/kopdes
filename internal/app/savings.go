@@ -81,6 +81,10 @@ func (s *Server) recordSaving(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Savings can only be recorded for active members")
 		return
 	}
+	if errors.Is(err, errMemberDeactivationPending) {
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_member_deactivation_pending"))
+		return
+	}
 	if errors.Is(err, errInsufficientSavingBalance) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Withdrawal cannot exceed current saving balance")
 		return
@@ -211,6 +215,13 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 	if member.Status != "active" {
 		return SavingRecord{}, errInactiveSavingMember
 	}
+	pendingDeactivation, err := hasPendingMemberDeactivation(tx, member.ID)
+	if err != nil {
+		return SavingRecord{}, err
+	}
+	if pendingDeactivation {
+		return SavingRecord{}, errMemberDeactivationPending
+	}
 	if recordType == "withdrawal" {
 		if category != "sukarela" {
 			return SavingRecord{}, errInvalidSavingWithdrawalCategory
@@ -262,7 +273,7 @@ func (s *Server) insertSaving(req savingRequest, recordedBy string) (SavingRecor
 			{Component: "savings_liability", Side: accountingDirectionCredit, Amount: record.Amount},
 		},
 		COAOverrides: map[string]string{"cash_bank": strings.TrimSpace(req.CashCOACode), "savings_liability": record.COACode},
-		Description: "Simpanan " + record.Category, RecordedBy: recordedBy,
+		Description:  "Simpanan " + record.Category, RecordedBy: recordedBy,
 	}); err != nil {
 		return SavingRecord{}, err
 	}

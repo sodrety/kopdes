@@ -188,6 +188,7 @@ func syncOfficerNotifications(tx *sql.Tx, userID, role string, active bool) erro
 	}{
 		{RequestType: "loan", Table: "loan_requests", Link: "/admin/loan-requests"},
 		{RequestType: "withdrawal", Table: "withdrawal_requests", Link: "/admin/withdrawal-requests"},
+		{RequestType: "member_deactivation", Table: "member_deactivation_requests", Link: "/admin/withdrawal-requests"},
 	} {
 		rows, err := tx.Query(`SELECT id FROM `+source.Table+` WHERE status='pending' AND current_approval_stage=$1 ORDER BY created_at,id`, stage)
 		if err != nil {
