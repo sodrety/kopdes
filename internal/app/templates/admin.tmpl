@@ -1975,20 +1975,20 @@
             <ul class="compact-list">{{range .Balances}}<li>{{t $.Lang (printf "simpanan_%s" .Category)}}: {{nominal .Amount}}</li>{{end}}</ul>
             <p class="field-help">{{t $.Lang "member_deactivation_loan_separate"}}</p>
             {{if .CanDecide}}
-            <div class="table-actions">
+            <div class="deactivation-review-actions">
               <form method="post" action="/api/admin/member-deactivation-requests/{{.ID}}/approve" hx-post="/api/admin/member-deactivation-requests/{{.ID}}/approve" hx-target="#member-deactivation-review-error" hx-swap="innerHTML">
                 {{if eq .CurrentApprovalStage "manager"}}
-                <fieldset>
+                <fieldset class="deactivation-payout-method">
                   <legend>{{t $.Lang "member_deactivation_payout_method"}}</legend>
-                  <label><input type="radio" name="payout_source" value="cash" required> {{t $.Lang "cash"}}</label>
-                  {{if and .BankName .BankAccount}}<label><input type="radio" name="payout_source" value="bank" required> {{t $.Lang "bank"}} · {{.BankName}} · {{.BankAccount}}</label>{{end}}
+                  <label class="deactivation-payout-option"><input type="radio" name="payout_source" value="cash" required> <span>{{t $.Lang "cash"}}</span></label>
+                  {{if and .BankName .BankAccount}}<label class="deactivation-payout-option"><input type="radio" name="payout_source" value="bank" required> <span>{{t $.Lang "bank"}} · {{.BankName}} · {{.BankAccount}}</span></label>{{end}}
                   {{if not (and .BankName .BankAccount)}}<p class="field-help">{{t $.Lang "member_deactivation_bank_details_missing"}}</p>{{end}}
                 </fieldset>
                 {{end}}
                 <label>{{t $.Lang "approval_note_optional"}} <input name="note" maxlength="500"></label>
                 <button type="submit">{{t $.Lang "approve"}}</button>
               </form>
-              <form class="inline-rejection-form" method="post" action="/api/admin/member-deactivation-requests/{{.ID}}/reject" hx-post="/api/admin/member-deactivation-requests/{{.ID}}/reject" hx-target="#member-deactivation-review-error" hx-swap="innerHTML">
+              <form method="post" action="/api/admin/member-deactivation-requests/{{.ID}}/reject" hx-post="/api/admin/member-deactivation-requests/{{.ID}}/reject" hx-target="#member-deactivation-review-error" hx-swap="innerHTML">
                 <label>{{t $.Lang "member_deactivation_rejection_reason"}} <input name="reason" maxlength="1000" required></label>
                 <button class="button-secondary" type="submit">{{t $.Lang "reject"}}</button>
               </form>

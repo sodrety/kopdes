@@ -1924,6 +1924,55 @@ td:nth-child(n+2):not(.review-cell) {
 .review-cell {
 	min-width: 120px;
 }
+.deactivation-review-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  align-items: start;
+  gap: 24px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-soft);
+}
+.deactivation-review-actions > form {
+  min-width: 0;
+  align-content: start;
+}
+.deactivation-review-actions button {
+  justify-self: start;
+}
+.deactivation-payout-method {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.deactivation-payout-method legend {
+  padding: 0 6px;
+  color: var(--body);
+  font-size: 13px;
+  font-weight: 600;
+}
+.deactivation-payout-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.deactivation-payout-option input[type="radio"] {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--primary);
+}
+.deactivation-payout-method .field-help {
+  margin: 0;
+}
 .review-action label {
 	gap: 4px;
 	font-size: 12px;
