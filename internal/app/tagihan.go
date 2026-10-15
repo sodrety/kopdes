@@ -57,12 +57,14 @@ type tagihanLoanDue struct {
 }
 
 type TagihanImportResult struct {
-	StatementMonth string                     `json:"statement_month"`
-	RecordDate     string                     `json:"record_date"`
-	Committed      bool                       `json:"committed"`
-	Message        string                     `json:"message,omitempty"`
-	Rows           []TagihanImportRowResult   `json:"rows"`
-	Summary        TagihanImportResultSummary `json:"summary"`
+	SuspensionsCreated int                        `json:"suspensions_created"`
+	SuspensionsSkipped int                        `json:"suspensions_skipped"`
+	StatementMonth     string                     `json:"statement_month"`
+	RecordDate         string                     `json:"record_date"`
+	Committed          bool                       `json:"committed"`
+	Message            string                     `json:"message,omitempty"`
+	Rows               []TagihanImportRowResult   `json:"rows"`
+	Summary            TagihanImportResultSummary `json:"summary"`
 }
 
 type TagihanImportResultSummary struct {
@@ -72,6 +74,8 @@ type TagihanImportResultSummary struct {
 }
 
 type TagihanImportRowResult struct {
+	Sheet          string   `json:"sheet,omitempty"`
+	LoanID         string   `json:"loan_id,omitempty"`
 	ExcelRow       int      `json:"excel_row"`
 	MemberID       string   `json:"member_id"`
 	MemberNo       string   `json:"member_no,omitempty"`
@@ -145,6 +149,10 @@ func (s *Server) exportTagihanXLSX(c *gin.Context) {
 	}
 	defer workbook.Close()
 
+	if err := s.addSuspensionSheet(workbook, statementMonth, languageFromRequest(c)); err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="tagihan-%s.xlsx"`, statementMonth.Value))
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	if err := workbook.Write(c.Writer); err != nil {
@@ -208,11 +216,23 @@ func (s *Server) adminTagihanPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
+	suspensionLoans, err := s.suspensionLoans(statementMonth)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	history, err := s.suspensionHistory(statementMonth.Value)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
 	renderPage(c, "admin-tagihan", pageData(c, "Tagihan - KKSUK PD Dharma Jaya", "tagihan", "tagihan", "tagihan_description", gin.H{
-		"StatementMonth": statementMonth.Value,
-		"DefaultDate":    statementMonth.DefaultDate,
-		"TagihanConfig":  tagihanConfiguration(),
-		"Rows":           rows,
+		"SuspensionLoans":   suspensionLoans,
+		"SuspensionHistory": history,
+		"StatementMonth":    statementMonth.Value,
+		"DefaultDate":       statementMonth.DefaultDate,
+		"TagihanConfig":     tagihanConfiguration(),
+		"Rows":              rows,
 	}))
 }
 
@@ -532,6 +552,17 @@ func (s *Server) recordPaidTagihanRowTx(tx *sql.Tx, memberID string, statementMo
 
 	repaymentsCreated := 0
 	for _, due := range dues {
+		var lockedLoanID string
+		if err := tx.QueryRow(`SELECT id FROM loans WHERE id=$1`+rowLockClause(s.db), due.LoanID).Scan(&lockedLoanID); err != nil {
+			return 0, 0, nil, err
+		}
+		var alreadyRecorded int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM loan_repayments WHERE loan_id=$1 AND reference_no=$2`, due.LoanID, reference).Scan(&alreadyRecorded); err != nil {
+			return 0, 0, nil, err
+		}
+		if alreadyRecorded > 0 {
+			continue
+		}
 		if err := s.recordTagihanRepaymentTx(tx, due.LoanID, due.Amount, recordDate, reference, note, source, "", recordedBy); err != nil {
 			return 0, 0, nil, err
 		}
@@ -666,6 +697,14 @@ func (s *Server) importTagihan(statementMonth tagihanStatementMonth, recordDate 
 	}
 	defer workbook.Close()
 
+	suspensions, err := readSuspensionActions(workbook, statementMonth, recordDate, language)
+	if err != nil {
+		return TagihanImportResult{}, err
+	}
+	suspendedLoans := map[string]bool{}
+	for _, action := range suspensions {
+		suspendedLoans[action.LoanID] = true
+	}
 	sheet := workbook.GetSheetName(0)
 	rows, err := workbook.GetRows(sheet)
 	if err != nil {
@@ -770,7 +809,11 @@ func (s *Server) importTagihan(statementMonth tagihanStatementMonth, recordDate 
 				invalidRows++
 				break
 			}
-			dues = append(dues, loanDues...)
+			for _, due := range loanDues {
+				if !suspendedLoans[due.LoanID] {
+					dues = append(dues, due)
+				}
+			}
 		}
 		hasDue := savings.Wajib > 0 || savings.Manasuka > 0 || len(dues) > 0
 		if len(rowResult.Messages) > 0 {
@@ -792,6 +835,14 @@ func (s *Server) importTagihan(statementMonth tagihanStatementMonth, recordDate 
 		result.Message = translate(language, "tagihan_import_rejected")
 		return result, tagihanImportRejectedError{result: result}
 	}
+	for _, action := range suspensions {
+		if !seenMembers[action.MemberID] {
+			return result, errSuspensionConflict
+		}
+		if _, err := s.tagihanMember(action.MemberID); err != nil {
+			return result, errSuspensionConflict
+		}
+	}
 
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
@@ -800,6 +851,22 @@ func (s *Server) importTagihan(statementMonth tagihanStatementMonth, recordDate 
 		return TagihanImportResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	for _, action := range suspensions {
+		created, err := s.applyLoanSuspensionTx(tx, action, recordedBy, language)
+		if err != nil {
+			result.SuspensionsCreated = 0
+			result.SuspensionsSkipped = 0
+			result.Summary.Invalid++
+			result.Message = translate(language, "tagihan_import_rejected")
+			result.Rows = append(result.Rows, TagihanImportRowResult{Sheet: suspensionSheet, ExcelRow: action.ExcelRow, MemberID: action.MemberID, LoanID: action.LoanID, Result: "invalid", Messages: []string{translate(language, "suspension_invalid")}})
+			return result, tagihanImportRejectedError{result: result}
+		}
+		if created {
+			result.SuspensionsCreated++
+		} else {
+			result.SuspensionsSkipped++
+		}
+	}
 	for _, row := range validated {
 		if row.status != "paid" || (row.savings.Wajib <= 0 && row.savings.Manasuka <= 0 && len(row.dues) == 0) {
 			continue

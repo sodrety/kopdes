@@ -78,7 +78,7 @@ func validAccountingTransactionDirection(value string) bool {
 
 func validCashTransactionType(value string) bool {
 	switch value {
-	case "savings", "withdrawal", "loan", "repayment":
+	case "savings", "withdrawal", "loan", "repayment", "loan_suspension_fee":
 		return true
 	case "manual":
 		return true
@@ -175,6 +175,16 @@ func (s *Server) cashTransactionsQuery(filters CashTransactionFilters) (string, 
 			lr.reference_no,COALESCE(NULLIF(u.full_name,''),u.email,''),CAST(lr.created_at AS TEXT)
 		FROM loan_repayments lr JOIN members m ON m.id=lr.member_id LEFT JOIN users u ON u.id=lr.recorded_by
 		LEFT JOIN cash_movement cm ON cm.transaction_id=lr.id AND cm.transaction_type='repayment'
+		UNION ALL
+		SELECT 'suspension:' || x.id,x.record_date,m.member_no,m.full_name,
+			CASE WHEN cm.net_amount>0 THEN 'debit' WHEN cm.net_amount<0 THEN 'credit' ELSE 'pending_mapping' END,
+			'loan_suspension_fee','',e.description,'','',COALESCE(cm.coa_codes,''),
+			CASE WHEN cm.net_amount>0 THEN cm.net_amount ELSE 0 END,
+			CASE WHEN cm.net_amount<0 THEN -cm.net_amount ELSE 0 END,
+			ABS(COALESCE(cm.net_amount,0)),e.reference_no,COALESCE(NULLIF(u.full_name,''),u.email,''),CAST(x.created_at AS TEXT)
+		FROM loan_suspensions x JOIN members m ON m.id=x.member_id LEFT JOIN users u ON u.id=x.recorded_by
+		JOIN financial_journal_entries e ON e.transaction_id=x.id AND e.transaction_type='loan_suspension_fee' AND e.reversal_of IS NULL
+		LEFT JOIN cash_movement cm ON cm.transaction_id=x.id AND cm.transaction_type='loan_suspension_fee'
 		UNION ALL
 		SELECT 'manual:' || mt.id,mt.transaction_date,'','',
 			CASE WHEN cm.status='posted' AND cm.net_amount<>0 THEN CASE WHEN cm.net_amount>0 THEN 'debit' ELSE 'credit' END ELSE 'pending_mapping' END,

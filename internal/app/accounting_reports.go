@@ -152,7 +152,7 @@ func (s *Server) financialJournalsForAdmin(dateFrom, dateTo string) ([]Financial
 	query := `SELECT e.id,e.reference_no,e.transaction_type,e.transaction_date,e.description,e.category,e.loan_type,e.status,e.recorded_by,COALESCE(e.reversal_of,''),e.correction_reason,
 		COALESCE(SUM(CASE WHEN l.side='debit' THEN l.amount ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN l.side='credit' THEN l.amount ELSE 0 END),0),
-		(e.status='posted' AND NOT EXISTS(SELECT 1 FROM financial_journal_entries r WHERE r.reversal_of=e.id))
+		(e.status='posted' AND e.transaction_type<>'loan_suspension_fee' AND NOT EXISTS(SELECT 1 FROM financial_journal_entries r WHERE r.reversal_of=e.id))
 		FROM financial_journal_entries e LEFT JOIN financial_journal_lines l ON l.journal_id=e.id WHERE 1=1`
 	args := []any{}
 	if dateFrom != "" {
@@ -379,6 +379,12 @@ func (s *Server) reverseFinancialJournalTx(journalID, actorID, reversalDate, rea
 	}
 	if entry.Status != "posted" {
 		return errJournalNotPosted
+	}
+	// A fee reversal must also undo its schedule extension. Until that workflow
+	// is supported, prohibit an independent journal reversal that would leave
+	// the suspension falsely marked as paid.
+	if entry.TransactionType == "loan_suspension_fee" {
+		return errInvalidJournalReversal
 	}
 	var reversed bool
 	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM financial_journal_entries WHERE reversal_of=$1)`, journalID).Scan(&reversed); err != nil {

@@ -613,6 +613,7 @@ var migrations = []migration{
 		},
 	},
 	{Version: 43, Name: "add_voucher_loans"},
+	{Version: 44, Name: "add_loan_suspensions", Statements: loanSuspensionMigrationStatements},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -805,7 +806,7 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 		}
 	}
 	for _, statement := range migration.Statements {
-		if (migration.Version == 36 || migration.Version == 42) && isSQLite && strings.Contains(statement, "ENABLE ROW LEVEL SECURITY") {
+		if (migration.Version == 36 || migration.Version == 42 || migration.Version == 44) && isSQLite && strings.Contains(statement, "ENABLE ROW LEVEL SECURITY") {
 			continue
 		}
 		if migration.Version == 32 && isSQLite {

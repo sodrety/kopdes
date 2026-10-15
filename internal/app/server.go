@@ -147,6 +147,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	admin.GET("/tagihan", server.requirePermission(PermissionTagihanView), server.adminTagihan)
 	admin.GET("/tagihan/export.xlsx", server.requirePermission(PermissionTagihanView), server.exportTagihanXLSX)
 	admin.POST("/tagihan/import", server.requirePermission(PermissionTagihanManage), server.importTagihanXLSX)
+	admin.POST("/tagihan/suspensions", server.requirePermission(PermissionTagihanManage), server.recordTagihanSuspension)
 	admin.GET("/officers", server.requirePermission(PermissionOfficersManage), server.listOfficers)
 	admin.POST("/officers", server.requirePermission(PermissionOfficersManage), server.createOfficer)
 	admin.POST("/officers/:id/update", server.requirePermission(PermissionOfficersManage), server.updateOfficer)

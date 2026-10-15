@@ -752,7 +752,7 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 func (s *Server) loanByID(id string) (Loan, error) {
 	var loan Loan
 	err := s.db.QueryRow(
-		`SELECT id, loan_request_id, member_id, loan_type, legacy_terms, source, COALESCE(coa_code,''), approved_amount, duration_months, monthly_installment, remaining_balance, start_date, admin_fee_policy, monthly_admin_fee, total_admin_fee, total_obligation, next_due_date, final_due_date, status, approved_by, approved_at, created_at, updated_at
+		`SELECT id, loan_request_id, member_id, loan_type, legacy_terms, source, COALESCE(coa_code,''), approved_amount, (duration_months + (SELECT COUNT(*) FROM loan_suspensions sx WHERE sx.loan_id=loans.id)), monthly_installment, remaining_balance, start_date, admin_fee_policy, monthly_admin_fee, total_admin_fee, total_obligation, next_due_date, final_due_date, status, approved_by, approved_at, created_at, updated_at
 		FROM loans
 		WHERE id = $1`,
 		id,
@@ -764,7 +764,7 @@ func (s *Server) loanByID(id string) (Loan, error) {
 func (s *Server) activeLoanByMember(memberID string) (Loan, error) {
 	var loan Loan
 	err := s.db.QueryRow(
-		`SELECT id, loan_request_id, member_id, loan_type, legacy_terms, source, COALESCE(coa_code,''), approved_amount, duration_months, monthly_installment, remaining_balance, start_date, admin_fee_policy, monthly_admin_fee, total_admin_fee, total_obligation, next_due_date, final_due_date, status, approved_by, approved_at, created_at, updated_at
+		`SELECT id, loan_request_id, member_id, loan_type, legacy_terms, source, COALESCE(coa_code,''), approved_amount, (duration_months + (SELECT COUNT(*) FROM loan_suspensions sx WHERE sx.loan_id=loans.id)), monthly_installment, remaining_balance, start_date, admin_fee_policy, monthly_admin_fee, total_admin_fee, total_obligation, next_due_date, final_due_date, status, approved_by, approved_at, created_at, updated_at
 		FROM loans
 		WHERE member_id = $1 AND status = 'active'
 		ORDER BY created_at DESC
@@ -777,7 +777,7 @@ func (s *Server) activeLoanByMember(memberID string) (Loan, error) {
 
 func (s *Server) loansForAdmin(status string) ([]AdminLoan, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT l.id, l.loan_request_id, l.member_id, l.loan_type, l.legacy_terms, l.source, COALESCE(l.coa_code,''), m.member_no, m.full_name, m.member_type, l.approved_amount, l.duration_months, l.monthly_installment, l.remaining_balance, l.start_date,l.admin_fee_policy,l.monthly_admin_fee,l.total_admin_fee,l.total_obligation,l.next_due_date,l.final_due_date,l.status, l.approved_at, l.created_at, l.updated_at
+	query := `SELECT l.id, l.loan_request_id, l.member_id, l.loan_type, l.legacy_terms, l.source, COALESCE(l.coa_code,''), m.member_no, m.full_name, m.member_type, l.approved_amount, (l.duration_months + (SELECT COUNT(*) FROM loan_suspensions sx WHERE sx.loan_id=l.id)), l.monthly_installment, l.remaining_balance, l.start_date,l.admin_fee_policy,l.monthly_admin_fee,l.total_admin_fee,l.total_obligation,l.next_due_date,l.final_due_date,l.status, l.approved_at, l.created_at, l.updated_at
 		FROM loans l
 		INNER JOIN members m ON m.id = l.member_id`
 	args := []any{}
@@ -807,7 +807,7 @@ func (s *Server) loansForAdmin(status string) ([]AdminLoan, error) {
 }
 
 func (s *Server) outstandingLoansByMember(memberID string) ([]Loan, error) {
-	rows, err := s.db.Query(`SELECT id,loan_request_id,member_id,loan_type,legacy_terms,source,COALESCE(coa_code,''),approved_amount,duration_months,monthly_installment,remaining_balance,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date,status,approved_by,approved_at,created_at,updated_at FROM loans WHERE member_id=$1 AND status <> 'cancelled' AND remaining_balance>0 ORDER BY next_due_date,created_at`, memberID)
+	rows, err := s.db.Query(`SELECT id,loan_request_id,member_id,loan_type,legacy_terms,source,COALESCE(coa_code,''),approved_amount,(duration_months + (SELECT COUNT(*) FROM loan_suspensions sx WHERE sx.loan_id=loans.id)),monthly_installment,remaining_balance,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date,status,approved_by,approved_at,created_at,updated_at FROM loans WHERE member_id=$1 AND status <> 'cancelled' AND remaining_balance>0 ORDER BY next_due_date,created_at`, memberID)
 	if err != nil {
 		return nil, err
 	}
@@ -870,6 +870,12 @@ func (s *Server) correctLoanStartDateByID(loanID, adminID, value string) (Loan, 
 		return Loan{}, errLoanStartDateStatus
 	}
 	var count int
+	if err = tx.QueryRow(`SELECT COUNT(*) FROM loan_suspensions WHERE loan_id=$1`, loanID).Scan(&count); err != nil {
+		return Loan{}, err
+	}
+	if count > 0 {
+		return Loan{}, errLoanStartDateLocked
+	}
 	if err = tx.QueryRow(`SELECT COUNT(*) FROM loan_repayments WHERE loan_id=$1`, loanID).Scan(&count); err != nil {
 		return Loan{}, err
 	}
