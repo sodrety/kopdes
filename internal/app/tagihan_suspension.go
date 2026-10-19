@@ -253,12 +253,10 @@ func (s *Server) applyLoanSuspensionTx(tx *sql.Tx, a suspensionAction, actor, la
 	if bank == "" || bank == "40201" {
 		return false, errSuspensionConflict
 	}
-	bankAccount, err := s.coaAccountForPostingTx(tx, bank)
-	if err != nil {
+	// Match repayment posting validation: imported bank accounts may carry
+	// statement subtypes such as "Neraca" rather than "bank" or "cash".
+	if _, err := s.coaAccountForPostingTx(tx, bank); err != nil {
 		return false, err
-	}
-	if bankAccount.AccountType != "asset" || !(strings.EqualFold(bankAccount.Subtype, "bank") || strings.EqualFold(bankAccount.Subtype, "cash") || bankAccount.SystemKey == "BANK" || bankAccount.SystemKey == "CASH") {
-		return false, errSuspensionConflict
 	}
 	income, err := s.coaAccountForPostingTx(tx, "40201")
 	if err != nil {

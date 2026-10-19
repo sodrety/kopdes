@@ -20,7 +20,11 @@ func TestTagihanSuspensionExcelPreservesBalanceAndPosts40201(t *testing.T) {
 	if m.ID == "" {
 		t.Fatal("missing member")
 	}
-	if _, err := f.db.Exec(`INSERT INTO accounting_mappings(id,mapping_key,transaction_type,component,loan_type,coa_code,active) VALUES('susp-test-bank','susp-test-bank','repayment','cash_bank','regular','BANK',TRUE)`); err != nil {
+	// Imported bank accounts use statement subtypes and may have no system key.
+	if _, err := f.db.Exec(`INSERT INTO coa_accounts(id,code,name,account_type,subtype,normal_balance,is_group,active) VALUES('susp-imported-bank','10200','Bank DKI','asset','Neraca','D',FALSE,TRUE)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Exec(`INSERT INTO accounting_mappings(id,mapping_key,transaction_type,component,loan_type,coa_code,active) VALUES('susp-test-bank','susp-test-bank','repayment','cash_bank','regular','10200',TRUE)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.db.Exec(`INSERT INTO coa_accounts(id,code,name,account_type,normal_balance,is_group,active) VALUES('susp-income','40201','Loan service income','revenue','C',FALSE,TRUE) ON CONFLICT(code) DO NOTHING`); err != nil {
