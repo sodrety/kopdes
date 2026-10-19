@@ -20,6 +20,13 @@ func TestSuspensionSheetBahasaAndLegacyCompatibility(t *testing.T) {
 			if err != nil || len(actions) != 1 || actions[0].LoanID != "loan-1" {
 				t.Fatal(actions, err)
 			}
+			for _, reason := range []string{"", "   "} {
+				_ = w.SetCellValue(name, "H2", reason)
+				actions, err = readSuspensionActions(w, month, "2026-10-25", "id")
+				if err != nil || len(actions) != 1 || actions[0].Reason != "" {
+					t.Fatal("optional reason rejected", actions, err)
+				}
+			}
 			other := suspensionSheet
 			if name == other {
 				other = legacySuspensionSheet

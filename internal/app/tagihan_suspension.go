@@ -128,7 +128,7 @@ func (s *Server) suspensionLoans(month tagihanStatementMonth) ([]suspensionLoan,
 // month key and the loan row lock make retries safe across app processes.
 func (s *Server) applyLoanSuspensionTx(tx *sql.Tx, a suspensionAction, actor, language string) (bool, error) {
 	month, err := parseTagihanStatementMonth(a.Month)
-	if err != nil || strings.TrimSpace(a.Reason) == "" || len(a.Reason) > 2000 || a.Fee <= 0 {
+	if err != nil || len(a.Reason) > 2000 || a.Fee <= 0 {
 		return false, errSuspensionConflict
 	}
 	if _, err = time.Parse("2006-01-02", a.RecordDate); err != nil || a.RecordDate < a.Month+"-01" {
@@ -356,7 +356,7 @@ func readSuspensionActions(w *excelize.File, month tagihanStatementMonth, record
 		}
 		a := suspensionAction{LoanID: tagihanCell(row, 0), MemberID: tagihanCell(row, 1), Month: tagihanCell(row, 4), Fee: fee, Reason: tagihanCell(row, 7), RecordDate: recordDate}
 		a.ExcelRow = index + 2
-		if a.Month != month.Value || a.LoanID == "" || a.MemberID == "" || seen[a.LoanID] || strings.TrimSpace(a.Reason) == "" {
+		if a.Month != month.Value || a.LoanID == "" || a.MemberID == "" || seen[a.LoanID] {
 			return nil, errSuspensionConflict
 		}
 		seen[a.LoanID] = true

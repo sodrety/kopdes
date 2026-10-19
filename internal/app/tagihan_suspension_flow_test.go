@@ -67,7 +67,8 @@ func TestTagihanSuspensionExcelPreservesBalanceAndPosts40201(t *testing.T) {
 		t.Fatal(fee, err)
 	}
 	_ = w.SetCellValue("Rincian Pinjaman", "K2", "suspend")
-	_ = w.SetCellValue("Rincian Pinjaman", "L2", "Approved salary deferral")
+	// An omitted reason must work through preview, confirmation and retry.
+	_ = w.SetCellValue("Rincian Pinjaman", "L2", "")
 	buf, err := w.WriteToBuffer()
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +195,7 @@ func TestTagihanSuspensionAppAuthorizationAndConsecutiveMonths(t *testing.T) {
 	_ = f.db.QueryRow(`SELECT next_due_date,remaining_balance FROM loans WHERE id=$1`, loan.ID).Scan(&first, &balance)
 	post := func(auth, month, member string, fee int64) *httptest.ResponseRecorder {
 		t.Helper()
-		body, _ := json.Marshal(map[string]any{"loan_id": loan.ID, "member_id": member, "statement_month": month, "fee_amount": fee, "record_date": month + "-28", "reason": "Approved monthly suspension"})
+		body, _ := json.Marshal(map[string]any{"loan_id": loan.ID, "member_id": member, "statement_month": month, "fee_amount": fee, "record_date": month + "-28"})
 		r := httptest.NewRequest("POST", "/api/admin/tagihan/suspensions", bytes.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+auth)
 		r.Header.Set("Content-Type", "application/json")
