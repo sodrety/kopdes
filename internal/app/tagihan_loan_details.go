@@ -212,29 +212,38 @@ func addDetailedTagihanSummary(w *excelize.File, lang string) error {
 		return err
 	}
 	end := max(2, len(loans))
-	for i, key := range reviewKeys {
+	// Remove earlier realization inputs and formulas before laying out loan-only summaries.
+	for i := range rows {
+		for col := 14; col <= 21; col++ {
+			cell, _ := excelize.CoordinatesToCellName(col, i+1)
+			_ = w.SetCellFormula("Tagihan", cell, "")
+			_ = w.SetCellValue("Tagihan", cell, "")
+		}
+	}
+	for i, key := range reviewKeys[2:] {
 		cell, _ := excelize.CoordinatesToCellName(14+i, 1)
 		_ = w.SetCellValue("Tagihan", cell, translate(lang, key))
 	}
+	_ = w.SetCellValue("Tagihan", "K1", translate(lang, "savings_auto_status"))
 	_ = w.SetCellValue("Tagihan", "M1", translate(lang, "suspension_collection_total"))
-	_ = w.SetCellValue("Tagihan", "T1", translate(lang, "review_actual_total"))
-	_ = w.SetCellValue("Tagihan", "U1", translate(lang, "review_difference"))
+	_ = w.SetCellValue("Tagihan", "R1", translate(lang, "review_actual_total"))
+	_ = w.SetCellValue("Tagihan", "S1", translate(lang, "review_difference"))
 	_ = w.SetCellValue("Tagihan", "W1", translate(lang, "detail_summary_help"))
 	for i := 1; i < len(rows); i++ {
 		r := i + 1
+		_ = w.SetCellValue("Tagihan", fmt.Sprintf("K%d", r), "paid")
 		for j, kind := range reviewTypes[2:] {
-			cell, _ := excelize.CoordinatesToCellName(16+j, r)
+			cell, _ := excelize.CoordinatesToCellName(14+j, r)
 			formula := fmt.Sprintf(`SUMIFS('%s'!$M$2:$M$%d,'%s'!$B$2:$B$%d,A%d,'%s'!$U$2:$U$%d,"%s")`, loanDetailSheet, end, loanDetailSheet, end, r, loanDetailSheet, end, kind)
 			if err = w.SetCellFormula("Tagihan", cell, formula); err != nil {
 				return err
 			}
 		}
 		fees := fmt.Sprintf(`SUMIFS('%s'!$N$2:$N$%d,'%s'!$B$2:$B$%d,A%d)`, loanDetailSheet, end, loanDetailSheet, end, r)
-		total := fmt.Sprintf(`IF(OR(K%d="paid",K%d="lunas"),SUM(N%d:O%d),0)+SUM(P%d:S%d)+%s`, r, r, r, r, r, r, fees)
-		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("T%d", r), total)
-		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("U%d", r), fmt.Sprintf("T%d-J%d", r, r))
+		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("R%d", r), fmt.Sprintf("SUM(E%d:F%d)+SUM(N%d:Q%d)+%s", r, r, r, r, fees))
+		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("S%d", r), fmt.Sprintf("R%d-J%d", r, r))
 		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("M%d", r), fmt.Sprintf("J%d", r))
 	}
-	_ = w.SetColWidth("Tagihan", "N", "U", 25)
+	_ = w.SetColWidth("Tagihan", "N", "S", 25)
 	return nil
 }

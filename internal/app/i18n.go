@@ -15,6 +15,7 @@ const (
 
 var translations = map[string]map[string]string{
 	defaultLanguage: {
+		"savings_auto_status": "Savings status (automatic paid)",
 		"detail_payment":      "Payment",
 		"detail_action":       "Action",
 		"detail_arrears":      "Previous arrears",
@@ -24,7 +25,7 @@ var translations = map[string]map[string]string{
 		"detail_fee_received": "Suspension fee received",
 		"review_deferred":     "Deferred amount",
 		"detail_help":         "One row per loan and statement month. Select Payment and enter the actual loan payment in M (including 0), or select suspension and provide a reason; suspension requires the separate fee and no loan payment. Blank action means no collection for this loan. Reference amounts and loan identity are validated against the application.",
-		"detail_summary_help": "Enter actual savings only in N–O and mark paid for savings collected. Loan columns P–S are summaries only. Enter each loan payment or suspension in Rincian Pinjaman; it is independent of the main savings status. Preview each Loan ID before confirmation.",
+		"detail_summary_help": "Savings are automatically paid in full from member configuration; no savings realization input is needed. Columns N–Q summarize actual loan payments; R is total collection and S the difference. Enter each loan payment or suspension only in Rincian Pinjaman. Preview before confirming all savings and loan postings.",
 
 		"review_wajib":        "Actual mandatory savings",
 		"review_manasuka":     "Actual voluntary savings",
@@ -44,7 +45,7 @@ var translations = map[string]map[string]string{
 		"review_preview":      "Preview differences",
 		"review_preview_help": "No changes have been saved. Review savings and each Loan ID before confirming. Loan shortfalls remain arrears. Suspension fees are separate.",
 		"review_excel_help":   "Edit actual amounts in columns N–S using whole Rupiah, including 0 for unpaid components. Set Status to paid for reviewed collections, including partial payments; unpaid skips the row. Do not edit reference bill amounts. Suspension remains in Penangguhan Cicilan. Loan actuals cannot exceed the current bill. Preview is required before confirmation.",
-		"review_invalid":      "Cannot preview this file. Check member IDs, status, the savings actuals and Rincian Pinjaman entries, nonnegative whole Rupiah amounts, and loan amounts no greater than current bills. Previously imported collections cannot be changed by re-import. Older files with multiple loans of one type must be exported again. Check suspension terms and accounting mappings.",
+		"review_invalid":      "Cannot preview this file. Check member IDs, status, the Rincian Pinjaman entries and savings configuration, nonnegative whole Rupiah amounts, and loan amounts no greater than current bills. Previously imported collections cannot be changed by re-import. Older files with multiple loans of one type must be exported again. Check suspension terms and accounting mappings.",
 		"review_changed":      "The file, date, member data or loan state changed, or this preview expired. Preview again before confirming.",
 		"review_legacy":       "Older files use current application amounts. Preview every component before confirmation.",
 
@@ -1017,6 +1018,7 @@ var translations = map[string]map[string]string{
 		"error.Only pending withdrawal requests can be rejected":                           "Only pending withdrawal requests can be rejected",
 	},
 	bahasaLanguage: {
+		"savings_auto_status": "Status simpanan (otomatis paid)",
 		"detail_payment":      "Pembayaran",
 		"detail_action":       "Tindakan",
 		"detail_arrears":      "Tunggakan sebelumnya",
@@ -1026,7 +1028,7 @@ var translations = map[string]map[string]string{
 		"detail_fee_received": "Jasa penangguhan diterima",
 		"review_deferred":     "Nominal ditangguhkan",
 		"detail_help":         "Satu baris per pinjaman dan bulan tagihan. Pilih Pembayaran lalu isi realisasi pinjaman di M (termasuk 0), atau pilih penangguhan dan isi alasan; penangguhan mewajibkan jasa terpisah tanpa pembayaran pinjaman. Tindakan kosong berarti tidak ada pembayaran untuk pinjaman ini. Nominal acuan dan identitas pinjaman diperiksa terhadap aplikasi.",
-		"detail_summary_help": "Isi realisasi simpanan hanya di N–O dan tandai paid untuk simpanan yang diterima. Kolom pinjaman P–S hanya ringkasan. Isi pembayaran atau penangguhan setiap pinjaman di Rincian Pinjaman; tindakan pinjaman terpisah dari status simpanan utama. Periksa preview setiap Loan ID sebelum konfirmasi.",
+		"detail_summary_help": "Simpanan otomatis paid penuh sesuai konfigurasi anggota; tidak ada input realisasi simpanan. Kolom N–Q merangkum realisasi pinjaman; R total realisasi dan S selisih. Isi pembayaran atau penangguhan hanya di Rincian Pinjaman. Periksa preview sebelum konfirmasi seluruh pencatatan simpanan dan pinjaman.",
 
 		"review_wajib":        "Realisasi Simpanan Wajib",
 		"review_manasuka":     "Realisasi Simpanan Manasuka",
@@ -1046,7 +1048,7 @@ var translations = map[string]map[string]string{
 		"review_preview":      "Preview selisih",
 		"review_preview_help": "Belum ada perubahan tersimpan. Periksa realisasi simpanan dan setiap Loan ID sebelum konfirmasi. Kekurangan pembayaran pinjaman tetap menjadi tunggakan. Jasa penangguhan terpisah.",
 		"review_excel_help":   "Ubah realisasi pada kolom N–S dalam Rupiah bulat, termasuk 0 untuk komponen yang tidak dibayar. Isi Status paid untuk realisasi termasuk pembayaran sebagian; unpaid melewati baris. Jangan ubah nominal tagihan acuan. Penangguhan tetap di Penangguhan Cicilan. Realisasi pinjaman tidak boleh melebihi tagihan saat ini. Wajib preview sebelum konfirmasi.",
-		"review_invalid":      "File belum dapat dipreview. Periksa ID anggota, status, realisasi simpanan dan baris Rincian Pinjaman, nominal Rupiah bulat tidak negatif, dan realisasi pinjaman tidak melebihi tagihan saat ini. Realisasi yang sudah diimpor tidak dapat diubah lewat impor ulang. File lama dengan beberapa pinjaman sejenis harus diekspor ulang. Periksa ketentuan penangguhan dan pemetaan jurnal.",
+		"review_invalid":      "File belum dapat dipreview. Periksa ID anggota, status, baris Rincian Pinjaman dan konfigurasi simpanan, nominal Rupiah bulat tidak negatif, dan realisasi pinjaman tidak melebihi tagihan saat ini. Realisasi yang sudah diimpor tidak dapat diubah lewat impor ulang. File lama dengan beberapa pinjaman sejenis harus diekspor ulang. Periksa ketentuan penangguhan dan pemetaan jurnal.",
 		"review_changed":      "File, tanggal, data anggota atau pinjaman berubah, atau preview kedaluwarsa. Lakukan preview kembali sebelum konfirmasi.",
 		"review_legacy":       "File lama memakai nominal aplikasi saat ini. Periksa setiap komponen pada preview sebelum konfirmasi.",
 

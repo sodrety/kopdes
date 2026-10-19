@@ -648,7 +648,11 @@ func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRo
 		return nil, err
 	}
 	for index, row := range rows {
-		values := []interface{}{row.MemberID, row.MemberNo, row.oldNPP, row.FullName, row.SimpananWajib, row.SimpananSukarela, row.PinjamanReguler, row.PinjamanBarangSekunder, row.PembelianBarang, row.Total, row.Status, row.PinjamanVoucher}
+		status := row.Status
+		if strings.TrimSpace(status) == "" {
+			status = "paid"
+		}
+		values := []interface{}{row.MemberID, row.MemberNo, row.oldNPP, row.FullName, row.SimpananWajib, row.SimpananSukarela, row.PinjamanReguler, row.PinjamanBarangSekunder, row.PembelianBarang, row.Total, status, row.PinjamanVoucher}
 		cell, err := excelize.CoordinatesToCellName(1, index+2)
 		if err != nil {
 			_ = workbook.Close()

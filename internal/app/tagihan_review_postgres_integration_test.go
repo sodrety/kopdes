@@ -51,7 +51,7 @@ func TestPostgresTagihanReviewedPreviewAndConfirmation(t *testing.T) {
 	}
 	var count int
 	_ = db.QueryRow(`SELECT COUNT(*) FROM saving_records WHERE member_id='review-pg-member'`).Scan(&count)
-	if count != 0 || plan.Committed || plan.ActualTotal != 5000 {
+	if count != 0 || plan.Committed || plan.ActualTotal != 10000 {
 		t.Fatal("preview persisted or repriced", plan)
 	}
 	claim := tagihanPreviewClaim{State: plan.fingerprint}
@@ -65,7 +65,7 @@ func TestPostgresTagihanReviewedPreviewAndConfirmation(t *testing.T) {
 	var amount, journal int64
 	_ = db.QueryRow(`SELECT amount FROM saving_records WHERE member_id='review-pg-member'`).Scan(&amount)
 	_ = db.QueryRow(`SELECT SUM(x.amount) FROM financial_journal_lines x JOIN financial_journal_entries j ON j.id=x.journal_id WHERE j.batch_id='TAGIHAN-2026-10' AND x.side='debit'`).Scan(&journal)
-	if amount != 5000 || journal != 5000 {
+	if amount != 10000 || journal != 10000 {
 		t.Fatal("wrong actual/journal", amount, journal)
 	}
 }

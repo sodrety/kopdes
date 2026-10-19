@@ -2256,7 +2256,7 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	if tagihanExcelRow == 0 {
 		t.Fatalf("expected Tagihan row for member %s, got %#v", member.ID, rows)
 	}
-	expectedHeaders := "Member ID|NPP|Old NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Status|Voucher|Collection after suspension"
+	expectedHeaders := "Member ID|NPP|Old NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Savings status (automatic paid)|Voucher|Collection after suspension"
 	if strings.Join(rows[0][:13], "|") != expectedHeaders {
 		t.Fatalf("unexpected Tagihan headers: %#v", rows[0])
 	}

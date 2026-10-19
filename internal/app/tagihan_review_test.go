@@ -92,12 +92,23 @@ func TestTagihanReviewedPartialAmountsPreviewAndJournals(t *testing.T) {
 	if target == 0 {
 		t.Fatal("member absent")
 	}
+	for _, header := range rows[0] {
+		if header == "Actual mandatory savings" || header == "Actual voluntary savings" {
+			t.Fatal("unexpected savings realization input", header)
+		}
+	}
+	if rows[0][13] != "Actual regular loan" || rows[0][17] != "Actual collection total" {
+		t.Fatal("wrong loan-only summary layout", rows[0])
+	}
+
 	for col, val := range map[string]any{"K": "paid", "N": 40000, "O": 0, "P": 100000, "Q": 0, "R": 0, "S": 0} {
 		_ = w.SetCellValue("Tagihan", fmt.Sprintf("%s%d", col, target), val)
 	}
 	detailRow := setLoanDetailReview(t, w, loan.ID, "payment", 100000)
-	// Changing reference bill columns must never dictate payment amounts.
+	// Changing savings reference, status or loan summary cells must not override configured savings.
 	_ = w.SetCellValue("Tagihan", fmt.Sprintf("G%d", target), 999999)
+	_ = w.SetCellValue("Tagihan", fmt.Sprintf("E%d", target), 1)
+	_ = w.SetCellValue("Tagihan", fmt.Sprintf("K%d", target), "unpaid")
 	serialize := func() []byte {
 		var b bytes.Buffer
 		if err := w.Write(&b); err != nil {
@@ -116,7 +127,7 @@ func TestTagihanReviewedPartialAmountsPreviewAndJournals(t *testing.T) {
 		} `json:"components"`
 	}
 	_ = json.Unmarshal(preview.Body.Bytes(), &plan)
-	if plan.Actual != 140000 {
+	if plan.Actual != 250000 {
 		t.Fatal(preview.Body.String())
 	}
 	var count int
@@ -149,7 +160,7 @@ func TestTagihanReviewedPartialAmountsPreviewAndJournals(t *testing.T) {
 	_ = f.db.QueryRow(`SELECT remaining_balance FROM loans WHERE id=$1`, loan.ID).Scan(&remaining)
 	_ = f.db.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM saving_records WHERE member_id=$1 AND reference_no=$2`, m.ID, "TAGIHAN-"+month).Scan(&saved)
 	_ = f.db.QueryRow(`SELECT COALESCE(SUM(x.amount),0) FROM financial_journal_lines x JOIN financial_journal_entries j ON j.id=x.journal_id WHERE j.transaction_id IN(SELECT id FROM loan_repayments WHERE loan_id=$1) AND x.side='debit'`, loan.ID).Scan(&journal)
-	if paid != 100000 || remaining != balance-100000 || saved != 40000 || journal != 100000 {
+	if paid != 100000 || remaining != balance-100000 || saved != 160000 || journal != 100000 {
 		t.Fatalf("actuals not respected: paid=%d remaining=%d savings=%d journal=%d", paid, remaining, saved, journal)
 	}
 	// New preview of same file is idempotent; edited retry cannot overwrite receipts.

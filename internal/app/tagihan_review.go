@@ -103,7 +103,7 @@ func (s *Server) readTagihanPreview(token string) (tagihanPreviewClaim, error) {
 }
 
 func readTagihanReviewRows(w *excelize.File) ([]tagihanReviewRow, error) {
-	sheet := "Tagihan"
+	const sheet = "Tagihan"
 	rows, err := w.GetRows(sheet)
 	if err != nil || len(rows) < 1 || len(rows) > 5001 {
 		return nil, errTagihanReview
@@ -113,31 +113,30 @@ func readTagihanReviewRows(w *excelize.File) ([]tagihanReviewRow, error) {
 	if !ok {
 		return nil, errTagihanReview
 	}
-	statusCol, ok := headers["status"]
-	if !ok {
+	detailIndex, _ := w.GetSheetIndex(loanDetailSheet)
+	detailed := detailIndex >= 0
+	statusCol, hasStatus := headers["status"]
+	if !detailed && !hasStatus {
 		return nil, errTagihanReview
 	}
 	var cols [6]int
-	detailIndex, _ := w.GetSheetIndex(loanDetailSheet)
-	limit := 6
-	if detailIndex >= 0 {
-		limit = 2
-	}
 	present := 0
-	for i, key := range reviewKeys[:limit] {
-		cols[i] = -1
-		for _, lang := range []string{"en", "id"} {
-			if col, ok := headers[strings.ToLower(translate(lang, key))]; ok {
-				cols[i] = col
-				break
+	if !detailed {
+		for i := 2; i < 6; i++ {
+			cols[i] = -1
+			for _, lang := range []string{"en", "id"} {
+				if col, ok := headers[strings.ToLower(translate(lang, reviewKeys[i]))]; ok {
+					cols[i] = col
+					break
+				}
+			}
+			if cols[i] >= 0 {
+				present++
 			}
 		}
-		if cols[i] >= 0 {
-			present++
+		if present != 0 && present != 4 {
+			return nil, errTagihanReview
 		}
-	}
-	if present != 0 && present != limit {
-		return nil, errTagihanReview
 	}
 	seen := map[string]bool{}
 	result := []tagihanReviewRow{}
@@ -145,26 +144,23 @@ func readTagihanReviewRows(w *excelize.File) ([]tagihanReviewRow, error) {
 		if strings.TrimSpace(strings.Join(row, "")) == "" {
 			continue
 		}
-		r := tagihanReviewRow{memberID: tagihanCell(row, memberCol), explicit: present == limit, excelRow: index + 2}
-		r.status, ok = parseTagihanStatus(tagihanCell(row, statusCol))
-		if !ok || r.memberID == "" || seen[r.memberID] {
+		r := tagihanReviewRow{memberID: tagihanCell(row, memberCol), explicit: present == 4, excelRow: index + 2, status: "paid"}
+		if !detailed {
+			r.status, ok = parseTagihanStatus(tagihanCell(row, statusCol))
+			if !ok {
+				return nil, errTagihanReview
+			}
+		}
+		if r.memberID == "" || seen[r.memberID] {
 			return nil, fmt.Errorf("%w: %d", errTagihanReview, index+2)
 		}
 		seen[r.memberID] = true
-		if r.explicit && r.status == "paid" {
-			for i, col := range cols[:limit] {
-				value := tagihanCell(row, col)
-				cell, _ := excelize.CoordinatesToCellName(col+1, index+2)
-				formula, _ := w.GetCellFormula(sheet, cell)
-				if formula != "" {
-					value, err = w.CalcCellValue(sheet, cell)
-					if err != nil {
-						return nil, errTagihanReview
-					}
-				}
-				amount, e := strconv.ParseInt(value, 10, 64)
-				if e != nil || amount < 0 || amount > 1_000_000_000_000 {
-					return nil, fmt.Errorf("%w: %d", errTagihanReview, index+2)
+		if !detailed && r.explicit && r.status == "paid" {
+			for i := 2; i < 6; i++ {
+				cell, _ := excelize.CoordinatesToCellName(cols[i]+1, index+2)
+				amount, e := reviewedExcelAmount(w, sheet, cell)
+				if e != nil {
+					return nil, e
 				}
 				r.values[i] = amount
 			}
@@ -334,13 +330,16 @@ func (s *Server) reviewTagihan(month tagihanStatementMonth, date string, data []
 		if r.status == "unpaid" {
 			actual = [6]int64{}
 		}
+		// Savings are always collected in full from authoritative configuration.
+		// Spreadsheet realization and status cells cannot reduce these deposits.
+		actual[0], actual[1] = expected[0], expected[1]
 		job := tagihanReviewWork{memberID: r.memberID}
 		limit := 6
 		if detailed {
 			limit = 2
 		}
 		for k := 0; k < limit; k++ {
-			if r.status == "paid" && recorded[k] > 0 && recorded[k] != actual[k] {
+			if (k < 2 || r.status == "paid") && recorded[k] > 0 && recorded[k] != actual[k] {
 				return result, errTagihanReview
 			}
 			if k >= 2 && actual[k] > expected[k] {
@@ -353,7 +352,7 @@ func (s *Server) reviewTagihan(month tagihanStatementMonth, date string, data []
 			result.Components = append(result.Components, component)
 			result.ExpectedTotal += expected[k]
 			result.ActualTotal += actual[k]
-			if r.status == "unpaid" || recorded[k] > 0 {
+			if (k >= 2 && r.status == "unpaid") || recorded[k] > 0 {
 				continue
 			}
 			if k == 0 {
