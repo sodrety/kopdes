@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -2195,6 +2194,7 @@ func TestAdminCanExportPinjamanAndAngsuranCSV(t *testing.T) {
 
 func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	fixture := newTestFixture(t)
+	configureReviewedCollectionMappings(t, fixture)
 	adminToken := fixture.login(t, "admin@coop.test", "password")
 	member := fixture.createMember(t, adminToken, `{"member_no":"K-TAG-001","full_name":"Tagihan Member","join_date":"2026-01-01","status":"active","email":"tagihan-member@coop.test","password":"member-password"}`)
 	memberToken := fixture.login(t, "tagihan-member@coop.test", "member-password")
@@ -2257,7 +2257,7 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 		t.Fatalf("expected Tagihan row for member %s, got %#v", member.ID, rows)
 	}
 	expectedHeaders := "Member ID|NPP|Old NPP|Nama|Simpanan Wajib|Simpanan Manasuka|Pinjaman Reguler|Pinjaman Barang Sekunder|Pembelian Barang|Total Tagihan|Status|Voucher|Collection after suspension"
-	if strings.Join(rows[0], "|") != expectedHeaders {
+	if strings.Join(rows[0][:13], "|") != expectedHeaders {
 		t.Fatalf("unexpected Tagihan headers: %#v", rows[0])
 	}
 	if tagihanRow[1] != "K-TAG-001" || tagihanRow[4] != "100000" || tagihanRow[5] != "50000" || tagihanRow[6] != "210000" || tagihanRow[7] != "120000" || tagihanRow[8] != "210000" || tagihanRow[9] != "690000" {
@@ -2269,6 +2269,10 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	}
 	if err := workbook.SetCellValue(sheet, statusCell, "paid"); err != nil {
 		t.Fatalf("mark exported row paid: %v", err)
+	}
+	detailRows, _ := workbook.GetRows("Rincian Pinjaman")
+	for i := range detailRows[1:] {
+		_ = workbook.SetCellValue("Rincian Pinjaman", fmt.Sprintf("K%d", i+2), "payment")
 	}
 	var paidWorkbook bytes.Buffer
 	if err := workbook.Write(&paidWorkbook); err != nil {
@@ -5231,33 +5235,19 @@ func (f testFixture) importTagihanWorkbook(t *testing.T, adminToken, statementMo
 	} `json:"summary"`
 } {
 	t.Helper()
-
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("statement_month", statementMonth); err != nil {
-		t.Fatalf("write statement month field: %v", err)
+	preview := postReviewedTagihan(f, adminToken, statementMonth, recordDate, workbook, "", false)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview failed: %d %s", preview.Code, preview.Body.String())
 	}
-	if err := writer.WriteField("record_date", recordDate); err != nil {
-		t.Fatalf("write record date field: %v", err)
+	var plan struct {
+		Token string `json:"preview_token"`
 	}
-	part, err := writer.CreateFormFile("file", "tagihan.xlsx")
-	if err != nil {
-		t.Fatalf("create multipart file: %v", err)
+	if err := json.Unmarshal(preview.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := part.Write(workbook); err != nil {
-		t.Fatalf("write multipart workbook: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/tagihan/import", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+adminToken)
-	rec := httptest.NewRecorder()
-	f.server.ServeHTTP(rec, req)
+	rec := postReviewedTagihan(f, adminToken, statementMonth, recordDate, workbook, plan.Token, false)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected Tagihan import status 200, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("confirmation failed: %d %s", rec.Code, rec.Body.String())
 	}
 	var response struct {
 		StatementMonth string `json:"statement_month"`
@@ -5269,7 +5259,7 @@ func (f testFixture) importTagihanWorkbook(t *testing.T, adminToken, statementMo
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode Tagihan import response: %v", err)
+		t.Fatal(err)
 	}
 	return response
 }

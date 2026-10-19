@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -59,36 +58,35 @@ func TestTagihanSuspensionExcelPreservesBalanceAndPosts40201(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	susp, err := w.GetRows("LoanSuspensions")
+	susp, err := w.GetRows("Rincian Pinjaman")
 	if err != nil || len(susp) != 2 {
 		t.Fatalf("suspension rows: %v %v", susp, err)
 	}
-	fee, err := strconv.ParseInt(susp[1][5], 10, 64)
+	fee, err := strconv.ParseInt(susp[1][9], 10, 64)
 	if err != nil || fee <= 0 {
 		t.Fatal(fee, err)
 	}
-	_ = w.SetCellValue("LoanSuspensions", "G2", "suspend")
-	_ = w.SetCellValue("LoanSuspensions", "H2", "Approved salary deferral")
+	_ = w.SetCellValue("Rincian Pinjaman", "K2", "suspend")
+	_ = w.SetCellValue("Rincian Pinjaman", "L2", "Approved salary deferral")
 	buf, err := w.WriteToBuffer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	importFile := func(data []byte) *httptest.ResponseRecorder {
 		t.Helper()
-		var body bytes.Buffer
-		mw := multipart.NewWriter(&body)
-		_ = mw.WriteField("statement_month", month)
-		_ = mw.WriteField("record_date", date)
-		part, _ := mw.CreateFormFile("file", "tagihan.xlsx")
-		_, _ = part.Write(data)
-		_ = mw.Close()
-		r := httptest.NewRequest("POST", "/api/admin/tagihan/import", &body)
-		r.Header.Set("Authorization", "Bearer "+token)
-		r.Header.Set("Content-Type", mw.FormDataContentType())
-		out := httptest.NewRecorder()
-		f.server.ServeHTTP(out, r)
-		return out
+		preview := postReviewedTagihan(f, token, month, date, data, "", false)
+		if preview.Code != 200 {
+			return preview
+		}
+		var plan struct {
+			Token string `json:"preview_token"`
+		}
+		if err := json.Unmarshal(preview.Body.Bytes(), &plan); err != nil {
+			t.Fatal(err)
+		}
+		return postReviewedTagihan(f, token, month, date, data, plan.Token, false)
 	}
+
 	// Inactive revenue account must roll back both schedule and fee, atomically.
 	_, _ = f.db.Exec(`UPDATE coa_accounts SET active=FALSE WHERE code='40201'`)
 	if out := importFile(buf.Bytes()); out.Code == 200 {
@@ -135,7 +133,7 @@ func TestTagihanSuspensionExcelPreservesBalanceAndPosts40201(t *testing.T) {
 		t.Fatal("suspended month still due", due)
 	}
 	// Changing a fee in the returned file is rejected atomically, even on retry.
-	_ = w.SetCellValue("LoanSuspensions", "F2", fee+1)
+	_ = w.SetCellValue("Rincian Pinjaman", "J2", fee+1)
 	tampered, _ := w.WriteToBuffer()
 	if out := importFile(tampered.Bytes()); out.Code == 200 {
 		t.Fatal("tampered fee accepted")

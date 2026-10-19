@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -162,6 +161,7 @@ func (s *Server) exportTagihanXLSX(c *gin.Context) {
 }
 
 func (s *Server) importTagihanXLSX(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<20)
 	user, ok := currentUser(c)
 	if !ok {
 		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication token is required")
@@ -180,24 +180,7 @@ func (s *Server) importTagihanXLSX(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_tagihan_record_date"))
 		return
 	}
-	file, _, err := c.Request.FormFile("file")
-	if err != nil {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_tagihan_file"))
-		return
-	}
-	defer file.Close()
-
-	result, err := s.importTagihan(statementMonth, recordDate, file, user.ID, languageFromRequest(c))
-	var rejected tagihanImportRejectedError
-	if errors.As(err, &rejected) {
-		c.JSON(http.StatusUnprocessableEntity, rejected.result)
-		return
-	}
-	if err != nil {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_tagihan_file"))
-		return
-	}
-	c.JSON(http.StatusOK, result)
+	s.handleTagihanReview(c, statementMonth, recordDate, user.ID)
 }
 
 func (s *Server) adminTagihanPage(c *gin.Context) {
@@ -676,6 +659,10 @@ func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRo
 			return nil, err
 		}
 	}
+	if err := addTagihanRealizationColumns(workbook, language); err != nil {
+		_ = workbook.Close()
+		return nil, err
+	}
 	style, err := workbook.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
 	if err == nil {
 		_ = workbook.SetCellStyle(sheet, "A1", "L1", style)
@@ -688,225 +675,6 @@ func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRo
 		Subject: "KKSUK PD Dharma Jaya Tagihan",
 	})
 	return workbook, nil
-}
-
-func (s *Server) importTagihan(statementMonth tagihanStatementMonth, recordDate string, reader io.Reader, recordedBy, language string) (TagihanImportResult, error) {
-	workbook, err := excelize.OpenReader(reader)
-	if err != nil {
-		return TagihanImportResult{}, err
-	}
-	defer workbook.Close()
-
-	suspensions, err := readSuspensionActions(workbook, statementMonth, recordDate, language)
-	if err != nil {
-		return TagihanImportResult{}, err
-	}
-	suspendedLoans := map[string]bool{}
-	for _, action := range suspensions {
-		suspendedLoans[action.LoanID] = true
-	}
-	sheet := workbook.GetSheetName(0)
-	rows, err := workbook.GetRows(sheet)
-	if err != nil {
-		return TagihanImportResult{}, err
-	}
-	if len(rows) == 0 {
-		return TagihanImportResult{}, errors.New("empty tagihan workbook")
-	}
-	headers := tagihanHeaderIndexes(rows[0])
-	memberIDColumn, hasMemberID := headers["member id"]
-	statusColumn, hasStatus := headers["status"]
-	if !hasMemberID || !hasStatus {
-		return TagihanImportResult{}, errors.New("missing required tagihan headers")
-	}
-
-	result := TagihanImportResult{StatementMonth: statementMonth.Value, RecordDate: recordDate, Message: translate(language, "tagihan_import_no_writes")}
-	type validatedTagihanRow struct {
-		result  TagihanImportRowResult
-		member  Member
-		status  string
-		savings tagihanSavingAmounts
-		dues    []tagihanLoanDue
-	}
-	validated := make([]validatedTagihanRow, 0, len(rows)-1)
-	seenMembers := map[string]bool{}
-	invalidRows := 0
-	for index, row := range rows[1:] {
-		rowResult := TagihanImportRowResult{ExcelRow: index + 2}
-		memberID := tagihanCell(row, memberIDColumn)
-		statusValue := tagihanCell(row, statusColumn)
-		rowResult.MemberID = memberID
-		rowResult.Status = statusValue
-		status, ok := parseTagihanStatus(statusValue)
-		if strings.TrimSpace(statusValue) == "" {
-			rowResult.Result = "invalid"
-			rowResult.Messages = append(rowResult.Messages, translate(language, "tagihan_status_required"))
-			invalidRows++
-			result.Rows = append(result.Rows, rowResult)
-			continue
-		}
-		if !ok {
-			rowResult.Result = "invalid"
-			rowResult.Messages = append(rowResult.Messages, translate(language, "tagihan_unknown_status"))
-			invalidRows++
-			result.Rows = append(result.Rows, rowResult)
-			continue
-		}
-		if strings.TrimSpace(memberID) == "" {
-			rowResult.Result = "invalid"
-			rowResult.Messages = append(rowResult.Messages, "missing member id")
-			invalidRows++
-			result.Rows = append(result.Rows, rowResult)
-			continue
-		}
-		if seenMembers[memberID] {
-			rowResult.Result = "invalid"
-			rowResult.Messages = append(rowResult.Messages, translate(language, "tagihan_duplicate_member"))
-			invalidRows++
-			result.Rows = append(result.Rows, rowResult)
-			continue
-		}
-		seenMembers[memberID] = true
-		member, err := s.tagihanMember(memberID)
-		if errors.Is(err, sql.ErrNoRows) {
-			rowResult.Result = "invalid"
-			rowResult.Messages = append(rowResult.Messages, translate(language, "tagihan_member_not_eligible"))
-			invalidRows++
-			result.Rows = append(result.Rows, rowResult)
-			continue
-		}
-		if err != nil {
-			rowResult.Result = "invalid"
-			rowResult.Messages = append(rowResult.Messages, translate(language, "tagihan_member_lookup_failed"))
-			invalidRows++
-			result.Rows = append(result.Rows, rowResult)
-			continue
-		}
-		rowResult.MemberNo = member.MemberNo
-		rowResult.FullName = member.FullName
-		if status == "unpaid" {
-			rowResult.Result = "skipped"
-			rowResult.Messages = append(rowResult.Messages, "unpaid")
-			result.Summary.Skipped++
-			result.Rows = append(result.Rows, rowResult)
-			validated = append(validated, validatedTagihanRow{result: rowResult, member: member, status: status})
-			continue
-		}
-		savings, err := s.tagihanSavingAmounts(member.ID, statementMonth)
-		if err != nil {
-			rowResult.Result = "invalid"
-			rowResult.Messages = append(rowResult.Messages, translate(language, "tagihan_saving_lookup_failed"))
-			invalidRows++
-			result.Rows = append(result.Rows, rowResult)
-			continue
-		}
-		dues := []tagihanLoanDue{}
-		for _, regular := range []bool{true, false} {
-			loanDues, duesErr := s.tagihanLoanDues(member.ID, statementMonth, regular)
-			if duesErr != nil {
-				rowResult.Result = "invalid"
-				rowResult.Messages = append(rowResult.Messages, translate(language, "tagihan_loan_due_lookup_failed"))
-				invalidRows++
-				break
-			}
-			for _, due := range loanDues {
-				if !suspendedLoans[due.LoanID] {
-					dues = append(dues, due)
-				}
-			}
-		}
-		hasDue := savings.Wajib > 0 || savings.Manasuka > 0 || len(dues) > 0
-		if len(rowResult.Messages) > 0 {
-			rowResult.Result = "invalid"
-			invalidRows++
-			result.Rows = append(result.Rows, rowResult)
-			continue
-		}
-		if !hasDue {
-			rowResult.Result = "skipped"
-			rowResult.Messages = append(rowResult.Messages, translate(language, "tagihan_nothing_due"))
-			result.Summary.Skipped++
-		}
-		result.Rows = append(result.Rows, rowResult)
-		validated = append(validated, validatedTagihanRow{result: rowResult, member: member, status: status, savings: savings, dues: dues})
-	}
-	if invalidRows > 0 {
-		result.Summary.Invalid = invalidRows
-		result.Message = translate(language, "tagihan_import_rejected")
-		return result, tagihanImportRejectedError{result: result}
-	}
-	for _, action := range suspensions {
-		if !seenMembers[action.MemberID] {
-			return result, errSuspensionConflict
-		}
-		if _, err := s.tagihanMember(action.MemberID); err != nil {
-			return result, errSuspensionConflict
-		}
-	}
-
-	s.financialMu.Lock()
-	defer s.financialMu.Unlock()
-	tx, err := s.db.Begin()
-	if err != nil {
-		return TagihanImportResult{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	for _, action := range suspensions {
-		created, err := s.applyLoanSuspensionTx(tx, action, recordedBy, language)
-		if err != nil {
-			result.SuspensionsCreated = 0
-			result.SuspensionsSkipped = 0
-			result.Summary.Invalid++
-			result.Message = translate(language, "tagihan_import_rejected")
-			result.Rows = append(result.Rows, TagihanImportRowResult{Sheet: suspensionSheet, ExcelRow: action.ExcelRow, MemberID: action.MemberID, LoanID: action.LoanID, Result: "invalid", Messages: []string{translate(language, "suspension_invalid")}})
-			return result, tagihanImportRejectedError{result: result}
-		}
-		if created {
-			result.SuspensionsCreated++
-		} else {
-			result.SuspensionsSkipped++
-		}
-	}
-	for _, row := range validated {
-		if row.status != "paid" || (row.savings.Wajib <= 0 && row.savings.Manasuka <= 0 && len(row.dues) == 0) {
-			continue
-		}
-		savingsCreated, repaymentCreated, messages, writeErr := s.recordPaidTagihanRowTx(tx, row.member.ID, statementMonth, recordDate, transactionSourceBank, recordedBy, language, row.savings, row.dues)
-		if writeErr != nil {
-			return TagihanImportResult{}, writeErr
-		}
-		for index := range result.Rows {
-			if result.Rows[index].ExcelRow != row.result.ExcelRow {
-				continue
-			}
-			result.Rows[index].SavingsCreated = savingsCreated
-			result.Rows[index].Repayments = repaymentCreated
-			result.Rows[index].Messages = append(result.Rows[index].Messages, messages...)
-			if savingsCreated == 0 && repaymentCreated == 0 {
-				result.Rows[index].Result = "skipped"
-				result.Rows[index].Messages = append(result.Rows[index].Messages, translate(language, "tagihan_nothing_due"))
-				result.Summary.Skipped++
-			} else {
-				result.Rows[index].Result = "imported"
-				result.Summary.Imported++
-			}
-			break
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return TagihanImportResult{}, err
-	}
-	result.Committed = true
-	result.Message = translate(language, "tagihan_import_committed")
-	return result, nil
-}
-
-type tagihanImportRejectedError struct {
-	result TagihanImportResult
-}
-
-func (e tagihanImportRejectedError) Error() string {
-	return e.result.Message
 }
 
 func tagihanHeaderIndexes(row []string) map[string]int {

@@ -800,7 +800,7 @@
       </section>
       <section class="panel">
         <h2>{{t .Lang "import_tagihan"}}</h2>
-        <p class="field-help">{{t .Lang "tagihan_journal_mapping_help"}}</p>
+        <p class="field-help">{{t .Lang "tagihan_journal_mapping_help"}}</p><p>{{t .Lang "detail_summary_help"}}</p><p>{{t .Lang "review_legacy"}}</p>
         <form class="filter-form" method="post" action="/api/admin/tagihan/import" enctype="multipart/form-data">
           <label>{{t .Lang "statement_month"}}
             <input type="month" name="statement_month" value="{{.StatementMonth}}" required>
@@ -811,7 +811,7 @@
           <label>{{t .Lang "xlsx_file"}}
             <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
           </label>
-          <button type="submit">{{t .Lang "import_tagihan"}}</button>
+          <button type="submit">{{t .Lang "review_preview"}}</button>
         </form>
       </section>
       <section class="panel">
@@ -2586,4 +2586,24 @@
         </div>
       </div>
 {{end}}
+{{end}}
+
+{{define "admin-tagihan-review"}}
+{{template "admin-shell-start" .}}
+<section class="panel">
+<p>{{.Review.Message}}</p>
+<table><thead><tr><th>{{t .Lang "full_name"}}</th><th>{{t .Lang "suspension_loan_id"}}</th><th>{{t .Lang "review_component"}}</th><th>{{t .Lang "review_expected"}}</th><th>{{t .Lang "review_actual"}}</th><th>{{t .Lang "review_difference"}}</th><th>{{t .Lang "review_remaining"}}</th><th>{{t .Lang "review_recorded"}}</th><th>{{t .Lang "review_deferred"}}</th></tr></thead>
+<tbody>{{range .Review.Components}}<tr><td>{{.Name}}</td><td>{{.LoanID}}</td><td>{{.Label}}</td><td>{{nominal .Expected}}</td><td>{{nominal .Actual}}</td><td>{{nominal .Difference}}</td><td>{{nominal .Remaining}}</td><td>{{nominal .AlreadyRecorded}}</td><td>{{nominal .Deferred}}</td></tr>{{end}}</tbody></table>
+<p>{{t .Lang "review_actual_total"}}: <strong>{{nominal .Review.ActualTotal}}</strong></p>
+{{if not .Review.Committed}}
+<form method="post" action="/api/admin/tagihan/import">
+<input type="hidden" name="statement_month" value="{{.Review.StatementMonth}}">
+<input type="hidden" name="record_date" value="{{.Review.RecordDate}}">
+<input type="hidden" name="preview_token" value="{{.Review.PreviewToken}}">
+<input type="hidden" name="workbook" value="{{.Workbook}}">
+<button type="submit">{{t .Lang "review_confirm"}}</button>
+</form>
+{{end}}
+</section>
+{{template "admin-shell-end" .}}
 {{end}}

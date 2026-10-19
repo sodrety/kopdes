@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,7 +13,8 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-const suspensionSheet = "LoanSuspensions"
+const suspensionSheet = "Penangguhan Cicilan"
+const legacySuspensionSheet = "LoanSuspensions"
 
 var errSuspensionConflict = errors.New("suspension conflicts with loan or statement state")
 
@@ -310,79 +310,30 @@ func (s *Server) recordTagihanSuspension(c *gin.Context) {
 }
 
 func (s *Server) addSuspensionSheet(w *excelize.File, month tagihanStatementMonth, language string) error {
-	loans, err := s.suspensionLoans(month)
-	if err != nil {
-		return err
-	}
-	if _, err = w.NewSheet(suspensionSheet); err != nil {
-		return err
-	}
-	keys := []string{"suspension_loan_id", "member_id", "member_no", "full_name", "statement_month", "suspension_fee", "status", "suspension_reason", "suspension_first_due", "suspension_final_due", "suspension_deferred_amount", "suspension_collection_adjustment"}
-	headers := make([]interface{}, len(keys))
-	for i, key := range keys {
-		headers[i] = translate(language, key)
-	}
-	if err = w.SetSheetRow(suspensionSheet, "A1", &headers); err != nil {
-		return err
-	}
-	for i, l := range loans {
-		values := []interface{}{l.ID, l.MemberID, l.MemberNo, l.FullName, month.Value, l.Fee, "", "", l.FirstDue, l.FinalDue, l.InstallmentAmount}
-		cell, _ := excelize.CoordinatesToCellName(1, i+2)
-		if err = w.SetSheetRow(suspensionSheet, cell, &values); err != nil {
-			return err
-		}
-		r := i + 2
-		if err = w.SetCellFormula(suspensionSheet, fmt.Sprintf("L%d", r), fmt.Sprintf(`IF(OR(G%d="suspend",G%d="%s",G%d="%s"),F%d-K%d,0)`, r, r, translate("en", "suspension_action"), r, translate("id", "suspension_action"), r, r)); err != nil {
-			return err
-		}
-	}
-	_ = w.SetColWidth(suspensionSheet, "A", "B", 32)
-	_ = w.SetColWidth(suspensionSheet, "C", "J", 24)
-	_ = w.SetColWidth(suspensionSheet, "H", "H", 50)
-	if len(loans) > 0 {
-		validation := excelize.NewDataValidation(true)
-		validation.Sqref = fmt.Sprintf("G2:G%d", len(loans)+1)
-		if err = validation.SetDropList([]string{translate(language, "suspension_action")}); err != nil {
-			return err
-		}
-		if err = w.AddDataValidation(suspensionSheet, validation); err != nil {
-			return err
-		}
-	}
-	_ = w.SetCellValue(suspensionSheet, "N1", translate(language, "suspension_excel_help"))
-	_ = w.SetColWidth(suspensionSheet, "N", "N", 95)
-	if len(loans) > 0 {
-		main, err := w.GetRows("Tagihan")
-		if err != nil {
-			return err
-		}
-		_ = w.SetCellValue("Tagihan", "M1", translate(language, "suspension_collection_total"))
-		_ = w.SetColWidth("Tagihan", "M", "M", 28)
-		for i := 1; i < len(main); i++ {
-			r := i + 1
-			formula := fmt.Sprintf(`J%d+SUMIFS('%s'!$L$2:$L$%d,'%s'!$B$2:$B$%d,A%d)`, r, suspensionSheet, len(loans)+1, suspensionSheet, len(loans)+1, r)
-			if err = w.SetCellFormula("Tagihan", fmt.Sprintf("M%d", r), formula); err != nil {
-				return err
-			}
-		}
-	}
-	mode := "auto"
-	recalculate := true
-	if err = w.SetCalcProps(&excelize.CalcPropsOptions{CalcMode: &mode, FullCalcOnLoad: &recalculate}); err != nil {
-		return err
-	}
-	return nil
+	return s.addLoanDetailSheet(w, month, language)
 }
 
 func readSuspensionActions(w *excelize.File, month tagihanStatementMonth, recordDate, language string) ([]suspensionAction, error) {
-	index, err := w.GetSheetIndex(suspensionSheet)
+	sheet := suspensionSheet
+	index, err := w.GetSheetIndex(sheet)
+	legacyIndex, legacyErr := w.GetSheetIndex(legacySuspensionSheet)
+	if legacyErr != nil {
+		return nil, legacyErr
+	}
+	if index >= 0 && legacyIndex >= 0 {
+		return nil, errSuspensionConflict
+	}
+	if index < 0 && legacyIndex >= 0 {
+		sheet = legacySuspensionSheet
+		index = legacyIndex
+	}
 	if err != nil {
 		return nil, err
 	}
 	if index < 0 {
 		return nil, nil
 	}
-	rows, err := w.GetRows(suspensionSheet)
+	rows, err := w.GetRows(sheet)
 	if err != nil {
 		return nil, err
 	}
