@@ -135,7 +135,7 @@ func (s *Server) addLoanDetailSheet(w *excelize.File, month tagihanStatementMont
 		if kind == "regular" {
 			fee = suspensionFee(monthly, admin, duration)
 		}
-		values := []any{id, member, npp, name, translate(lang, "loan_type_"+kind), month.Value, arrears, current, arrears + current, fee, "", "", nil, nil, nil, nil, first, final}
+		values := []any{id, member, npp, name, translate(lang, "loan_type_"+kind), month.Value, arrears, current, arrears + current, fee, translate(lang, "detail_payment"), "", nil, nil, nil, nil, first, final}
 		cell, _ := excelize.CoordinatesToCellName(1, r)
 		if err = w.SetSheetRow(loanDetailSheet, cell, &values); err != nil {
 			return err
