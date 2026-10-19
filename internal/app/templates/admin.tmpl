@@ -701,25 +701,77 @@
 {{template "admin-shell-start" .}}
       <section class="panel">
         <h2>{{t .Lang "suspension_title"}}</h2>
-        <p>{{t .Lang "suspension_help"}}</p>
-        <p class="field-help">{{t .Lang "suspension_excel_help"}}</p>
-        {{range .SuspensionLoans}}
-        <details><summary>{{.MemberNo}} — {{.FullName}} · {{t $.Lang "suspension_fee"}}: {{nominal .Fee}}</summary>
-        <form class="filter-form" method="post" action="/api/admin/tagihan/suspensions">
-          <input type="hidden" name="loan_id" value="{{.ID}}">
-          <input type="hidden" name="member_id" value="{{.MemberID}}">
-          <input type="hidden" name="statement_month" value="{{$.StatementMonth}}">
-          <input type="hidden" name="fee_amount" value="{{.Fee}}">
-          <strong>{{.MemberNo}} — {{.FullName}}</strong>
-          <span>{{t $.Lang "suspension_loan_id"}}: {{.ID}}</span>
-          <span>{{t $.Lang "suspension_first_due"}}: {{.FirstDue}}</span>
-          <span>{{t $.Lang "suspension_fee"}}: {{nominal .Fee}}</span>
-          <label>{{t $.Lang "record_date"}}<input type="date" name="record_date" value="{{$.DefaultDate}}" required></label>
-          <label>{{t $.Lang "suspension_reason"}}<input name="reason" maxlength="2000" required></label>
-          <button type="submit">{{t $.Lang "suspension_action"}}</button>
-        </form>
-        </details>
-        {{else}}<p>{{t .Lang "suspension_empty"}}</p>{{end}}
+        <button type="button" id="manual-suspension-toggle" aria-expanded="false" aria-controls="manual-suspension-panel">{{t .Lang "suspension_manual"}}</button>
+        <div id="manual-suspension-panel" hidden>
+          <p>{{t .Lang "suspension_help"}}</p>
+          <p class="field-help">{{t .Lang "suspension_excel_help"}}</p>
+          {{if .SuspensionLoans}}
+          <div class="filter-form">
+            <label>{{t .Lang "suspension_search"}}<input type="search" id="suspension-loan-search" placeholder="{{t .Lang "suspension_search_placeholder"}}" aria-controls="suspension-loan-select"></label>
+            <label>{{t .Lang "suspension_select"}}
+              <select id="suspension-loan-select" size="6">
+                <option value="" disabled selected>{{t .Lang "suspension_select"}}</option>
+                {{range .SuspensionLoans}}<option value="{{.ID}}" data-member-id="{{.MemberID}}" data-fee="{{.Fee}}" data-fee-label="{{nominal .Fee}}" data-first-due="{{.FirstDue}}">{{.MemberNo}} — {{.FullName}} · {{.ID}} · {{t $.Lang "suspension_fee"}}: {{nominal .Fee}}</option>{{end}}
+              </select>
+            </label>
+          </div>
+          <p id="suspension-no-results" role="status" hidden>{{t .Lang "suspension_no_results"}}</p>
+          <div id="suspension-selected-loan" hidden>
+            <form class="filter-form" method="post" action="/api/admin/tagihan/suspensions" id="manual-suspension-form">
+              <input type="hidden" name="loan_id">
+              <input type="hidden" name="member_id">
+              <input type="hidden" name="statement_month" value="{{.StatementMonth}}">
+              <input type="hidden" name="fee_amount">
+              <span>{{t .Lang "suspension_loan_id"}}: <strong id="suspension-selected-id"></strong></span>
+              <span>{{t .Lang "suspension_first_due"}}: <strong id="suspension-selected-due"></strong></span>
+              <span>{{t .Lang "suspension_fee"}}: <strong id="suspension-selected-fee"></strong></span>
+              <label>{{t .Lang "record_date"}}<input type="date" name="record_date" value="{{.DefaultDate}}" required></label>
+              <label>{{t .Lang "suspension_reason"}}<input name="reason" maxlength="2000" required></label>
+              <button type="submit">{{t .Lang "suspension_action"}}</button>
+            </form>
+          </div>
+          {{else}}<p>{{t .Lang "suspension_empty"}}</p>{{end}}
+        </div>
+        <script>
+          (function () {
+            var toggle = document.getElementById('manual-suspension-toggle');
+            var panel = document.getElementById('manual-suspension-panel');
+            var search = document.getElementById('suspension-loan-search');
+            var select = document.getElementById('suspension-loan-select');
+            toggle.addEventListener('click', function () {
+              panel.hidden = !panel.hidden;
+              toggle.setAttribute('aria-expanded', String(!panel.hidden));
+              if (!panel.hidden && search) search.focus();
+            });
+            if (!select) return;
+            var options = Array.from(select.options).slice(1);
+            var form = document.getElementById('manual-suspension-form');
+            var selected = document.getElementById('suspension-selected-loan');
+            search.addEventListener('input', function () {
+              var query = search.value.trim().toLocaleLowerCase();
+              var matches = options.filter(function (option) {
+                return option.textContent.toLocaleLowerCase().includes(query);
+              });
+              select.replaceChildren.apply(select, matches);
+              select.selectedIndex = -1;
+              selected.hidden = true;
+              form.reset();
+              document.getElementById('suspension-no-results').hidden = matches.length > 0;
+            });
+            select.addEventListener('change', function () {
+              var option = select.selectedOptions[0];
+              selected.hidden = !option || !option.value;
+              if (selected.hidden) return;
+              form.reset();
+              form.elements.loan_id.value = option.value;
+              form.elements.member_id.value = option.dataset.memberId;
+              form.elements.fee_amount.value = option.dataset.fee;
+              document.getElementById('suspension-selected-id').textContent = option.value;
+              document.getElementById('suspension-selected-due').textContent = option.dataset.firstDue;
+              document.getElementById('suspension-selected-fee').textContent = option.dataset.feeLabel;
+            });
+          }());
+        </script>
         {{if .SuspensionHistory}}
         <h3>{{t .Lang "suspension_history"}}</h3>
 {{template "table-open" .}}
