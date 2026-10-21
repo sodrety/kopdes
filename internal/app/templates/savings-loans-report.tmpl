@@ -13,10 +13,22 @@
 <section class="panel">
 {{if .Rows}}
 {{template "table-open" .}}
-<thead><tr><th>{{t .Lang "date"}}</th><th>{{t .Lang "member_no"}}</th><th>{{t .Lang "full_name"}}</th><th>{{t .Lang "type"}}</th><th>{{t .Lang "category"}}</th><th>{{t .Lang "amount"}}</th><th>{{t .Lang "reference"}}</th><th>{{t .Lang "note"}}</th></tr></thead>
-<tbody>{{range .Rows}}<tr><td>{{.RecordDate}}</td><td>{{.MemberNo}}</td><td>{{if index $.Permissions "members.view"}}<a href="/admin/members/{{.MemberID}}">{{.FullName}}</a>{{else}}{{.FullName}}{{end}}</td><td>{{t $.Lang .TypeKey}}</td><td>{{t $.Lang .CategoryKey}}</td><td>{{nominal .Amount}}</td><td>{{.Reference}}</td><td>{{.Note}}</td></tr>{{end}}</tbody>
+<thead><tr>
+<th>{{t .Lang "member_no"}}</th><th>{{t .Lang "full_name"}}</th>
+<th>{{t .Lang "simpanan_pokok"}}</th><th>{{t .Lang "simpanan_wajib"}}</th><th>{{t .Lang "simpanan_manasuka"}}</th><th>{{t .Lang "simpanan_shu_tertahan"}}</th><th>{{t .Lang "simpanan_khusus"}}</th>
+<th>{{t .Lang "saving_balance"}}</th><th>{{t .Lang "savings_loans_running_total"}}</th><th>{{t .Lang "savings_loans_remaining_total"}}</th>
+</tr></thead>
+<tbody>{{range .Rows}}<tr>
+<td>{{.MemberNo}}</td><td>{{if index $.Permissions "members.view"}}<a href="/admin/members/{{.MemberID}}">{{.FullName}}</a>{{else}}{{.FullName}}{{end}}</td>
+{{template "savings-loans-amount-cells" .}}
+</tr>{{end}}</tbody>
+<tfoot><tr><th colspan="2">{{t .Lang "total"}}</th>{{template "savings-loans-amount-cells" .Totals}}</tr></tfoot>
 {{template "table-close" .}}
 {{else}}{{template "empty-state" (t .Lang "savings_loans_empty")}}{{end}}
 </section>
 {{template "admin-shell-end" .}}
+{{end}}
+
+{{define "savings-loans-amount-cells"}}
+<td>{{nominal .PokokBalance}}</td><td>{{nominal .WajibBalance}}</td><td>{{nominal .SukarelaBalance}}</td><td>{{nominal .SHUBalance}}</td><td>{{nominal .KhususBalance}}</td><td>{{nominal .SavingsBalance}}</td><td>{{nominal .RunningLoanTotal}}</td><td>{{nominal .RemainingLoanBalance}}</td>
 {{end}}

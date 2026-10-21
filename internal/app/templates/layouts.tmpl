@@ -250,6 +250,7 @@
         {{if index .Permissions "reports.view"}}<div class="sidebar-nav-group">
           <span class="sidebar-group-label">{{t .Lang "nav_group_reports"}}</span>
           <a class="sidebar-link {{if eq .Active "reports"}}active{{end}}" href="/admin/reports/balance" title="{{t .Lang "balance_report"}}"><i class="sidebar-icon" data-lucide="scale"></i><span class="sidebar-label">{{t .Lang "balance_report"}}</span></a>
+          <a class="sidebar-link {{if eq .Active "savings-loans-report"}}active{{end}}" href="/admin/reports/savings-loans" title="{{t .Lang "savings_loans_report"}}"><i class="sidebar-icon" data-lucide="landmark"></i><span class="sidebar-label">{{t .Lang "savings_loans_report"}}</span></a>
         </div>{{end}}
       </nav>
 {{end}}
