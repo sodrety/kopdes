@@ -178,6 +178,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.GET("/admin/notifications", server.requirePermission(PermissionDashboardView), server.notificationsPage)
 
 	router.GET("/admin/dashboard", server.requirePermission(PermissionDashboardView), server.adminDashboardPage)
+	router.GET("/admin/reports/savings-loans", server.requirePermission(PermissionReportsView), server.adminSavingsLoansReportPage)
 	router.GET("/admin/reports", server.requirePermission(PermissionReportsView), server.adminReportsPage)
 	router.GET("/admin/reports/balance", server.requirePermission(PermissionReportsView), server.adminBalanceReportPage)
 	router.GET("/admin/reports/profit-loss", server.requirePermission(PermissionReportsView), server.adminProfitLossReportPage)

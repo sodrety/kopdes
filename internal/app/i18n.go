@@ -15,6 +15,11 @@ const (
 
 var translations = map[string]map[string]string{
 	defaultLanguage: {
+		"savings_loans_report": "Savings and loans report",
+		"savings_loans_report_description": "Savings, loans and repayments from member profiles. Dates filter savings and repayments by record date and loans by start date. Historical repayment events are shown separately; amounts are not additive.",
+		"savings_loans_invalid_dates": "Enter valid dates and ensure the from date is on or before the to date.",
+		"savings_loans_empty": "No records match these filters.",
+
 		"savings_auto_status": "Savings status (automatic paid)",
 		"detail_payment":      "Payment",
 		"detail_action":       "Action",
@@ -1018,6 +1023,11 @@ var translations = map[string]map[string]string{
 		"error.Only pending withdrawal requests can be rejected":                           "Only pending withdrawal requests can be rejected",
 	},
 	bahasaLanguage: {
+		"savings_loans_report": "Laporan Simpan Pinjam",
+		"savings_loans_report_description": "Simpanan, pinjaman, dan angsuran dari profil anggota. Tanggal menyaring simpanan dan angsuran berdasarkan tanggal pencatatan serta pinjaman berdasarkan tanggal mulai. Peristiwa angsuran historis ditampilkan terpisah; jumlah tidak untuk dijumlahkan.",
+		"savings_loans_invalid_dates": "Masukkan tanggal yang valid dan pastikan tanggal awal tidak melewati tanggal akhir.",
+		"savings_loans_empty": "Tidak ada data yang sesuai dengan filter.",
+
 		"savings_auto_status": "Status simpanan (otomatis paid)",
 		"detail_payment":      "Pembayaran",
 		"detail_action":       "Tindakan",

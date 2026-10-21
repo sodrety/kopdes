@@ -1,0 +1,22 @@
+{{define "admin-savings-loans-report"}}
+{{template "admin-shell-start" .}}
+<section class="page-actions"><a class="button-link button-link-secondary" href="/admin/reports">{{t .Lang "reports"}}</a></section>
+<section class="panel">
+<form class="filter-form" method="get" action="/admin/reports/savings-loans">
+<label>{{t .Lang "search"}}<input type="search" name="search" value="{{.Search}}" placeholder="{{t .Lang "search_loans_placeholder"}}"></label>
+<label>{{t .Lang "date_from"}}<input type="date" name="date_from" value="{{.DateFrom}}" {{if .DateTo}}max="{{.DateTo}}"{{end}}></label>
+<label>{{t .Lang "date_to"}}<input type="date" name="date_to" value="{{.DateTo}}" {{if .DateFrom}}min="{{.DateFrom}}"{{end}}></label>
+<button type="submit">{{t .Lang "apply_filters"}}</button>
+<a class="button-link button-link-secondary" href="/admin/reports/savings-loans">{{t .Lang "reset"}}</a>
+</form>
+</section>
+<section class="panel">
+{{if .Rows}}
+{{template "table-open" .}}
+<thead><tr><th>{{t .Lang "date"}}</th><th>{{t .Lang "member_no"}}</th><th>{{t .Lang "full_name"}}</th><th>{{t .Lang "type"}}</th><th>{{t .Lang "category"}}</th><th>{{t .Lang "amount"}}</th><th>{{t .Lang "reference"}}</th><th>{{t .Lang "note"}}</th></tr></thead>
+<tbody>{{range .Rows}}<tr><td>{{.RecordDate}}</td><td>{{.MemberNo}}</td><td>{{if index $.Permissions "members.view"}}<a href="/admin/members/{{.MemberID}}">{{.FullName}}</a>{{else}}{{.FullName}}{{end}}</td><td>{{t $.Lang .TypeKey}}</td><td>{{t $.Lang .CategoryKey}}</td><td>{{nominal .Amount}}</td><td>{{.Reference}}</td><td>{{.Note}}</td></tr>{{end}}</tbody>
+{{template "table-close" .}}
+{{else}}{{template "empty-state" (t .Lang "savings_loans_empty")}}{{end}}
+</section>
+{{template "admin-shell-end" .}}
+{{end}}
