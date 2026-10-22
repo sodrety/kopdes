@@ -5113,8 +5113,8 @@ func (f testFixture) approveWithdrawalRequest(t *testing.T, managerToken, reques
 	t.Helper()
 	for _, token := range []string{
 		managerToken,
-		f.login(t, "ketua-i@coop.test", "password"),
 		f.login(t, "ketua-ii@coop.test", "password"),
+		f.login(t, "ketua-i@coop.test", "password"),
 		f.login(t, "ketua-utama@coop.test", "password"),
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/api/admin/withdrawal-requests/"+requestID+"/approve", bytes.NewBufferString(`{}`))

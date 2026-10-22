@@ -64,6 +64,19 @@ func nextLoanApprovalStage(stage string) string {
 	}
 }
 
+func nextWithdrawalApprovalStage(stage string) string {
+	switch stage {
+	case approvalStageManager:
+		return approvalStageKetuaII
+	case approvalStageKetuaII:
+		return approvalStageKetuaI
+	case approvalStageKetuaI:
+		return approvalStageKetuaUtama
+	default:
+		return ""
+	}
+}
+
 func nextLoanApprovalStageForAmount(stage string, approvedAmount int64) string {
 	if stage == approvalStageKetuaI && approvedAmount < ketuaUtamaLoanApprovalThreshold {
 		return ""

@@ -2133,7 +2133,7 @@
                     <button class="button-secondary" type="submit">{{t $.Lang "super_admin_reject"}}</button>
                   </form>
                 </div>
-                {{else if and (eq .CurrentApprovalStage "manager") (or (eq $.Role "manager") (eq $.Role "admin")) (index $.Permissions "requests.decide")}}
+                {{else if and (index $.Permissions "requests.decide") (or (and (eq .CurrentApprovalStage "manager") (or (eq $.Role "manager") (eq $.Role "admin"))) (and (eq .CurrentApprovalStage "ketua_ii") (eq $.Role "ketua_ii")) (and (eq .CurrentApprovalStage "ketua_i") (eq $.Role "ketua_i")))}}
                 <div class="table-actions">
                   <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
                     {{if index $.Permissions "accounting_coa.override"}}

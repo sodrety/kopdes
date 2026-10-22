@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -225,14 +226,42 @@ func TestWithdrawalReservationsReleaseAndFinalApprovalCreatesOneSavingRecord(t *
 		t.Fatalf("cancel withdrawal: %d: %s", response.Code, response.Body.String())
 	}
 	secondID := fixture.createWithdrawalRequest(t, memberToken, 400, "Released balance")
+	assertAdminPageApprovalAction := func(email string, wantAction bool) {
+		t.Helper()
+		cookie := fixture.browserLogin(t, email, "password")
+		request := httptest.NewRequest(http.MethodGet, "/admin/withdrawal-requests", nil)
+		request.AddCookie(cookie)
+		recorder := httptest.NewRecorder()
+		fixture.server.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("withdrawal page for %s: %d %s", email, recorder.Code, recorder.Body.String())
+		}
+		action := `action="/api/admin/withdrawal-requests/` + secondID + `/approve"`
+		gotAction := strings.Contains(recorder.Body.String(), action)
+		if gotAction != wantAction {
+			t.Fatalf("withdrawal page approval action for %s = %t, want %t", email, gotAction, wantAction)
+		}
+	}
+	assertAdminPageApprovalAction("ketua-ii@coop.test", false)
 
 	stages := []string{
 		managerToken,
-		fixture.login(t, "ketua-i@coop.test", "password"),
 		fixture.login(t, "ketua-ii@coop.test", "password"),
+		fixture.login(t, "ketua-i@coop.test", "password"),
 		fixture.login(t, "ketua-utama@coop.test", "password"),
 	}
 	for index, token := range stages {
+		if index == 1 {
+			assertAdminPageApprovalAction("ketua-ii@coop.test", true)
+			assertAdminPageApprovalAction("ketua-i@coop.test", false)
+		}
+		if index == 2 {
+			assertAdminPageApprovalAction("ketua-ii@coop.test", false)
+			assertAdminPageApprovalAction("ketua-i@coop.test", true)
+		}
+		if index == 3 {
+			assertAdminPageApprovalAction("ketua-utama@coop.test", false)
+		}
 		response = hierarchyRequest(fixture, http.MethodPost, "/api/admin/withdrawal-requests/"+secondID+"/approve", token, `{"note":"verified"}`)
 		if response.Code != http.StatusOK {
 			t.Fatalf("withdrawal stage %d: %d: %s", index, response.Code, response.Body.String())

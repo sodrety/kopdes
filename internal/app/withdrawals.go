@@ -565,7 +565,7 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	if err := resolveRequestNotifications(tx, "withdrawal", requestID); err != nil {
 		return WithdrawalRequest{}, err
 	}
-	nextStage := nextApprovalStage(stageRole)
+	nextStage := nextWithdrawalApprovalStage(stageRole)
 	if nextStage != "" {
 		if stageRole == approvalStageManager {
 			request.ProposedCashCOACode = strings.TrimSpace(req.CashCOACode)

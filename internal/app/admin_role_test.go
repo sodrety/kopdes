@@ -126,8 +126,8 @@ func TestAdminRoleApprovesOnlyManagerStageForLoansAndWithdrawals(t *testing.T) {
 	if err := fixture.db.QueryRow(`SELECT current_approval_stage FROM withdrawal_requests WHERE id=$1`, withdrawalRequestID).Scan(&withdrawalStage); err != nil {
 		t.Fatalf("read withdrawal stage: %v", err)
 	}
-	if withdrawalStage != "ketua_i" {
-		t.Fatalf("admin withdrawal approval should advance to Ketua I, got %q", withdrawalStage)
+	if withdrawalStage != "ketua_ii" {
+		t.Fatalf("admin withdrawal approval should advance to Ketua II, got %q", withdrawalStage)
 	}
 	if response := hierarchyRequest(fixture, http.MethodPost, "/api/admin/withdrawal-requests/"+withdrawalRequestID+"/approve", adminToken, `{}`); response.Code != http.StatusForbidden {
 		t.Fatalf("admin should not approve a later withdrawal stage: %d %s", response.Code, response.Body.String())
