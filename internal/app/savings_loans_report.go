@@ -85,6 +85,16 @@ func (s *Server) adminSavingsLoansReportPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
+	if c.Query("export") == "xlsx" {
+		workbook, err := savingsLoansReportWorkbook(languageFromRequest(c), search, from, to, report, totals)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+			return
+		}
+		c.Header("Content-Disposition", `attachment; filename="laporan-simpan-pinjam.xlsx"`)
+		c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", workbook)
+		return
+	}
 	renderPage(c, "admin-savings-loans-report", pageData(c, translate(languageFromRequest(c), "savings_loans_report"), "savings-loans-report", "savings_loans_report", "savings_loans_report_description", gin.H{"Rows": report, "Totals": totals, "Search": search, "DateFrom": from, "DateTo": to}))
 }
 

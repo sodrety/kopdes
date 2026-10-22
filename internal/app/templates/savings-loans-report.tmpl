@@ -7,6 +7,7 @@
 <label>{{t .Lang "date_from"}}<input type="date" name="date_from" value="{{.DateFrom}}" {{if .DateTo}}max="{{.DateTo}}"{{end}}></label>
 <label>{{t .Lang "date_to"}}<input type="date" name="date_to" value="{{.DateTo}}" {{if .DateFrom}}min="{{.DateFrom}}"{{end}}></label>
 <button type="submit">{{t .Lang "apply_filters"}}</button>
+<button class="button-secondary" type="submit" name="export" value="xlsx">{{t .Lang "export_xlsx"}}</button>
 <a class="button-link button-link-secondary" href="/admin/reports/savings-loans">{{t .Lang "reset"}}</a>
 </form>
 </section>
