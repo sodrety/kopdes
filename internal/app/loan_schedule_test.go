@@ -26,12 +26,12 @@ func TestLoanOverdueIncludesPartiallyUnpaidOldestInstallment(t *testing.T) {
 	}
 }
 
-func TestCalculateLoanScheduleClampsExactMonthlyDeadlines(t *testing.T) {
+func TestCalculateLoanScheduleUsesTwentiethAfterLateMonthDisbursement(t *testing.T) {
 	schedule, err := calculateLoanSchedule(1_000_000, 4, 100, "2024-01-31")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDates := []string{"2024-02-29", "2024-03-31", "2024-04-30", "2024-05-31"}
+	wantDates := []string{"2024-03-20", "2024-04-20", "2024-05-20", "2024-06-20"}
 	var sum int64
 	for index, installment := range schedule.Installments {
 		if installment.DueDate != wantDates[index] {
@@ -212,9 +212,9 @@ func TestAllocateRepaymentsRejectsOverpayment(t *testing.T) {
 	}
 }
 
-func TestCalculateLoanScheduleRateBoundariesAndNonLeapClamp(t *testing.T) {
+func TestCalculateLoanScheduleRateBoundariesAndDisbursementDueDate(t *testing.T) {
 	zero, err := calculateLoanSchedule(10_000, 1, 0, "2023-01-31")
-	if err != nil || zero.TotalInterest != 0 || zero.Installments[0].DueDate != "2023-02-28" {
+	if err != nil || zero.TotalInterest != 0 || zero.Installments[0].DueDate != "2023-03-20" {
 		t.Fatalf("zero-rate schedule = %+v, err=%v", zero, err)
 	}
 	maximum, err := calculateLoanSchedule(10_000, 1, 1000, "2023-01-31")

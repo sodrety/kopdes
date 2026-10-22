@@ -62,7 +62,7 @@ func TestLoanScheduleMigrationBackfillsAndReopensPaidLoan(t *testing.T) {
 		Scan(&startDate, &interest, &obligation, &balance, &status, &nextDueDate, &finalDueDate); err != nil {
 		t.Fatal(err)
 	}
-	if startDate != "2026-02-01" || interest != 20_000 || obligation != 1_020_000 || balance != 20_000 || status != "adjustment_due" || nextDueDate != "2026-04-01" || finalDueDate != "2026-04-01" {
+	if startDate != "2026-02-01" || interest != 20_000 || obligation != 1_020_000 || balance != 20_000 || status != "adjustment_due" || nextDueDate != "2026-04-20" || finalDueDate != "2026-04-20" {
 		t.Fatalf("unexpected migrated loan: start=%s interest=%d obligation=%d balance=%d status=%s next=%s final=%s", startDate, interest, obligation, balance, status, nextDueDate, finalDueDate)
 	}
 
@@ -162,7 +162,7 @@ func TestLoanScheduleMigrationPreservesLegacyTenorAboveCurrentLimit(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if duration != 121 || count != 121 || interest != 146410 || obligation != 267410 || scheduledTotal != obligation || firstDue != "2026-03-01" || finalDue != "2036-03-01" {
+	if duration != 121 || count != 121 || interest != 146410 || obligation != 267410 || scheduledTotal != obligation || firstDue != "2026-03-20" || finalDue != "2036-03-20" {
 		t.Fatalf("legacy schedule duration=%d count=%d interest=%d obligation=%d sum=%d first=%s final=%s", duration, count, interest, obligation, scheduledTotal, firstDue, finalDue)
 	}
 }

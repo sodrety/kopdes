@@ -250,14 +250,15 @@ func parseLoanDate(value string) (time.Time, error) {
 	return date, nil
 }
 
+// loanDueDate starts installments on the 20th, skipping the coming month when
+// disbursement happens after the 20th.
 func loanDueDate(start time.Time, installmentNumber int) time.Time {
-	firstOfTargetMonth := time.Date(start.Year(), start.Month()+time.Month(installmentNumber), 1, 0, 0, 0, 0, jakartaLocation)
-	lastDay := time.Date(firstOfTargetMonth.Year(), firstOfTargetMonth.Month()+1, 0, 0, 0, 0, 0, jakartaLocation).Day()
-	day := start.Day()
-	if day > lastDay {
-		day = lastDay
+	firstDueMonthOffset := 1
+	if start.Day() > 20 {
+		firstDueMonthOffset = 2
 	}
-	return time.Date(firstOfTargetMonth.Year(), firstOfTargetMonth.Month(), day, 0, 0, 0, 0, jakartaLocation)
+	targetMonthOffset := firstDueMonthOffset + installmentNumber - 1
+	return time.Date(start.Year(), start.Month()+time.Month(targetMonthOffset), 20, 0, 0, 0, 0, jakartaLocation)
 }
 
 func calculateLoanSchedule(principal int64, durationMonths, interestRateBPS int, startDate string) (LoanScheduleCalculation, error) {
