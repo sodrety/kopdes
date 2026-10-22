@@ -130,7 +130,15 @@ func TestVoucherBulkNominalFeeApprovalAndPrimerJournals(t *testing.T) {
 				}
 			}
 			// Tagihan exposes the entire one-month obligation in its Voucher column.
-			month := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).AddDate(0, 1, 0).Format("2006-01")
+			var nextDueDate string
+			if err := fixture.db.QueryRow(`SELECT next_due_date FROM loans WHERE id=$1`, loan.ID).Scan(&nextDueDate); err != nil {
+				t.Fatal(err)
+			}
+			dueMonth, err := time.Parse("2006-01-02", nextDueDate)
+			if err != nil {
+				t.Fatalf("parse Voucher due date %q: %v", nextDueDate, err)
+			}
+			month := dueMonth.Format("2006-01")
 			export := adminLoanJSONRequest(fixture, http.MethodGet, "/api/admin/tagihan/export.xlsx?month="+month, manager, "")
 			if export.Code != http.StatusOK {
 				t.Fatalf("Voucher Tagihan export: %d %s", export.Code, export.Body.String())
