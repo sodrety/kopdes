@@ -2201,10 +2201,17 @@ func TestAdminCanExportAndImportTagihanXLSX(t *testing.T) {
 	requestID := fixture.createLoanRequest(t, memberToken, 1_000_000, 5)
 	start := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60))
 	startDate := start.Format("2006-01-02")
-	statementMonthTime := start.AddDate(0, 1, 0)
+	loan := fixture.approveLoanRequestWithStartDate(t, adminToken, requestID, 1_000_000, 5, startDate)
+	var nextDueDate string
+	if err := fixture.db.QueryRow(`SELECT next_due_date FROM loans WHERE id=$1`, loan.ID).Scan(&nextDueDate); err != nil {
+		t.Fatal(err)
+	}
+	statementMonthTime, err := time.Parse("2006-01-02", nextDueDate)
+	if err != nil {
+		t.Fatalf("parse loan due date %q: %v", nextDueDate, err)
+	}
 	statementMonth := statementMonthTime.Format("2006-01")
 	recordDate := time.Date(statementMonthTime.Year(), statementMonthTime.Month()+1, 0, 0, 0, 0, 0, statementMonthTime.Location()).Format("2006-01-02")
-	loan := fixture.approveLoanRequestWithStartDate(t, adminToken, requestID, 1_000_000, 5, startDate)
 	secondaryGoodsRequestID := fixture.createLoanRequestWithType(t, memberToken, "secondary_goods", 100_000, 1)
 	secondaryGoodsLoan := fixture.approveLoanRequestWithStartDate(t, adminToken, secondaryGoodsRequestID, 100_000, 1, startDate)
 	goodsPurchaseRequestID := fixture.createLoanRequestWithType(t, memberToken, "goods_purchase_paylater", 200_000, 1)
