@@ -405,10 +405,13 @@ func (s *Server) adminLoanRequestsPage(c *gin.Context) {
 		}
 	}
 	current, _ := currentUser(c)
+	for index := range requests {
+		requests[index].CanDecide = hasPermission(current.Role, PermissionRequestsDecide) && requests[index].Status == "pending" && requests[index].CurrentApprovalStage == approvalStageForOfficer(current.Role)
+	}
 	renderPage(c, "admin-loan-requests", pageData(c, "Loan request review - KKSUK PD Dharma Jaya", "loan-requests", "loan_request_review", "inspect_pending_loan_requests", gin.H{
 		"LoanRequests":         requests,
 		"Members":              activeMembers,
-		"AdminCanCreate":       hasPermission(current.Role, PermissionRequestsManage),
+		"AdminCanCreate":       hasPermission(current.Role, PermissionRequestsCreateOnBehalf),
 		"SingleIdempotencyKey": newID(),
 		"LoanRequestStatus":    status,
 		"LoanRequestSource":    c.Query("source"),

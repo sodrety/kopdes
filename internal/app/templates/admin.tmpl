@@ -2172,10 +2172,10 @@
           <p class="field-help">{{t .Lang "admin_loan_create_single_help"}}</p>
           <form method="post" action="/api/admin/loan-requests/on-behalf" hx-post="/api/admin/loan-requests/on-behalf" hx-target="#admin-loan-create-error" hx-swap="innerHTML" hx-confirm="{{t .Lang "admin_loan_confirm"}}">
             <label>{{t .Lang "admin_loan_member"}}
-              <input name="member_no" list="admin-loan-members" autocomplete="off" required>
-              <datalist id="admin-loan-members">
-                {{range .Members}}<option value="{{.MemberNo}}">{{.FullName}}</option>{{end}}
-              </datalist>
+              <select name="member_no" required>
+                <option value="">{{t .Lang "select_member"}}</option>
+                {{range .Members}}<option value="{{.MemberNo}}">{{.FullName}} · {{.MemberNo}}</option>{{end}}
+              </select>
             </label>
             <label>{{t .Lang "loan_type"}}
               <select name="loan_type" required>
@@ -2303,7 +2303,7 @@
                         <button class="button-secondary" type="submit">{{t $.Lang "super_admin_reject"}}</button>
                       </form>
                     </div>
-                    {{else if and (eq .CurrentApprovalStage "manager") (or (eq $.Role "manager") (eq $.Role "admin")) (index $.Permissions "requests.decide")}}
+                    {{else if .CanDecide}}
                     <div class="review-modal-actions">
                       <form class="inline-approval-form review-action" method="post" action="/api/admin/loan-requests/{{.ID}}/approve" hx-post="/api/admin/loan-requests/{{.ID}}/approve" hx-target="#loan-review-error" hx-swap="innerHTML" data-loan-fee-preview data-loan-type-value="{{.LoanType}}"{{if eq .LoanType "voucher"}} data-voucher-admin-fee="{{nominal .RequestedAdminFee}}"{{end}} data-monthly-admin-fee-label="{{t $.Lang "monthly_admin_fee"}}" data-total-admin-fee-label="{{t $.Lang "total_admin_fee"}}" data-total-obligation-label="{{t $.Lang "total_obligation"}}" data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}">
                         {{if index $.Permissions "accounting_coa.override"}}

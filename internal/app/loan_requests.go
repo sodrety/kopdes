@@ -350,10 +350,11 @@ func (s *Server) loanRequestsForAdmin(status string) ([]AdminLoanRequest, error)
 
 func (s *Server) loanRequestsForAdminFiltered(status, source, batchID string) ([]AdminLoanRequest, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, m.member_type, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.loan_type, lr.legacy_terms, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_admin_fee_policy,''), lr.proposed_monthly_admin_fee, COALESCE(lr.proposed_total_admin_fee,0), COALESCE(lr.proposed_total_obligation,0), COALESCE(lr.proposed_cash_coa_code,''), COALESCE(lr.proposed_loan_coa_code,''), COALESCE(lr.proposed_admin_fee_coa_code,''), COALESCE(lr.disbursement_date,''), COALESCE(lr.disbursed_by,''), COALESCE(CAST(lr.disbursed_at AS TEXT),''), lr.rejection_reason, lr.created_at, lr.updated_at, lr.requested_admin_fee, COALESCE(lr.creation_source,'member'), COALESCE(lr.created_by,''), COALESCE(creator.full_name,creator.email,''), COALESCE(lr.batch_id,'')
+	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, m.member_type, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.loan_type, lr.legacy_terms, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_admin_fee_policy,''), lr.proposed_monthly_admin_fee, COALESCE(lr.proposed_total_admin_fee,0), COALESCE(lr.proposed_total_obligation,0), COALESCE(lr.proposed_cash_coa_code,''), COALESCE(lr.proposed_loan_coa_code,''), COALESCE(lr.proposed_admin_fee_coa_code,''), COALESCE(lr.disbursement_date,''), COALESCE(lr.disbursed_by,''), COALESCE(CAST(lr.disbursed_at AS TEXT),''), lr.rejection_reason, lr.created_at, lr.updated_at, lr.requested_admin_fee, COALESCE(lr.creation_source,'member'), COALESCE(lr.created_by,''), COALESCE(NULLIF(TRIM(creator_member.full_name),''),NULLIF(TRIM(creator.full_name),''),creator.email,''), COALESCE(lr.batch_id,'')
 		FROM loan_requests lr
 		INNER JOIN members m ON m.id = lr.member_id
-		LEFT JOIN users creator ON creator.id = lr.created_by`
+		LEFT JOIN users creator ON creator.id = lr.created_by
+		LEFT JOIN members creator_member ON creator_member.id = creator.member_id`
 	args := []any{}
 	filters := []string{}
 	if status != "" {
