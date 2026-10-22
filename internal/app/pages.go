@@ -393,11 +393,6 @@ func (s *Server) adminLoanRequestsPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
 	}
-	coaAccounts, err := s.coaPostingAccountsForAdmin()
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
-		return
-	}
 	activeMembers := members[:0]
 	for _, member := range members {
 		if member.Status == "active" {
@@ -416,8 +411,6 @@ func (s *Server) adminLoanRequestsPage(c *gin.Context) {
 		"LoanRequestStatus":    status,
 		"LoanRequestSource":    c.Query("source"),
 		"LoanRequestBatchID":   c.Query("batch_id"),
-		"CurrentDate":          time.Now().In(jakartaLocation).Format("2006-01-02"),
-		"COAAccounts":          coaAccounts,
 	}))
 }
 

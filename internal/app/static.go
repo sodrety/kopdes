@@ -11,7 +11,19 @@ import (
 //go:embed static/vendor/*.js static/images/*.png
 var staticAssetFS embed.FS
 
-const appCSS = `:root {
+const appCSS = `
+.member-picker { position: relative; }
+.member-picker input { width: 100%; }
+.member-picker-results, .member-picker-status {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  margin-top: 4px; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--canvas); box-shadow: 0 6px 18px #11182718;
+}
+.member-picker-results { max-height: 260px; overflow-y: auto; }
+.member-picker-option { padding: 10px 12px; cursor: pointer; color: var(--ink); }
+.member-picker-option:hover, .member-picker-option[aria-selected="true"] { background: var(--primary-pale); }
+.member-picker-status { padding: 12px; color: var(--mute); }
+:root {
   --primary: #0056b3;
   --primary-strong: #004494;
   --primary-pale: #e8f1ff;
@@ -3181,6 +3193,41 @@ td:nth-child(n+2):not(.review-cell) {
 .loan-overdue, .loan-overdue-row { background: var(--negative-pale); }
 .overdue-label, .loan-overdue-row strong { color: var(--negative); font-weight: 800; }
 button:disabled { cursor: not-allowed; opacity: .55; }
+/* Loan review has a dedicated form layout rather than the compact table grid. */
+.loan-review-modal .review-modal-card { width: min(760px, 100%); padding: 22px; }
+.loan-review-modal .review-modal-header { align-items: center; margin-bottom: 20px; }
+.loan-review-modal .review-modal-header h2 { font-size: 20px; line-height: 28px; color: var(--ink); }
+.loan-review-modal .detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 24px; }
+.loan-review-modal .detail-grid > div { min-width: 0; gap: 6px; align-content: start; }
+.loan-review-modal .detail-grid strong { line-height: 1.5; overflow-wrap: anywhere; }
+.loan-review-modal .loan-review-member { grid-column: span 2; }
+.loan-review-modal .loan-review-member strong { font-size: 17px; }
+.loan-review-modal .loan-review-purpose { grid-column: span 2; }
+.loan-review-modal .loan-review-provenance { grid-column: auto; }
+.loan-review-modal .loan-review-provenance strong { font-size: 13px; font-weight: 500; color: var(--mute); }
+.loan-review-modal .review-modal-actions { gap: 16px; margin-top: 18px; }
+.loan-review-modal .inline-approval-form { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.loan-review-modal .review-action label { gap: 8px; font-size: 13px; line-height: 20px; }
+.loan-review-modal .review-action input { min-height: 42px; padding: 10px 12px; font-size: 14px; border-radius: var(--radius-md); }
+.loan-review-modal .loan-review-guidance, .loan-review-modal .loan-fee-preview,
+.loan-review-modal .loan-review-note, .loan-review-modal .inline-approval-form > p { grid-column: 1 / -1; }
+.loan-review-modal .loan-review-guidance { margin-top: -8px; color: var(--mute); font-size: 12px; line-height: 18px; }
+.loan-review-modal .loan-fee-preview { margin: 0; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--canvas-soft); font-size: 13px; line-height: 22px; }
+.loan-review-modal .table-actions { justify-content: flex-end; margin: 0; }
+.loan-review-modal .review-action button { min-height: 42px; min-width: 112px; padding: 10px 18px; }
+.loan-review-modal .inline-rejection-form { grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; margin: 0; padding-top: 20px; border-top: 1px solid var(--line-soft); }
+@media (max-width: 600px) {
+  .loan-review-modal { padding: 12px; }
+  .loan-review-modal .review-modal-card { padding: 18px; max-height: calc(100dvh - 24px); }
+  .loan-review-modal .review-modal-header { gap: 12px; margin-bottom: 20px; }
+  .loan-review-modal .review-modal-header h2 { font-size: 18px; line-height: 24px; }
+  .loan-review-modal .review-modal-close { flex-shrink: 0; }
+  .loan-review-modal .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .loan-review-modal .loan-review-purpose, .loan-review-modal .loan-review-provenance { grid-column: 1 / -1; }
+  .loan-review-modal .inline-approval-form, .loan-review-modal .inline-rejection-form { grid-template-columns: minmax(0, 1fr); }
+  .loan-review-modal .review-action button { width: 100%; }
+}
+
 }`
 
 func (s *Server) staticCSS(c *gin.Context) {

@@ -3412,7 +3412,7 @@ func TestAdminLoanRequestReviewPageRendersPendingQueue(t *testing.T) {
 		t.Fatalf("expected admin loan request page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"Loan request review", "table-scroll", "Queue Member", "M-0021", "3.200.000", "12", "Test loan", "Menunggu", `href="#loan-request-review-`, `class="review-modal"`, "Approve", "Reject"} {
+	for _, text := range []string{"Loan request review", "table-scroll", "Queue Member", "M-0021", "3.200.000", "12", "Test loan", "Menunggu", `href="#loan-request-review-`, `class="review-modal loan-review-modal"`, "Approve", "Reject"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected admin loan request page to include %q, got %s", text, body)
 		}
@@ -3538,7 +3538,7 @@ func TestLoanApprovalValidationAndConflicts(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 		}
-		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Approved amount, duration of 1 to 24 months, and start date are required")
+		assertError(t, rec.Body.Bytes(), "VALIDATION_ERROR", "Approved amount and duration of 1 to 24 months are required")
 		if loans := fixture.activeLoans(t, adminToken); len(loans) != 0 {
 			t.Fatalf("expected validation failure to create no loans, got %+v", loans)
 		}

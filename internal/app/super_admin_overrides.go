@@ -292,13 +292,7 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 	if duration <= 0 {
 		duration = request.RequestedDurationMonths
 	}
-	startDate := strings.TrimSpace(req.StartDate)
-	if startDate == "" {
-		startDate = strings.TrimSpace(request.ProposedStartDate)
-	}
-	if startDate == "" {
-		startDate = time.Now().In(jakartaLocation).Format("2006-01-02")
-	}
+	startDate := time.Now().In(jakartaLocation).Format("2006-01-02")
 	if amount <= 0 || duration <= 0 {
 		return LoanApprovalResult{}, errInvalidLoanApproval
 	}
@@ -316,14 +310,6 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 	}
 	if amount > maxLoanAmountForMemberSavings(memberType, summary.WajibBalance, summary.SukarelaBalance) {
 		return LoanApprovalResult{}, errLoanAmountLimitExceeded
-	}
-	start, parseErr := parseLoanDate(startDate)
-	if parseErr != nil || start.After(time.Now().In(jakartaLocation)) {
-		return LoanApprovalResult{}, errInvalidLoanStartDate
-	}
-	requestTime, parseErr := parseDatabaseTime(request.CreatedAt)
-	if parseErr != nil || start.Before(time.Date(requestTime.In(jakartaLocation).Year(), requestTime.In(jakartaLocation).Month(), requestTime.In(jakartaLocation).Day(), 0, 0, 0, 0, jakartaLocation)) {
-		return LoanApprovalResult{}, errInvalidLoanStartDate
 	}
 
 	var calc LoanScheduleCalculation
@@ -370,7 +356,7 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 			return LoanApprovalResult{}, err
 		}
 	} else {
-		if (req.ApprovedAmount > 0 && req.ApprovedAmount != request.ProposedApprovedAmount) || (req.DurationMonths > 0 && req.DurationMonths != request.ProposedDurationMonths) || (strings.TrimSpace(req.StartDate) != "" && strings.TrimSpace(req.StartDate) != request.ProposedStartDate) {
+		if (req.ApprovedAmount > 0 && req.ApprovedAmount != request.ProposedApprovedAmount) || (req.DurationMonths > 0 && req.DurationMonths != request.ProposedDurationMonths) {
 			return LoanApprovalResult{}, errInvalidLoanApproval
 		}
 	}
@@ -392,19 +378,7 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 	if err != nil {
 		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
 	}
-	cashCOACode := strings.TrimSpace(req.CashCOACode)
-	if cashCOACode == "" {
-		cashCOACode = request.ProposedCashCOACode
-	}
-	loanCOACode := strings.TrimSpace(req.COACode)
-	if loanCOACode == "" {
-		loanCOACode = request.ProposedLoanCOACode
-	}
-	adminFeeCOACode := strings.TrimSpace(req.AdminFeeCOACode)
-	if adminFeeCOACode == "" {
-		adminFeeCOACode = request.ProposedAdminFeeCOACode
-	}
-	result, err := tx.Exec(`UPDATE loan_requests SET status='approved',current_approval_stage=NULL,reviewed_by=$1,reviewed_at=CURRENT_TIMESTAMP,proposed_cash_coa_code=$2,proposed_loan_coa_code=$3,proposed_admin_fee_coa_code=$4,updated_at=CURRENT_TIMESTAMP WHERE id=$5 AND status='pending'`, admin.ID, cashCOACode, loanCOACode, adminFeeCOACode, requestID)
+	result, err := tx.Exec(`UPDATE loan_requests SET status='approved',current_approval_stage=NULL,reviewed_by=$1,reviewed_at=CURRENT_TIMESTAMP,proposed_cash_coa_code=$2,proposed_loan_coa_code=$3,proposed_admin_fee_coa_code=$4,updated_at=CURRENT_TIMESTAMP WHERE id=$5 AND status='pending'`, admin.ID, "", "", "", requestID)
 	if err != nil {
 		return LoanApprovalResult{}, err
 	}
