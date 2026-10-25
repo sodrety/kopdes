@@ -19,7 +19,7 @@ func TestAdminLoanPageSupportsOfficerStagesAndMemberSelection(t *testing.T) {
 	if err := f.db.QueryRow(`SELECT member_no FROM members WHERE id=$1`, member.ID).Scan(&memberNo); err != nil {
 		t.Fatal(err)
 	}
-	body := `{"member_no":"` + memberNo + `","loan_type":"regular","requested_amount":30000000,"duration_months":24,"purpose":"Browser regression","acknowledge_warnings":true,"idempotency_key":"admin-browser-regression"}`
+	body := `{"member_no":"` + memberNo + `","loan_type":"regular","requested_amount":55000000,"duration_months":24,"purpose":"Browser regression above savings limit","acknowledge_warnings":true,"idempotency_key":"admin-browser-regression"}`
 	created := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/on-behalf", admin, body)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", created.Code, created.Body.String())
@@ -42,6 +42,22 @@ func TestAdminLoanPageSupportsOfficerStagesAndMemberSelection(t *testing.T) {
 	if page.Code != http.StatusOK {
 		t.Fatalf("page: %d", page.Code)
 	}
+	adminApprovalAction := `action="/api/admin/loan-requests/` + requestID + `/approve"`
+	adminApprovalStart := strings.Index(page.Body.String(), adminApprovalAction)
+	if adminApprovalStart < 0 {
+		t.Fatalf("missing manager approval form for admin-origin request: %s", page.Body.String())
+	}
+	adminApprovalEnd := strings.Index(page.Body.String()[adminApprovalStart:], "</form>")
+	if adminApprovalEnd < 0 {
+		t.Fatalf("unterminated manager approval form for admin-origin request")
+	}
+	adminApprovalForm := page.Body.String()[adminApprovalStart : adminApprovalStart+adminApprovalEnd]
+	if strings.Contains(adminApprovalForm, `data-rupiah-max=`) {
+		t.Error("admin-origin manager approval form still applies the member savings limit")
+	}
+	if strings.Contains(adminApprovalForm, `approved-amount-hint-`) {
+		t.Error("admin-origin manager approval form still displays the member savings limit hint")
+	}
 	if !strings.Contains(page.Body.String(), `<select name="member_no"`) || !strings.Contains(page.Body.String(), memberNo+`">Dropdown Borrower`) {
 		t.Error("expected member dropdown showing borrower name and NPP")
 	}
@@ -59,7 +75,7 @@ func TestAdminLoanPageSupportsOfficerStagesAndMemberSelection(t *testing.T) {
 	}
 	date := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
 	stages := []struct{ email, body string }{
-		{"admin@coop.test", `{"approved_amount":30000000,"duration_months":24,"start_date":"` + date + `"}`},
+		{"admin@coop.test", `{"approved_amount":55000000,"duration_months":24,"start_date":"` + date + `"}`},
 		{"ketua-ii@coop.test", `{}`}, {"ketua-i@coop.test", `{}`}, {"ketua-utama@coop.test", `{}`},
 	}
 	action := `action="/api/admin/loan-requests/` + requestID + `/approve"`
@@ -91,6 +107,19 @@ func TestLoanApprovalRechecksSavingsLimitAtFinalStage(t *testing.T) {
 	memberToken := f.login(t, "limit-recheck@coop.test", "member-password")
 	f.ensureLoanCapacityForMember(t, managerToken, member.ID, 26_000_000)
 	requestID := f.createLoanRequest(t, memberToken, 26_000_000, 12)
+	managerPage := adminLoanJSONRequest(f, http.MethodGet, "/admin/loan-requests", managerToken, "")
+	if managerPage.Code != http.StatusOK {
+		t.Fatalf("manager loan page: %d", managerPage.Code)
+	}
+	approvalAction := `action="/api/admin/loan-requests/` + requestID + `/approve"`
+	formStart := strings.Index(managerPage.Body.String(), approvalAction)
+	if formStart < 0 {
+		t.Fatalf("missing manager approval form for member-origin request: %s", managerPage.Body.String())
+	}
+	formEnd := strings.Index(managerPage.Body.String()[formStart:], "</form>")
+	if formEnd < 0 || !strings.Contains(managerPage.Body.String()[formStart:formStart+formEnd], `data-rupiah-max=`) {
+		t.Error("member-origin manager approval form must retain the savings limit")
+	}
 	date := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
 
 	managerApproval := hierarchyRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, `{"approved_amount":26000000,"duration_months":12,"start_date":"`+date+`"}`)
