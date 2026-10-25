@@ -83,3 +83,76 @@ func TestAdminLoanPageSupportsOfficerStagesAndMemberSelection(t *testing.T) {
 	}
 	f.disburseLoanRequest(t, requestID, date)
 }
+
+func TestLoanApprovalRechecksSavingsLimitAtFinalStage(t *testing.T) {
+	f := newTestFixture(t)
+	managerToken := f.login(t, "admin@coop.test", "password")
+	member := f.createMember(t, managerToken, `{"member_no":"LIMIT-RECHECK-001","full_name":"Limit Recheck Borrower","join_date":"2026-01-01","status":"active","member_type":"customer","email":"limit-recheck@coop.test","password":"member-password"}`)
+	memberToken := f.login(t, "limit-recheck@coop.test", "member-password")
+	f.ensureLoanCapacityForMember(t, managerToken, member.ID, 26_000_000)
+	requestID := f.createLoanRequest(t, memberToken, 26_000_000, 12)
+	date := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
+
+	managerApproval := hierarchyRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, `{"approved_amount":26000000,"duration_months":12,"start_date":"`+date+`"}`)
+	if managerApproval.Code != http.StatusOK {
+		t.Fatalf("manager approval: %d %s", managerApproval.Code, managerApproval.Body.String())
+	}
+	var stage string
+	if err := f.db.QueryRow(`SELECT current_approval_stage FROM loan_requests WHERE id=$1`, requestID).Scan(&stage); err != nil {
+		t.Fatalf("read stage after manager approval: %v", err)
+	}
+	if stage != "ketua_ii" {
+		t.Fatalf("expected request to advance to ketua_ii, got %q", stage)
+	}
+
+	// Model a savings adjustment after the manager approved but before the
+	// final approver decides. The approved amount should now exceed the cap.
+	result, err := f.db.Exec(`UPDATE saving_records SET amount=10000000 WHERE member_id=$1 AND type='deposit' AND category='wajib'`, member.ID)
+	if err != nil {
+		t.Fatalf("reduce member savings after manager approval: %v", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		t.Fatalf("expected to adjust one Simpanan Wajib deposit, changed %d rows", changed)
+	}
+	var limit int64
+	if err := f.db.QueryRow(`SELECT loan_limit FROM member_loan_amount_limits WHERE member_id=$1`, member.ID).Scan(&limit); err != nil {
+		t.Fatalf("read reduced loan limit: %v", err)
+	}
+	if limit >= 26_000_000 {
+		t.Fatalf("test setup did not reduce the current loan limit below the proposed amount: %d", limit)
+	}
+
+	for _, approver := range []struct{ email, stage string }{
+		{"ketua-ii@coop.test", "ketua_ii"},
+		{"ketua-i@coop.test", "ketua_i"},
+	} {
+		response := hierarchyRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", f.login(t, approver.email, "password"), `{}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s approval before final stage: %d %s", approver.stage, response.Code, response.Body.String())
+		}
+	}
+
+	finalApproval := hierarchyRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", f.login(t, "ketua-utama@coop.test", "password"), `{}`)
+	if finalApproval.Code != http.StatusBadRequest {
+		t.Fatalf("expected final approval to reject the now-over-limit request, got %d: %s", finalApproval.Code, finalApproval.Body.String())
+	}
+	assertError(t, finalApproval.Body.Bytes(), "VALIDATION_ERROR", "Loan amount exceeds the member-type limit based on Simpanan Wajib and Simpanan Manasuka.")
+
+	var status, currentStage string
+	if err := f.db.QueryRow(`SELECT status,current_approval_stage FROM loan_requests WHERE id=$1`, requestID).Scan(&status, &currentStage); err != nil {
+		t.Fatalf("read request after rejected final approval: %v", err)
+	}
+	if status != "pending" || currentStage != "ketua_utama" {
+		t.Fatalf("rejected final approval should leave the request pending at ketua_utama, got status=%q stage=%q", status, currentStage)
+	}
+	var finalDecisions, loans int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id=$1 AND stage='ketua_utama'`, requestID).Scan(&finalDecisions); err != nil {
+		t.Fatalf("count final-stage approval decisions: %v", err)
+	}
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM loans WHERE loan_request_id=$1`, requestID).Scan(&loans); err != nil {
+		t.Fatalf("count loans for rejected request: %v", err)
+	}
+	if finalDecisions != 0 || loans != 0 {
+		t.Fatalf("rejected approval must roll back its decision and create no loan: final decisions=%d loans=%d", finalDecisions, loans)
+	}
+}
