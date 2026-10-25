@@ -729,16 +729,26 @@ func createAdminLoanBatchNotification(tx *sql.Tx, batchID string, createdCount i
 		return err
 	}
 	defer rows.Close()
+	userIDs := []string{}
 	for rows.Next() {
 		var userID string
 		if err := rows.Scan(&userID); err != nil {
 			return err
 		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, userID := range userIDs {
 		if _, err := tx.Exec(`INSERT INTO notifications (id,event_id,user_id,title_key,body_key,link,audience) VALUES ($1,$2,$3,'notification_admin_loan_batch_ready_title','notification_admin_loan_batch_ready_body',$4,'officer')`, newID(), eventID, userID, "/admin/loan-request-batches/"+batchID); err != nil {
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 func nullableString(value string) any {

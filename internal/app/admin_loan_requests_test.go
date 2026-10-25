@@ -3,6 +3,7 @@ package app_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -187,5 +188,242 @@ func TestAdminLoanBulkPreviewCommitIsAtomicAndIdempotent(t *testing.T) {
 	}
 	if created != 0 {
 		t.Fatalf("failed preview created requests: %d", created)
+	}
+}
+
+func TestAdminLoanBulkCommitAllowsOutstandingBalanceMissingBankAndLimitOverride(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	superToken := establishSuperAdmin(t, fixture)
+	_, adminToken := provisionAdminOfficer(t, fixture, superToken, managerToken)
+
+	memberNumbers := make([]string, 0, 8)
+	var firstMemberID string
+	for index := 1; index <= 8; index++ {
+		memberNo := fmt.Sprintf("BULK-EDGE-%04d", index)
+		email := fmt.Sprintf("bulk-edge-%02d@coop.test", index)
+		member := fixture.createMember(t, managerToken, fmt.Sprintf(`{"member_no":%q,"full_name":%q,"join_date":"2026-01-01","status":"active","bank_name":"","bank_account":"","email":%q,"password":"member-password"}`, memberNo, "Bulk Edge Borrower", email))
+		memberNumbers = append(memberNumbers, member.MemberNo)
+		if index == 1 {
+			firstMemberID = member.ID
+		}
+	}
+	if _, err := fixture.db.Exec(`UPDATE members SET bank_name='Test Bank',bank_account='0000000001' WHERE id=$1`, firstMemberID); err != nil {
+		t.Fatalf("set bank details for initial member loan: %v", err)
+	}
+
+	fixture.recordSaving(t, managerToken, firstMemberID, "deposit", 200000, "BULK-EDGE-SAVING", "Existing loan capacity")
+	memberToken := fixture.login(t, "bulk-edge-01@coop.test", "member-password")
+	existingRequestID := fixture.createLoanRequest(t, memberToken, 100000, 6)
+	openLoan := fixture.approveLoanRequest(t, managerToken, existingRequestID, 100000, 6)
+	if openLoan.RemainingBalance <= 0 {
+		t.Fatalf("expected disbursed existing loan to retain a balance, got %d", openLoan.RemainingBalance)
+	}
+	if _, err := fixture.db.Exec(`UPDATE members SET bank_name='',bank_account='' WHERE id=$1`, firstMemberID); err != nil {
+		t.Fatalf("clear bank details before Excel batch: %v", err)
+	}
+	var memberLoanLimit int64
+	if err := fixture.db.QueryRow(`SELECT loan_limit FROM member_loan_amount_limits WHERE member_id=$1`, firstMemberID).Scan(&memberLoanLimit); err != nil {
+		t.Fatalf("read first borrower's loan limit: %v", err)
+	}
+	if memberLoanLimit >= 70000000 {
+		t.Fatalf("fixture loan limit %d must be below the requested admin amount", memberLoanLimit)
+	}
+
+	amounts := []int64{70000000, 50000000, 55000000, 9000000, 12000000, 18000000, 25000000, 30000000}
+	rows := make([][]any, 0, len(memberNumbers))
+	for index, memberNo := range memberNumbers {
+		rows = append(rows, []any{memberNo, "Reguler", amounts[index], 24, "Pengajuan batch admin"})
+	}
+	preview := adminLoanMultipartRequest(fixture, adminToken, buildAdminLoanWorkbook(t, rows))
+	if preview.Code != http.StatusOK {
+		t.Fatalf("large batch preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	var payload struct {
+		ID           string `json:"id"`
+		ErrorCount   int    `json:"error_count"`
+		WarningCount int    `json:"warning_count"`
+	}
+	if err := json.NewDecoder(preview.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ID == "" || payload.ErrorCount != 0 || payload.WarningCount != 0 {
+		t.Fatalf("expected all eight high-amount rows to preview valid, got %+v", payload)
+	}
+
+	commit := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/bulk/"+payload.ID+"/commit", strings.NewReader(""))
+	commit.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	commit.Header.Set("Authorization", "Bearer "+adminToken)
+	commit.Header.Set("HX-Request", "true")
+	committed := httptest.NewRecorder()
+	fixture.server.ServeHTTP(committed, commit)
+	if committed.Code != http.StatusNoContent {
+		t.Fatalf("large batch commit status=%d body=%s", committed.Code, committed.Body.String())
+	}
+	var created int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loan_requests WHERE batch_id=$1 AND creation_source='admin'`, payload.ID).Scan(&created); err != nil {
+		t.Fatalf("count committed batch requests: %v", err)
+	}
+	if created != 8 {
+		t.Fatalf("expected all eight requests to commit atomically, got %d", created)
+	}
+	var storedBankName, storedBankAccount string
+	if err := fixture.db.QueryRow(`SELECT bank_name,bank_account FROM members WHERE id=$1`, firstMemberID).Scan(&storedBankName, &storedBankAccount); err != nil {
+		t.Fatalf("verify missing bank details remain absent: %v", err)
+	}
+	if strings.TrimSpace(storedBankName) != "" || strings.TrimSpace(storedBankAccount) != "" {
+		t.Fatalf("expected first borrower to have no bank details, got %q/%q", storedBankName, storedBankAccount)
+	}
+}
+
+func TestAdminLoanBulkCommitRevalidatesRowsAfterPreviewAtomically(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	superToken := establishSuperAdmin(t, fixture)
+	_, adminToken := provisionAdminOfficer(t, fixture, superToken, managerToken)
+	first := fixture.createMember(t, managerToken, `{"member_no":"BULK-STALE-0001","full_name":"Stale Preview One","join_date":"2026-01-01","status":"active"}`)
+	second := fixture.createMember(t, managerToken, `{"member_no":"BULK-STALE-0002","full_name":"Stale Preview Two","join_date":"2026-01-01","status":"active"}`)
+
+	preview := adminLoanMultipartRequest(fixture, adminToken, buildAdminLoanWorkbook(t, [][]any{{first.MemberNo, "Reguler", 100000, 6, "Still available"}, {second.MemberNo, "Reguler", 100000, 6, "Will become pending"}}))
+	if preview.Code != http.StatusOK {
+		t.Fatalf("stale batch preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	var payload struct {
+		ID         string `json:"id"`
+		ErrorCount int    `json:"error_count"`
+	}
+	if err := json.NewDecoder(preview.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ID == "" || payload.ErrorCount != 0 {
+		t.Fatalf("expected preview to be valid before member state changes, got %+v", payload)
+	}
+
+	newPending := `{"member_no":"` + second.MemberNo + `","loan_type":"regular","requested_amount":100000,"duration_months":6,"purpose":"Created after batch preview","acknowledge_warnings":true,"idempotency_key":"bulk-stale-after-preview"}`
+	created := adminLoanJSONRequest(fixture, http.MethodPost, "/api/admin/loan-requests/on-behalf", adminToken, newPending)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create request after preview status=%d body=%s", created.Code, created.Body.String())
+	}
+
+	commit := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/bulk/"+payload.ID+"/commit", strings.NewReader("acknowledge_warnings=on"))
+	commit.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	commit.Header.Set("Authorization", "Bearer "+adminToken)
+	commit.Header.Set("HX-Request", "true")
+	response := httptest.NewRecorder()
+	fixture.server.ServeHTTP(response, commit)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "BATCH_REVALIDATION_FAILED") {
+		t.Fatalf("expected commit-time revalidation conflict, got %d %s", response.Code, response.Body.String())
+	}
+	var batchRequests int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loan_requests WHERE batch_id=$1`, payload.ID).Scan(&batchRequests); err != nil {
+		t.Fatalf("count batch requests after revalidation failure: %v", err)
+	}
+	if batchRequests != 0 {
+		t.Fatalf("revalidation failure partially committed %d requests", batchRequests)
+	}
+	var batchStatus string
+	if err := fixture.db.QueryRow(`SELECT status FROM loan_request_batches WHERE id=$1`, payload.ID).Scan(&batchStatus); err != nil {
+		t.Fatalf("read failed batch status: %v", err)
+	}
+	if batchStatus != "validation_failed" {
+		t.Fatalf("expected validation_failed status, got %q", batchStatus)
+	}
+}
+
+func TestAdminLoanBulkPreviewRejectsDuplicateMembersInWorkbook(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	superToken := establishSuperAdmin(t, fixture)
+	_, adminToken := provisionAdminOfficer(t, fixture, superToken, managerToken)
+	member := fixture.createMember(t, managerToken, `{"member_no":"BULK-DUPLICATE-0001","full_name":"Duplicate Borrower","join_date":"2026-01-01","status":"active"}`)
+
+	preview := adminLoanMultipartRequest(fixture, adminToken, buildAdminLoanWorkbook(t, [][]any{{member.MemberNo, "Reguler", 100000, 6, "First row"}, {member.MemberNo, "Reguler", 200000, 12, "Duplicate row"}}))
+	if preview.Code != http.StatusOK {
+		t.Fatalf("duplicate batch preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	var payload struct {
+		ID         string `json:"id"`
+		ErrorCount int    `json:"error_count"`
+		Rows       []struct {
+			Status string   `json:"status"`
+			Errors []string `json:"errors"`
+		} `json:"rows"`
+	}
+	if err := json.NewDecoder(preview.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ID == "" || payload.ErrorCount != 1 || len(payload.Rows) != 2 {
+		t.Fatalf("expected one duplicate-row error, got %+v", payload)
+	}
+	if payload.Rows[0].Status != "valid" || payload.Rows[1].Status != "error" || len(payload.Rows[1].Errors) == 0 {
+		t.Fatalf("unexpected duplicate row statuses: %+v", payload.Rows)
+	}
+	var created int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loan_requests WHERE batch_id=$1`, payload.ID).Scan(&created); err != nil {
+		t.Fatalf("count requests after duplicate preview: %v", err)
+	}
+	if created != 0 {
+		t.Fatalf("duplicate preview unexpectedly created %d requests", created)
+	}
+}
+
+func TestAdminLoanBulkCommitRequiresAcknowledgementForWarnings(t *testing.T) {
+	fixture := newTestFixture(t)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	superToken := establishSuperAdmin(t, fixture)
+	_, adminToken := provisionAdminOfficer(t, fixture, superToken, managerToken)
+	member := fixture.createMember(t, managerToken, `{"member_no":"BULK-WARNING-0001","full_name":"Warning Borrower","join_date":"2026-01-01","status":"active"}`)
+	if _, err := fixture.db.Exec(`UPDATE users SET active=FALSE WHERE member_id=$1 AND historical_identity=FALSE`, member.ID); err != nil {
+		t.Fatalf("remove member login to produce preview warning: %v", err)
+	}
+
+	preview := adminLoanMultipartRequest(fixture, adminToken, buildAdminLoanWorkbook(t, [][]any{{member.MemberNo, "Reguler", 100000, 6, "Warning acknowledgement"}}))
+	if preview.Code != http.StatusOK {
+		t.Fatalf("warning batch preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	var payload struct {
+		ID           string `json:"id"`
+		ErrorCount   int    `json:"error_count"`
+		WarningCount int    `json:"warning_count"`
+	}
+	if err := json.NewDecoder(preview.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ID == "" || payload.ErrorCount != 0 || payload.WarningCount == 0 {
+		t.Fatalf("expected a warning-only valid batch, got %+v", payload)
+	}
+
+	commit := func(acknowledge bool) *httptest.ResponseRecorder {
+		body := ""
+		if acknowledge {
+			body = "acknowledge_warnings=on"
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/loan-requests/bulk/"+payload.ID+"/commit", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		fixture.server.ServeHTTP(rec, req)
+		return rec
+	}
+	if response := commit(false); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "WARNINGS_REQUIRE_ACKNOWLEDGEMENT") {
+		t.Fatalf("unacknowledged warning commit status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM loan_requests WHERE batch_id=$1`, payload.ID).Scan(&created); err != nil {
+		t.Fatalf("count requests before warning acknowledgement: %v", err)
+	}
+	if created != 0 {
+		t.Fatalf("unacknowledged warning commit created %d requests", created)
+	}
+	if response := commit(true); response.Code != http.StatusNoContent {
+		t.Fatalf("acknowledged warning commit status=%d body=%s", response.Code, response.Body.String())
+	}
+	var acknowledged bool
+	if err := fixture.db.QueryRow(`SELECT warnings_acknowledged FROM loan_request_batches WHERE id=$1`, payload.ID).Scan(&acknowledged); err != nil {
+		t.Fatalf("read warning acknowledgement state: %v", err)
+	}
+	if !acknowledged {
+		t.Fatal("expected committed batch to record warning acknowledgement")
 	}
 }
