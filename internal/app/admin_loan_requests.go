@@ -352,18 +352,12 @@ func (s *Server) validateAdminLoanRow(tx *sql.Tx, row *adminLoanRequestRow, lock
 	if requireBankDetails && (strings.TrimSpace(bankName) == "" || strings.TrimSpace(bankAccount) == "") {
 		row.Errors = append(row.Errors, "admin_issue_bank_details")
 	}
+	// Existing loan balances do not block another request; only an in-flight request does.
 	var pendingID string
 	if err := tx.QueryRow(`SELECT id FROM loan_requests WHERE member_id=$1 AND (status='pending' OR (status='approved' AND disbursement_date='')) LIMIT 1`, memberID).Scan(&pendingID); err == nil {
 		row.Errors = append(row.Errors, "admin_issue_pending")
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return "", nil, err
-	}
-	var outstanding int64
-	if err := tx.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND status<>'cancelled' AND remaining_balance>0`, memberID).Scan(&outstanding); err != nil {
-		return "", nil, err
-	}
-	if outstanding > 0 {
-		row.Errors = append(row.Errors, "admin_issue_outstanding")
 	}
 	var loginCount int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE member_id=$1 AND historical_identity=FALSE AND active=TRUE`, memberID).Scan(&loginCount); err != nil {
