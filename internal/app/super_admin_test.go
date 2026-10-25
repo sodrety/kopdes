@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,6 +119,94 @@ func TestSuperAdminCanOverrideLoanWithoutOfficerApprovals(t *testing.T) {
 	}
 	if approvals != 0 || overrides != 1 || audits != 1 {
 		t.Fatalf("unexpected override records: Officer approvals=%d overrides=%d audits=%d", approvals, overrides, audits)
+	}
+}
+
+func TestSuperAdminCanOverrideAdminOriginLoanAboveSavingsLimit(t *testing.T) {
+	fixture := newTestFixture(t)
+	superToken := establishSuperAdmin(t, fixture)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	_, adminToken := provisionAdminOfficer(t, fixture, superToken, managerToken)
+	member := fixture.createMember(t, managerToken, `{"member_no":"SUPER-ADMIN-LOAN-LIMIT","full_name":"Admin Loan Limit Member","join_date":"2026-01-01","status":"active","email":"admin-limit-member@coop.test","password":"member-password","bank_name":"Test Bank","bank_account":"123456"}`)
+	created := adminLoanJSONRequest(fixture, http.MethodPost, "/api/admin/loan-requests/on-behalf", adminToken, `{"member_no":"SUPER-ADMIN-LOAN-LIMIT","loan_type":"regular","requested_amount":55000000,"duration_months":24,"purpose":"Admin request above savings limit","acknowledge_warnings":true,"idempotency_key":"super-admin-limit-override"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create admin loan request: %d %s", created.Code, created.Body.String())
+	}
+	var createdRequest struct {
+		Request struct {
+			ID string `json:"id"`
+		} `json:"loan_request"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &createdRequest); err != nil || createdRequest.Request.ID == "" {
+		t.Fatalf("decode created admin loan request: %s (%v)", created.Body.String(), err)
+	}
+	requestID := createdRequest.Request.ID
+	var limit int64
+	if err := fixture.db.QueryRow(`SELECT loan_limit FROM member_loan_amount_limits WHERE member_id=$1`, member.ID).Scan(&limit); err != nil {
+		t.Fatalf("read member savings limit: %v", err)
+	}
+	if limit >= 55000000 {
+		t.Fatalf("fixture must put request above savings limit: limit=%d", limit)
+	}
+
+	cookie := fixture.browserLogin(t, "super@coop.test", "permanent-super-password")
+	pageReq := httptest.NewRequest(http.MethodGet, "/admin/loan-requests", nil)
+	pageReq.AddCookie(cookie)
+	pageRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(pageRec, pageReq)
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("admin loan request page: %d %s", pageRec.Code, pageRec.Body.String())
+	}
+	page := pageRec.Body.String()
+	formStart := strings.Index(page, `action="/api/admin/loan-requests/`+requestID+`/override-approve"`)
+	if formStart < 0 {
+		t.Fatalf("Super Admin override form missing for admin request %s", requestID)
+	}
+	formEnd := strings.Index(page[formStart:], "</form>")
+	if formEnd < 0 || strings.Contains(page[formStart:formStart+formEnd], `data-rupiah-max=`) {
+		t.Fatalf("admin-origin Super Admin override form still applies the savings limit: %s", page[formStart:])
+	}
+
+	override := adminLoanJSONRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/override-approve", superToken, `{"approved_amount":55000000,"duration_months":24,"note":"Approved above savings limit"}`)
+	if override.Code != http.StatusOK {
+		t.Fatalf("override admin-origin loan above savings limit: %d %s", override.Code, override.Body.String())
+	}
+	var requestStatus string
+	if err := fixture.db.QueryRow(`SELECT status FROM loan_requests WHERE id=$1`, requestID).Scan(&requestStatus); err != nil {
+		t.Fatalf("read overridden request status: %v", err)
+	}
+	if requestStatus != "approved" {
+		t.Fatalf("expected admin-origin request to be approved, got %q", requestStatus)
+	}
+}
+
+func TestSuperAdminOverrideKeepsSavingsLimitForMemberOriginLoan(t *testing.T) {
+	fixture := newTestFixture(t)
+	superToken := establishSuperAdmin(t, fixture)
+	managerToken := fixture.login(t, "admin@coop.test", "password")
+	member := fixture.createMember(t, managerToken, `{"member_no":"SUPER-MEMBER-LOAN-LIMIT","full_name":"Member Loan Limit","join_date":"2026-01-01","status":"active","email":"member-limit@coop.test","password":"member-password"}`)
+	fixture.recordSaving(t, superToken, member.ID, "deposit", 100000, "SUPER-MEMBER-LOAN-SAVING", "Loan capacity")
+	var limit int64
+	if err := fixture.db.QueryRow(`SELECT loan_limit FROM member_loan_amount_limits WHERE member_id=$1`, member.ID).Scan(&limit); err != nil {
+		t.Fatalf("read member savings limit: %v", err)
+	}
+	if limit <= 0 {
+		t.Fatalf("expected a positive member loan limit after saving, got %d", limit)
+	}
+	memberToken := fixture.login(t, "member-limit@coop.test", "member-password")
+	requestID := fixture.createLoanRequest(t, memberToken, int(limit), 6)
+	tooHigh := strconv.FormatInt(limit+1, 10)
+	body := `{"approved_amount":` + tooHigh + `,"duration_months":6,"note":"Must retain member savings limit"}`
+	override := adminLoanJSONRequest(fixture, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/override-approve", superToken, body)
+	if override.Code != http.StatusBadRequest {
+		t.Fatalf("member-origin override above savings limit should fail: %d %s", override.Code, override.Body.String())
+	}
+	var requestStatus string
+	if err := fixture.db.QueryRow(`SELECT status FROM loan_requests WHERE id=$1`, requestID).Scan(&requestStatus); err != nil {
+		t.Fatalf("read member request status: %v", err)
+	}
+	if requestStatus != "pending" {
+		t.Fatalf("expected rejected override to leave member request pending, got %q", requestStatus)
 	}
 }
 
