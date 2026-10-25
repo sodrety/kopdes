@@ -206,16 +206,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 44 {
-		t.Fatalf("expected forty-four tracked migrations, got %d", migrationCount)
+	if migrationCount != 45 {
+		t.Fatalf("expected forty-five tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 44`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 45`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "add_loan_suspensions" {
-		t.Fatalf("expected latest suspension migration, got %q", latestName)
+	if latestName != "admin_loan_limit_override_and_withdrawal_disbursement" {
+		t.Fatalf("expected latest admin loan override and withdrawal disbursement migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -993,7 +993,7 @@ func TestStaticCSSIncludesMobileAdminResponsiveRules(t *testing.T) {
 		t.Fatalf("expected css status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	css := rec.Body.String()
-	for _, text := range []string{"--primary: #0056b3", "--warning: #ffc107", "--negative: #dc2626", ".public-header", ".public-hero", ".public-feature-card", ".auth-visual", "linear-gradient(180deg, #4e73df", ".admin-topbar", ".summary-card", ".dashboard-home-grid", ".dashboard-quick-list", ".brand-logo", ".sidebar-group-label", ".status-pending", "@media (max-width: 760px)", ".admin-sidebar", "overflow-x: auto", ".page-shell", ".summary-grid", "grid-template-columns: repeat(2, minmax(0, 1fr))", ".inline-approval-form", ".inline-repayment-form", ".review-modal:target", ".review-modal-card", ".table-scroll td:last-child"} {
+	for _, text := range []string{"--primary: #0056b3", "--warning: #ffc107", "--negative: #dc2626", ".public-header", ".public-hero", ".public-feature-card", ".auth-visual", "linear-gradient(180deg, var(--primary)", ".admin-topbar", ".summary-card", ".dashboard-home-grid", ".dashboard-quick-list", ".brand-logo", ".sidebar-group-label", ".status-pending", "@media (max-width: 760px)", ".admin-sidebar", "overflow-x: auto", ".page-shell", ".summary-grid", "grid-template-columns: repeat(2, minmax(0, 1fr))", ".inline-approval-form", ".inline-repayment-form", ".review-modal:target", ".review-modal-card", ".table-scroll td:last-child"} {
 		if !strings.Contains(css, text) {
 			t.Fatalf("expected css to include %q, got %s", text, css)
 		}
@@ -2815,15 +2815,23 @@ func TestMemberCanRequestPenarikanAndAdminApproveCreatesSukarelaWithdrawal(t *te
 
 	fixture.approveWithdrawalRequest(t, adminToken, created.ID)
 	var approved struct {
-		ID             string `json:"id"`
-		Status         string `json:"status"`
-		SavingRecordID string `json:"saving_record_id"`
+		ID             string         `json:"id"`
+		Status         string         `json:"status"`
+		SavingRecordID sql.NullString `json:"saving_record_id"`
 	}
 	if err := fixture.db.QueryRow(`SELECT id,status,saving_record_id FROM withdrawal_requests WHERE id=$1`, created.ID).Scan(&approved.ID, &approved.Status, &approved.SavingRecordID); err != nil {
 		t.Fatalf("read approved withdrawal request: %v", err)
 	}
-	if approved.ID != created.ID || approved.Status != "approved" || approved.SavingRecordID != "" {
+	if approved.ID != created.ID || approved.Status != "approved" || approved.SavingRecordID.Valid {
 		t.Fatalf("unexpected approved withdrawal request: %+v", approved)
+	}
+
+	fixture.disburseWithdrawalRequest(t, created.ID)
+	if err := fixture.db.QueryRow(`SELECT saving_record_id FROM withdrawal_requests WHERE id=$1`, created.ID).Scan(&approved.SavingRecordID); err != nil {
+		t.Fatalf("read disbursed withdrawal saving record: %v", err)
+	}
+	if !approved.SavingRecordID.Valid || approved.SavingRecordID.String == "" {
+		t.Fatalf("expected disbursement to create a saving record, got %+v", approved)
 	}
 
 	summaryReq := httptest.NewRequest(http.MethodGet, "/api/member/savings/summary", nil)
@@ -2871,7 +2879,7 @@ func TestMemberCanRequestPenarikanAndAdminApproveCreatesSukarelaWithdrawal(t *te
 	}
 	var sawWithdrawal bool
 	for _, record := range history.Savings {
-		if record.ID == approved.SavingRecordID && record.Type == "withdrawal" && record.Category == "sukarela" && record.Amount == 125000 && record.Note == "Need cash" {
+		if record.ID == approved.SavingRecordID.String && record.Type == "withdrawal" && record.Category == "sukarela" && record.Amount == 125000 && record.Note == "Need cash" {
 			sawWithdrawal = true
 		}
 	}
