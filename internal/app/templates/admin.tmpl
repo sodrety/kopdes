@@ -745,9 +745,92 @@
 
 {{define "admin-tagihan"}}
 {{template "admin-shell-start" .}}
+      <section class="panel tagihan-period-panel">
+        <div class="tagihan-period-header">
+          <h2>{{t .Lang "generate_tagihan"}}</h2>
+          <form class="tagihan-period-form" method="get" action="/admin/tagihan">
+            <label>{{t .Lang "statement_month"}}
+              <input type="month" name="month" value="{{.StatementMonth}}" required>
+            </label>
+            <div class="tagihan-period-actions">
+              <button type="submit">{{t .Lang "apply_filters"}}</button>
+              <a class="button-link button-link-secondary" href="/api/admin/tagihan/export.xlsx?month={{.StatementMonth}}">{{t .Lang "export_xlsx"}}</a>
+            </div>
+          </form>
+        </div>
+      </section>
       <section class="panel">
-        <h2>{{t .Lang "suspension_title"}}</h2>
-        <button type="button" id="manual-suspension-toggle" aria-expanded="false" aria-controls="manual-suspension-panel">{{t .Lang "suspension_manual"}}</button>
+        <h2>{{t .Lang "import_tagihan"}}</h2>
+        <div class="tagihan-import-guidance">
+          <p>{{t .Lang "tagihan_journal_mapping_help"}}</p>
+          <p>{{t .Lang "detail_summary_help"}}</p>
+          <p>{{t .Lang "review_legacy"}}</p>
+        </div>
+        <details class="tagihan-config-details">
+          <summary>{{t .Lang "tagihan_saving_configuration"}}</summary>
+          <div class="tagihan-config-content">
+            <p><strong>{{t .Lang "tagihan_saving_source"}}:</strong> {{t .Lang "tagihan_saving_source_latest_member"}}</p>
+            <p>{{t .Lang "tagihan_saving_configuration_description"}}</p>
+            {{if .TagihanConfig.ReadOnly}}<span class="tagihan-read-only">{{t .Lang "read_only"}}</span>{{end}}
+          </div>
+        </details>
+        <form class="filter-form tagihan-import-form" method="post" action="/api/admin/tagihan/import" enctype="multipart/form-data">
+          <label>{{t .Lang "statement_month"}}
+            <input type="month" name="statement_month" value="{{.StatementMonth}}" required>
+          </label>
+          <label>{{t .Lang "record_date"}}
+            <input type="date" name="record_date" value="{{.DefaultDate}}">
+          </label>
+          <label>{{t .Lang "xlsx_file"}}
+            <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+          </label>
+          <button type="submit">{{t .Lang "review_preview"}}</button>
+        </form>
+      </section>
+      <section class="panel tagihan-preview-panel">
+        <h2>{{t .Lang "tagihan_preview"}}</h2>
+        {{if .Rows}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "member_no"}}</th>
+              <th>{{t $.Lang "full_name"}}</th>
+              <th>{{t $.Lang "simpanan_wajib"}}</th>
+              <th>{{t $.Lang "simpanan_manasuka"}}</th>
+              <th>{{t $.Lang "pinjaman_reguler"}}</th>
+              <th>{{t $.Lang "loan_type_secondary_goods"}}</th>
+              <th>{{t $.Lang "loan_type_goods_purchase_paylater"}}</th>
+              <th>{{t $.Lang "loan_type_voucher"}}</th>
+              <th>{{t $.Lang "total_tagihan"}}</th>
+              <th>{{t $.Lang "status"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Rows}}
+            <tr>
+              <td title="{{.MemberID}}">{{.MemberNo}}</td>
+              <td>{{.FullName}}</td>
+              <td>{{nominal .SimpananWajib}}</td>
+              <td>{{nominal .SimpananSukarela}}</td>
+              <td>{{nominal .PinjamanReguler}}</td>
+              <td>{{nominal .PinjamanBarangSekunder}}</td>
+              <td>{{nominal .PembelianBarang}}</td>
+              <td>{{nominal .PinjamanVoucher}}</td>
+              <td>{{nominal .Total}}</td>
+              <td>{{.Status}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_tagihan_rows")}}
+        {{end}}
+      </section>
+      <section class="panel tagihan-suspension-panel">
+        <div class="section-heading-row tagihan-suspension-header">
+          <h2>{{t .Lang "suspension_title"}}</h2>
+          <button class="button-secondary" type="button" id="manual-suspension-toggle" aria-expanded="false" aria-controls="manual-suspension-panel">{{t .Lang "suspension_manual"}}</button>
+        </div>
         <div id="manual-suspension-panel" hidden>
           <p>{{t .Lang "suspension_help"}}</p>
           <p class="field-help">{{t .Lang "suspension_excel_help"}}</p>
@@ -819,86 +902,13 @@
           }());
         </script>
         {{if .SuspensionHistory}}
-        <h3>{{t .Lang "suspension_history"}}</h3>
+        <details class="tagihan-suspension-history">
+          <summary>{{t .Lang "suspension_history"}}</summary>
 {{template "table-open" .}}
           <thead><tr><th>{{t .Lang "member_no"}}</th><th>{{t .Lang "full_name"}}</th><th>{{t .Lang "suspension_loan_id"}}</th><th>{{t .Lang "suspension_fee"}}</th><th>{{t .Lang "record_date"}}</th><th>{{t .Lang "suspension_reason"}}</th><th>{{t .Lang "suspension_previous_final"}}</th><th>{{t .Lang "suspension_final_due"}}</th></tr></thead>
           <tbody>{{range .SuspensionHistory}}<tr><td>{{.MemberNo}}</td><td>{{.FullName}}</td><td>{{.LoanID}}</td><td>{{nominal .Fee}}</td><td>{{.RecordDate}}</td><td>{{.Reason}}</td><td>{{.BeforeFinal}}</td><td>{{.AfterFinal}}</td></tr>{{end}}</tbody>
 {{template "table-close" .}}
-        {{end}}
-      </section>
-      <section class="panel">
-        <h2>{{t .Lang "generate_tagihan"}}</h2>
-        <form class="filter-form" method="get" action="/admin/tagihan">
-          <label>{{t .Lang "statement_month"}}
-            <input type="month" name="month" value="{{.StatementMonth}}" required>
-          </label>
-          <button type="submit">{{t .Lang "apply_filters"}}</button>
-          <a class="button-link" href="/api/admin/tagihan/export.xlsx?month={{.StatementMonth}}">{{t .Lang "export_xlsx"}}</a>
-        </form>
-      </section>
-      <section class="panel">
-        <h2>{{t .Lang "tagihan_saving_configuration"}}</h2>
-        <div class="form-grid form-grid-two">
-          <div class="tagihan-saving-source"><span>{{t .Lang "tagihan_saving_source"}}</span><strong>{{t .Lang "tagihan_saving_source_latest_member"}}</strong></div>
-        </div>
-        <p>{{t .Lang "tagihan_saving_configuration_description"}}</p>
-        {{if .TagihanConfig.ReadOnly}}<p>{{t .Lang "read_only"}}</p>{{end}}
-      </section>
-      <section class="panel">
-        <h2>{{t .Lang "import_tagihan"}}</h2>
-        <p class="field-help">{{t .Lang "tagihan_journal_mapping_help"}}</p><p>{{t .Lang "detail_summary_help"}}</p><p>{{t .Lang "review_legacy"}}</p>
-        <form class="filter-form" method="post" action="/api/admin/tagihan/import" enctype="multipart/form-data">
-          <label>{{t .Lang "statement_month"}}
-            <input type="month" name="statement_month" value="{{.StatementMonth}}" required>
-          </label>
-          <label>{{t .Lang "record_date"}}
-            <input type="date" name="record_date" value="{{.DefaultDate}}">
-          </label>
-          <label>{{t .Lang "xlsx_file"}}
-            <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
-          </label>
-          <button type="submit">{{t .Lang "review_preview"}}</button>
-        </form>
-      </section>
-      <section class="panel">
-        <h2>{{t .Lang "tagihan_preview"}}</h2>
-        {{if .Rows}}
-{{template "table-open" .}}
-          <thead>
-            <tr>
-              <th>{{t $.Lang "member_id"}}</th>
-              <th>{{t $.Lang "member_no"}}</th>
-              <th>{{t $.Lang "full_name"}}</th>
-              <th>{{t $.Lang "simpanan_wajib"}}</th>
-              <th>{{t $.Lang "simpanan_manasuka"}}</th>
-              <th>{{t $.Lang "pinjaman_reguler"}}</th>
-              <th>{{t $.Lang "loan_type_secondary_goods"}}</th>
-              <th>{{t $.Lang "loan_type_goods_purchase_paylater"}}</th>
-              <th>{{t $.Lang "loan_type_voucher"}}</th>
-              <th>{{t $.Lang "total_tagihan"}}</th>
-              <th>{{t $.Lang "status"}}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Rows}}
-            <tr>
-              <td>{{.MemberID}}</td>
-              <td>{{.MemberNo}}</td>
-              <td>{{.FullName}}</td>
-              <td>{{nominal .SimpananWajib}}</td>
-              <td>{{nominal .SimpananSukarela}}</td>
-              <td>{{nominal .PinjamanReguler}}</td>
-              <td>{{nominal .PinjamanBarangSekunder}}</td>
-              <td>{{nominal .PembelianBarang}}</td>
-              <td>{{nominal .PinjamanVoucher}}</td>
-              <td>{{nominal .Total}}</td>
-              <td>{{.Status}}</td>
-            </tr>
-            {{end}}
-          </tbody>
-{{template "table-close" .}}
-        {{else}}
-{{template "empty-state" (t .Lang "no_tagihan_rows")}}
+        </details>
         {{end}}
       </section>
 {{template "admin-shell-end" .}}

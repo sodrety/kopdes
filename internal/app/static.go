@@ -1802,9 +1802,132 @@ a {
 .page-shell > .accounting-mapping-form-panel {
   max-width: 760px;
 }
-.tagihan-saving-source {
+.tagihan-period-panel,
+.tagihan-suspension-panel {
+  padding: 0;
+}
+.tagihan-period-header,
+.tagihan-suspension-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0;
+  padding: 16px 20px;
+}
+.tagihan-period-header {
+  gap: 20px;
+}
+.tagihan-period-header h2,
+.tagihan-suspension-header h2 {
+  margin: 0;
+}
+.tagihan-period-form {
   display: grid;
-  gap: 4px;
+  grid-template-columns: minmax(180px, 260px) auto;
+  align-items: end;
+  gap: 12px;
+  width: min(720px, 100%);
+  margin: 0 0 0 auto;
+}
+.tagihan-period-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tagihan-period-actions > button,
+.tagihan-period-actions > .button-link {
+  min-height: 42px;
+  white-space: nowrap;
+}
+.panel > .tagihan-import-guidance,
+.panel > .tagihan-config-details,
+.panel > .tagihan-import-form {
+  margin: 12px 20px;
+}
+.tagihan-import-guidance {
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--canvas-soft);
+  color: var(--body);
+  font-size: 13px;
+  line-height: 19px;
+}
+.tagihan-import-guidance p {
+  margin: 0;
+}
+.tagihan-import-guidance p + p {
+  margin-top: 8px;
+}
+.tagihan-config-details {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: var(--canvas);
+}
+.tagihan-config-details > summary,
+.tagihan-suspension-history > summary {
+  color: var(--heading);
+  font-weight: 700;
+  cursor: pointer;
+}
+.tagihan-config-details > summary {
+  padding: 10px 14px;
+}
+.tagihan-config-details[open] > summary {
+  border-bottom: 1px solid var(--line-soft);
+}
+.tagihan-config-content {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px 12px;
+}
+.tagihan-config-content p {
+  margin: 0;
+}
+.tagihan-read-only {
+  width: max-content;
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  background: var(--canvas-soft);
+  color: var(--mute);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 700;
+}
+.tagihan-suspension-header {
+  border-bottom: 1px solid var(--line-soft);
+}
+.tagihan-suspension-header button {
+  flex: 0 0 auto;
+}
+.tagihan-suspension-panel > .tagihan-suspension-history {
+  margin: 0 20px 20px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 14px;
+}
+.tagihan-suspension-history > summary {
+  padding: 4px 0;
+}
+.tagihan-suspension-history[open] > .table-scroll {
+  margin-top: 12px;
+}
+.tagihan-preview-panel th,
+.tagihan-preview-panel td {
+  padding: 10px 14px;
+}
+.tagihan-preview-panel th:nth-child(n+3):nth-child(-n+9) {
+  text-align: right;
+}
+.tagihan-preview-panel td:first-child,
+.tagihan-preview-panel td:nth-child(n+3):nth-child(-n+9) {
+  white-space: nowrap;
+}
+.tagihan-preview-panel td:nth-child(n+3):nth-child(-n+9) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .accounting-mapping-table select[name="transaction_type"] {
   min-width: 150px;
@@ -3292,6 +3415,65 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .loan-review-modal .loan-review-purpose, .loan-review-modal .loan-review-provenance { grid-column: 1 / -1; }
   .loan-review-modal .inline-approval-form, .loan-review-modal .inline-rejection-form { grid-template-columns: minmax(0, 1fr); }
   .loan-review-modal .review-action button { width: 100%; }
+}
+
+@media (max-width: 1120px) {
+  .tagihan-period-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .tagihan-period-form {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+  }
+}
+@media (max-width: 760px) {
+  .page-shell .tagihan-period-panel,
+  .page-shell .tagihan-suspension-panel {
+    padding: 0;
+  }
+  .tagihan-period-header,
+  .tagihan-suspension-header {
+    padding: 14px 16px;
+  }
+  .tagihan-period-form {
+    grid-template-columns: 1fr;
+  }
+  .tagihan-period-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tagihan-period-actions > button,
+  .tagihan-period-actions > .button-link {
+    width: 100%;
+    padding-inline: 10px;
+  }
+  .tagihan-suspension-header {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .panel > .tagihan-import-guidance,
+  .panel > .tagihan-config-details,
+  .panel > .tagihan-import-form {
+    margin-inline: 16px;
+  }
+  .tagihan-suspension-panel > .tagihan-suspension-history {
+    margin-inline: 16px;
+  }
+  .tagihan-preview-panel th,
+  .tagihan-preview-panel td {
+    padding-inline: 10px;
+  }
+}
+@media (max-width: 420px) {
+  .tagihan-suspension-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .tagihan-suspension-header button {
+    width: 100%;
+  }
 }
 
 `
