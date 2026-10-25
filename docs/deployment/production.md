@@ -181,10 +181,6 @@ POSTGRES_PASSWORD=<strong-random-database-password>
 
 JWT_SECRET=<at-least-32-random-characters>
 
-KETUA_UTAMA_MEMBER_ID=ketua-utama-bootstrap
-KETUA_UTAMA_EMAIL=<production-admin-email>
-KETUA_UTAMA_PASSWORD=<temporary-bootstrap-password>
-
 SUPER_ADMIN_EMAIL=<production-super-admin-email>
 SUPER_ADMIN_PASSWORD=<temporary-bootstrap-password>
 SUPER_ADMIN_NAME=Platform Super Admin
@@ -219,7 +215,7 @@ echo "$GHCR_READ_TOKEN" | docker login ghcr.io \
 
 Keep the token in Docker's credential store, not in .env.production or Git.
 
-## First launch bootstrap
+## First launch
 
 Complete this once before relying on automatic deployment.
 
@@ -243,45 +239,20 @@ sudo -u deploy docker compose \
   ps postgres
 ```
 
-### 2. Run migrations without bootstrap credentials
+### 2. Run migrations and start the app once
 
-The schema must exist before creating the initial Member:
+The app applies migrations and creates the configured Super Admin at startup:
 
 ```sh
 sudo -u deploy docker compose \
   --env-file .env.production \
   -f compose.production.yml \
-  run --rm \
-  -e KETUA_UTAMA_MEMBER_ID= \
-  -e KETUA_UTAMA_EMAIL= \
-  -e KETUA_UTAMA_PASSWORD= \
-  app
+  run --rm app
 ```
 
 Stop the one-off app after migrations finish and the server starts with Ctrl+C.
 
-### 3. Create the bootstrap Member
-
-KETUA_UTAMA_MEMBER_ID must identify an existing active Member. An arbitrary ID is not enough; otherwise the app repeatedly logs load Ketua Utama Member: sql: no rows in result set and exits.
-
-The following uses the default POSTGRES_USER=kopdes and POSTGRES_DB=kopdes values:
-
-```sh
-sudo -u deploy docker compose \
-  --env-file .env.production \
-  -f compose.production.yml \
-  exec -T postgres psql -U kopdes -d kopdes <<'SQL'
-INSERT INTO members
-  (id, member_no, full_name, join_date, status, member_type)
-VALUES
-  ('ketua-utama-bootstrap', 'DJ-0001', 'Ketua Utama Bootstrap', CURRENT_DATE, 'active', 'employee')
-ON CONFLICT (id) DO NOTHING;
-SQL
-```
-
-If custom database/user values are configured, replace kopdes in the psql command.
-
-### 4. Start the stack
+### 3. Start the stack
 
 ```sh
 sudo -u deploy docker compose \
@@ -290,18 +261,10 @@ sudo -u deploy docker compose \
   up -d
 ```
 
-After the first successful login:
+After the first successful Super Admin login:
 
-1. Change the temporary Ketua Utama password in the application.
-2. Remove KETUA_UTAMA_PASSWORD from .env.production.
-3. Restart the app:
-
-```sh
-sudo -u deploy docker compose \
-  --env-file .env.production \
-  -f compose.production.yml \
-  up -d app
-```
+1. Change the temporary Super Admin password in the application.
+2. Create or select a Member login and assign the Ketua Utama appointment in Officer management.
 
 ## Smoke test
 
@@ -547,7 +510,7 @@ sudo -u deploy docker compose \
   logs --tail=200 app
 ```
 
-If logs contain load Ketua Utama Member: sql: no rows in result set, KETUA_UTAMA_MEMBER_ID does not identify an existing active Member. Complete the bootstrap SQL step above, then restart the app.
+If the app does not start, check the database connection, migration output, and configured Super Admin values in the app logs.
 
 ### /ready fails
 

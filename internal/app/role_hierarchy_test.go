@@ -206,7 +206,7 @@ func TestFinalLoanApprovalCopiesTheRequestedLoanType(t *testing.T) {
 	}
 }
 
-func TestWithdrawalReservationsReleaseAndFinalApprovalCreatesOneSavingRecord(t *testing.T) {
+func TestWithdrawalReservationsReleaseUntilBendaharaDisbursement(t *testing.T) {
 	fixture := newTestFixture(t)
 	managerToken := fixture.login(t, "admin@coop.test", "password")
 	member := fixture.createMember(t, managerToken, `{"member_no":"HIER-002","full_name":"Reserved Member","join_date":"2026-07-01","status":"active"}`)
@@ -270,13 +270,17 @@ func TestWithdrawalReservationsReleaseAndFinalApprovalCreatesOneSavingRecord(t *
 		if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM saving_records WHERE type='withdrawal' AND member_id=$1`, member.ID).Scan(&count); err != nil {
 			t.Fatalf("count withdrawal records: %v", err)
 		}
-		expected := 0
-		if index == len(stages)-1 {
-			expected = 1
+		if count != 0 {
+			t.Fatalf("stage %d created a withdrawal record before Bendahara disbursement: %d", index, count)
 		}
-		if count != expected {
-			t.Fatalf("stage %d expected %d withdrawal records, got %d", index, expected, count)
-		}
+	}
+	fixture.disburseWithdrawalRequest(t, secondID)
+	var disbursedCount int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM saving_records WHERE type='withdrawal' AND member_id=$1`, member.ID).Scan(&disbursedCount); err != nil {
+		t.Fatalf("count disbursed withdrawal records: %v", err)
+	}
+	if disbursedCount != 1 {
+		t.Fatalf("expected Bendahara disbursement to create one withdrawal record, got %d", disbursedCount)
 	}
 
 	var firstReservation, secondReservation string

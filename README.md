@@ -40,16 +40,13 @@ TRACING_ENABLED=false
 TRACING_EXPORTER=stdout
 TRACING_ENDPOINT=
 TRACING_INSECURE=false
-KETUA_UTAMA_MEMBER_ID=<existing-active-member-id>
-KETUA_UTAMA_EMAIL=ketua-utama@coop.test
-KETUA_UTAMA_PASSWORD=password
 SUPER_ADMIN_EMAIL=super-admin@coop.test
 SUPER_ADMIN_PASSWORD=<temporary-bootstrap-password>
 SUPER_ADMIN_NAME=Platform Super Admin
 LEGACY_OFFICER_MEMBER_MAPPINGS='{"legacy-officer@coop.test":"existing-active-member-id"}'
 ```
 
-`KETUA_UTAMA_MEMBER_ID` must identify an existing active Member. If that Member already has a login, the app keeps the existing credentials and assigns the Ketua Utama appointment. Otherwise, `KETUA_UTAMA_EMAIL` and `KETUA_UTAMA_PASSWORD` create the Member's initial login. Ketua Utama can then assign other Officer appointments to existing Members in the application.
+After logging in as the provisioned Super Admin, create or select a Member login and assign the Ketua Utama appointment in Officer management.
 
 `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD`, and `SUPER_ADMIN_NAME` bootstrap exactly one active, memberless Super Admin. The password is temporary and must be changed at first login. Once an active Super Admin exists, restarts do not overwrite its credentials; keep the bootstrap values available for initial provisioning or reactivating the same inactive identity.
 

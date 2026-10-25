@@ -307,7 +307,7 @@ func hasPendingMemberDeactivation(tx *sql.Tx, memberID string) (bool, error) {
 }
 
 func cancelMemberPendingWithdrawalsTx(tx *sql.Tx, memberID string) error {
-	rows, err := tx.Query(`SELECT id FROM withdrawal_requests WHERE member_id=$1 AND status='pending'`, memberID)
+	rows, err := tx.Query(`SELECT id FROM withdrawal_requests WHERE member_id=$1 AND (status='pending' OR (status='approved' AND disbursement_date=''))`, memberID)
 	if err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func cancelMemberPendingWithdrawalsTx(tx *sql.Tx, memberID string) error {
 		return err
 	}
 	for _, id := range requestIDs {
-		if _, err := tx.Exec(`UPDATE withdrawal_requests SET status='cancelled',current_approval_stage=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND status='pending'`, id); err != nil {
+		if _, err := tx.Exec(`UPDATE withdrawal_requests SET status='cancelled',current_approval_stage=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND (status='pending' OR (status='approved' AND disbursement_date=''))`, id); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`UPDATE withdrawal_reservations SET status='released',updated_at=CURRENT_TIMESTAMP WHERE request_id=$1 AND status='active'`, id); err != nil {

@@ -438,7 +438,6 @@ func (s *Server) rejectLoanRequestBySuperAdmin(requestID string, admin User, req
 }
 
 func (s *Server) approveWithdrawalRequestBySuperAdmin(requestID string, admin User, req approveWithdrawalInput) (WithdrawalRequest, error) {
-	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 	tx, err := s.db.Begin()
@@ -480,28 +479,20 @@ func (s *Server) approveWithdrawalRequestBySuperAdmin(requestID string, admin Us
 	if reservationStatus != "active" || reservationAmount != request.Amount {
 		return WithdrawalRequest{}, errWithdrawalRequestNotPending
 	}
-	recordID := newID()
-	note := strings.TrimSpace(request.Note)
-	if strings.TrimSpace(req.Note) != "" {
-		note = strings.TrimSpace(req.Note)
-	}
-	recordDate := time.Now().In(jakartaLocation).Format("2006-01-02")
-	if _, err := tx.Exec(`INSERT INTO saving_records (id,member_id,type,category,source,coa_code,amount,record_date,reference_no,note,recorded_by) VALUES ($1,$2,'withdrawal','sukarela',$3,$4,$5,$6,'',$7,$8)`, recordID, request.MemberID, source, nullIfEmpty(strings.TrimSpace(req.COACode)), request.Amount, recordDate, note, admin.ID); err != nil {
+	result, err := tx.Exec(`UPDATE withdrawal_requests SET status='approved',current_approval_stage=NULL,reviewed_by=$1,reviewed_at=CURRENT_TIMESTAMP,proposed_cash_coa_code=$2,proposed_savings_coa_code=$3,updated_at=CURRENT_TIMESTAMP WHERE id=$4 AND status='pending'`, admin.ID, strings.TrimSpace(req.CashCOACode), strings.TrimSpace(req.COACode), requestID)
+	if err != nil {
 		return WithdrawalRequest{}, err
 	}
-	if err := s.createFinancialJournalTx(tx, accountingJournalInput{TransactionID: recordID, TransactionType: "withdrawal", TransactionDate: recordDate, Source: source, Amount: request.Amount, Category: "sukarela", Components: []accountingJournalComponent{{Component: "savings_liability", Side: accountingDirectionDebit, Amount: request.Amount}, {Component: "cash_bank", Side: accountingDirectionCredit, Amount: request.Amount}}, COAOverrides: map[string]string{"cash_bank": strings.TrimSpace(req.CashCOACode), "savings_liability": strings.TrimSpace(req.COACode)}, Description: "Penarikan sukarela", RecordedBy: admin.ID}); err != nil {
-		return WithdrawalRequest{}, err
-	}
-	if _, err := tx.Exec(`UPDATE withdrawal_requests SET status='approved',current_approval_stage=NULL,reviewed_by=$1,reviewed_at=CURRENT_TIMESTAMP,saving_record_id=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$3 AND status='pending'`, admin.ID, recordID, requestID); err != nil {
-		return WithdrawalRequest{}, err
-	}
-	if _, err := tx.Exec(`UPDATE withdrawal_reservations SET status='consumed',updated_at=CURRENT_TIMESTAMP WHERE request_id=$1 AND status='active'`, requestID); err != nil {
-		return WithdrawalRequest{}, err
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return WithdrawalRequest{}, errWithdrawalRequestNotPending
 	}
 	if err := resolveRequestNotifications(tx, "withdrawal", requestID); err != nil {
 		return WithdrawalRequest{}, err
 	}
 	if err := createMemberOutcomeNotification(tx, "withdrawal", requestID, request.MemberID, "approved", "/member/withdrawal-requests"); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if err := createWithdrawalDisbursementReadyNotification(tx, requestID); err != nil {
 		return WithdrawalRequest{}, err
 	}
 	if err := tx.Commit(); err != nil {

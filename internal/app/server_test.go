@@ -1873,6 +1873,7 @@ func TestAdminCanRecordWithdrawalAndMemberBalanceCannotGoNegative(t *testing.T) 
 
 	requestID := fixture.createWithdrawalRequest(t, memberToken, 125000, "Cash withdrawal")
 	fixture.approveWithdrawalRequest(t, adminToken, requestID)
+	fixture.disburseWithdrawalRequest(t, requestID)
 	var withdrawalID string
 	if err := fixture.db.QueryRow(`SELECT saving_record_id FROM withdrawal_requests WHERE id=$1`, requestID).Scan(&withdrawalID); err != nil {
 		t.Fatalf("read approved saving record: %v", err)
@@ -2597,6 +2598,7 @@ func TestAdminProfitLossReportMimicsKopkarlytaReport(t *testing.T) {
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 300000, "PL-SUK", "Pendapatan sukarela")
 	withdrawalID := fixture.createWithdrawalRequest(t, memberToken, 75000, "Biaya penarikan")
 	fixture.approveWithdrawalRequest(t, adminToken, withdrawalID)
+	fixture.disburseWithdrawalRequest(t, withdrawalID)
 	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 240000, 6), 240000, 6)
 	fixture.recordRepayment(t, adminToken, loan.ID, 40000)
 
@@ -2703,6 +2705,7 @@ func TestProfitLossPeriodFilterChangesTotalsAndExports(t *testing.T) {
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 250000, "PLF-NEW", "Filtered income")
 	withdrawalID := fixture.createWithdrawalRequest(t, memberToken, 50000, "Filtered cost")
 	fixture.approveWithdrawalRequest(t, adminToken, withdrawalID)
+	fixture.disburseWithdrawalRequest(t, withdrawalID)
 	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 300000, 6), 300000, 6)
 	fixture.recordRepayment(t, adminToken, loan.ID, 75000)
 	if _, err := fixture.db.Exec(`UPDATE saving_records SET record_date = '2026-01-10' WHERE reference_no = 'PLF-OLD'`); err != nil {
@@ -2819,7 +2822,7 @@ func TestMemberCanRequestPenarikanAndAdminApproveCreatesSukarelaWithdrawal(t *te
 	if err := fixture.db.QueryRow(`SELECT id,status,saving_record_id FROM withdrawal_requests WHERE id=$1`, created.ID).Scan(&approved.ID, &approved.Status, &approved.SavingRecordID); err != nil {
 		t.Fatalf("read approved withdrawal request: %v", err)
 	}
-	if approved.ID != created.ID || approved.Status != "approved" || approved.SavingRecordID == "" {
+	if approved.ID != created.ID || approved.Status != "approved" || approved.SavingRecordID != "" {
 		t.Fatalf("unexpected approved withdrawal request: %+v", approved)
 	}
 
@@ -4193,6 +4196,7 @@ func TestAdminTransactionsPageShowsAggregateCashLedgerAndManualEntryForm(t *test
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 750000, "CASH-SAVE", "Cash saving")
 	withdrawalID := fixture.createWithdrawalRequest(t, memberToken, 200000, "Cash withdrawal")
 	fixture.approveWithdrawalRequest(t, adminToken, withdrawalID)
+	fixture.disburseWithdrawalRequest(t, withdrawalID)
 	loan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 500000, 5), 500000, 5)
 	fixture.recordRepayment(t, adminToken, loan.ID, 100000)
 	adminCookie := fixture.browserLogin(t, "admin@coop.test", "password")
@@ -4474,6 +4478,7 @@ func TestAdminDashboardAggregatesOperationalTotals(t *testing.T) {
 	fixture.recordSaving(t, adminToken, active.ID, "deposit", 1000000, "DASH-DEP", "Dashboard deposit")
 	withdrawalID := fixture.createWithdrawalRequest(t, memberToken, 200000, "Dashboard withdrawal")
 	fixture.approveWithdrawalRequest(t, adminToken, withdrawalID)
+	fixture.disburseWithdrawalRequest(t, withdrawalID)
 	activeLoan := fixture.approveLoanRequest(t, adminToken, fixture.createLoanRequest(t, memberToken, 600000, 6), 600000, 6)
 	fixture.recordRepayment(t, adminToken, activeLoan.ID, 150000)
 
@@ -5125,6 +5130,36 @@ func (f testFixture) approveWithdrawalRequest(t *testing.T, managerToken, reques
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected withdrawal approval status 200, got %d: %s", rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func (f testFixture) disburseWithdrawalRequest(t *testing.T, requestID string) {
+	t.Helper()
+	const officerID = "ketua-i-user-id"
+	var originalRole string
+	if err := f.db.QueryRow(`SELECT role FROM officer_appointments WHERE id=$1`, officerID).Scan(&originalRole); err != nil {
+		t.Fatalf("read fixture officer role for Bendahara withdrawal disbursement: %v", err)
+	}
+	if _, err := f.db.Exec(`UPDATE officer_appointments SET role='bendahara' WHERE id=$1`, officerID); err != nil {
+		t.Fatalf("assign fixture officer to Bendahara withdrawal disbursement: %v", err)
+	}
+	defer func() {
+		if _, err := f.db.Exec(`UPDATE officer_appointments SET role=$1 WHERE id=$2`, originalRole, officerID); err != nil {
+			t.Errorf("restore fixture officer role after Bendahara withdrawal disbursement: %v", err)
+		}
+	}()
+	location, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		t.Fatalf("load Jakarta timezone: %v", err)
+	}
+	date := time.Now().In(location).Format("2006-01-02")
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/withdrawal-requests/"+requestID+"/disburse", bytes.NewBufferString(`{"disbursement_date":"`+date+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+f.login(t, "ketua-i@coop.test", "password"))
+	rec := httptest.NewRecorder()
+	f.server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected withdrawal disbursement status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

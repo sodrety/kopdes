@@ -24,19 +24,16 @@ JWT_SECRET=<strong-random-secret>
 COOKIE_SECURE=true
 ```
 
-Optional initial Ketua Utama bootstrap:
+Optional initial Super Admin bootstrap:
 
 ```sh
-KETUA_UTAMA_MEMBER_ID=<existing-active-member-id>
-KETUA_UTAMA_EMAIL=ketua-utama@coop.test
-KETUA_UTAMA_PASSWORD=<temporary-bootstrap-password>
 SUPER_ADMIN_EMAIL=super-admin@coop.test
 SUPER_ADMIN_PASSWORD=<temporary-bootstrap-password>
 SUPER_ADMIN_NAME=Platform Super Admin
 LEGACY_OFFICER_MEMBER_MAPPINGS='{"legacy-officer@coop.test":"existing-active-member-id"}'
 ```
 
-`KETUA_UTAMA_MEMBER_ID` must identify an existing active Member. Existing Member credentials are retained; the email and temporary password are used only when that Member has no login. After the first successful staging login, remove or rotate `KETUA_UTAMA_PASSWORD` in the hosting platform.
+The Super Admin values create one active, memberless Super Admin when none exists. Change the temporary password after the first login. Assign the Ketua Utama appointment to an existing Member from Officer management.
 
 If the database already contains standalone Officer users, prepare `LEGACY_OFFICER_MEMBER_MAPPINGS` before deployment. Every legacy Officer must map explicitly to a different existing active Member. Startup stops without applying migration 13 when a mapping is missing or invalid.
 
@@ -54,9 +51,9 @@ openssl rand -base64 32
 4. Select the `render.yaml` file from the repository root.
 5. Enter the prompted secret values:
    - `DATABASE_URL` (the Supabase PostgreSQL connection string)
-   - `KETUA_UTAMA_MEMBER_ID`
-   - `KETUA_UTAMA_EMAIL`
-   - `KETUA_UTAMA_PASSWORD`
+   - `SUPER_ADMIN_EMAIL`
+   - `SUPER_ADMIN_PASSWORD`
+   - `SUPER_ADMIN_NAME`
    - `LEGACY_OFFICER_MEMBER_MAPPINGS` when legacy Officer users exist
 6. Apply the Blueprint.
 
@@ -74,7 +71,7 @@ After each staging deploy:
 
 1. Open `/health` and confirm HTTP 200.
 2. Open `/login`.
-3. Login as the seeded admin.
+3. Login as the provisioned Super Admin.
 4. Create a member with login credentials.
 5. Login as that member.
 6. Submit a loan request.

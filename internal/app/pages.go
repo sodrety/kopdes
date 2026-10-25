@@ -432,6 +432,27 @@ func (s *Server) adminLoanDisbursementsPage(c *gin.Context) {
 	}))
 }
 
+func (s *Server) adminWithdrawalDisbursementsPage(c *gin.Context) {
+	requests, err := s.withdrawalRequestsForAdmin("approved")
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	waiting := make([]AdminWithdrawalRequest, 0, len(requests))
+	for _, request := range requests {
+		if request.DisbursementDate == "" && request.SavingRecordID == "" {
+			waiting = append(waiting, request)
+		}
+	}
+	current, _ := currentUser(c)
+	lang := languageFromRequest(c)
+	renderPage(c, "admin-withdrawal-disbursements", pageData(c, translate(lang, "withdrawal_disbursements"), "withdrawal-disbursements", "withdrawal_disbursements", "withdrawal_disbursements_description", gin.H{
+		"WithdrawalRequests": waiting,
+		"CurrentDate":        time.Now().In(jakartaLocation).Format("2006-01-02"),
+		"CanDisburse":        current.Role == "bendahara",
+	}))
+}
+
 func (s *Server) adminLoansPage(c *gin.Context) {
 	loans, err := s.loansForAdmin("")
 	if err != nil {

@@ -16,9 +16,6 @@ type Config struct {
 	SuperAdminEmail             string
 	SuperAdminPassword          string
 	SuperAdminName              string
-	KetuaUtamaMemberID          string
-	KetuaUtamaEmail             string
-	KetuaUtamaPassword          string
 	LegacyOfficerMemberMappings map[string]string
 	AppEnv                      string
 	ServiceName                 string
@@ -44,9 +41,6 @@ func ConfigFromEnv() (Config, error) {
 		SuperAdminEmail:    os.Getenv("SUPER_ADMIN_EMAIL"),
 		SuperAdminPassword: os.Getenv("SUPER_ADMIN_PASSWORD"),
 		SuperAdminName:     os.Getenv("SUPER_ADMIN_NAME"),
-		KetuaUtamaMemberID: os.Getenv("KETUA_UTAMA_MEMBER_ID"),
-		KetuaUtamaEmail:    os.Getenv("KETUA_UTAMA_EMAIL"),
-		KetuaUtamaPassword: os.Getenv("KETUA_UTAMA_PASSWORD"),
 		AppEnv:             appEnv,
 		ServiceName:        envOrDefault("SERVICE_NAME", "kopdes"),
 		ServiceVersion:     envOrDefault("SERVICE_VERSION", "development"),

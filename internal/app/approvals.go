@@ -332,6 +332,39 @@ func createLoanDisbursementReadyNotification(tx *sql.Tx, requestID string) error
 	return nil
 }
 
+func createWithdrawalDisbursementReadyNotification(tx *sql.Tx, requestID string) error {
+	eventID := newID()
+	if _, err := tx.Exec(`INSERT INTO notification_events (id,event_type,request_type,request_id,payload) VALUES ($1,'withdrawal_disbursement_ready','withdrawal',$2,'{}')`, eventID, requestID); err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT u.id FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE WHERE oa.role='bendahara' AND oa.active=TRUE AND m.status='active' AND u.active=TRUE`)
+	if err != nil {
+		return err
+	}
+	var userIDs []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, userID := range userIDs {
+		if _, err := tx.Exec(`INSERT INTO notifications (id,event_id,user_id,title_key,body_key,link,audience) VALUES ($1,$2,$3,'notification_withdrawal_disbursement_ready_title','notification_withdrawal_disbursement_ready_body','/admin/withdrawal-disbursements','officer')`, newID(), eventID, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func createMemberLoanTermsChangedNotification(tx *sql.Tx, requestID, memberID string) error {
 	payload, _ := json.Marshal(map[string]string{"change": "manager_terms"})
 	eventID := newID()

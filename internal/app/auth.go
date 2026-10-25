@@ -119,60 +119,6 @@ func EnsureSuperAdminUser(db *sql.DB, email, password, fullName string) error {
 	return err
 }
 
-func EnsureKetuaUtamaUser(db *sql.DB, memberID, email, password string) error {
-	memberID = strings.TrimSpace(memberID)
-	email = strings.ToLower(strings.TrimSpace(email))
-	if memberID == "" && email == "" && password == "" {
-		return nil
-	}
-	if memberID == "" {
-		return errors.New("KETUA_UTAMA_MEMBER_ID is required for Ketua Utama bootstrap")
-	}
-	var fullName, status string
-	if err := db.QueryRow(`SELECT full_name,status FROM members WHERE id=$1`, memberID).Scan(&fullName, &status); err != nil {
-		return fmt.Errorf("load Ketua Utama Member: %w", err)
-	}
-	if status != "active" {
-		return errors.New("KETUA_UTAMA_MEMBER_ID must identify an active Member")
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var userID string
-	err = tx.QueryRow(`SELECT id FROM users WHERE member_id=$1 AND historical_identity=FALSE`, memberID).Scan(&userID)
-	if errors.Is(err, sql.ErrNoRows) {
-		if email == "" || len(password) < 8 {
-			return errors.New("KETUA_UTAMA_EMAIL and KETUA_UTAMA_PASSWORD are required when the Member has no User")
-		}
-		hash, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if hashErr != nil {
-			return hashErr
-		}
-		userID = newID()
-		if _, err := tx.Exec(`INSERT INTO users (id,email,password_hash,role,member_id,full_name,active,must_change_password,historical_identity) VALUES ($1,$2,$3,'member',$4,$5,TRUE,TRUE,FALSE)`, userID, email, string(hash), memberID, fullName); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	}
-	var appointmentID string
-	err = tx.QueryRow(`SELECT id FROM officer_appointments WHERE member_id=$1`, memberID).Scan(&appointmentID)
-	if errors.Is(err, sql.ErrNoRows) {
-		_, err = tx.Exec(`INSERT INTO officer_appointments (id,member_id,role,active) VALUES ($1,$2,'ketua_utama',TRUE)`, newID(), memberID)
-	} else if err == nil {
-		_, err = tx.Exec(`UPDATE officer_appointments SET role='ketua_utama',active=TRUE,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, appointmentID)
-	}
-	if err != nil {
-		return err
-	}
-	if err := syncOfficerNotifications(tx, userID, "ketua_utama", true); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func CreateMemberUser(db *sql.DB, email, password, memberID string) (User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {

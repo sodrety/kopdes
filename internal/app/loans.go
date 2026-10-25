@@ -389,11 +389,12 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		ProposedCashCOACode     string
 		ProposedLoanCOACode     string
 		ProposedAdminFeeCOACode string
+		CreationSource          string
 	}
 	err = tx.QueryRow(
-		`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),requested_admin_fee FROM loan_requests WHERE id = $1`+rowLockClause(s.db),
+		`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),requested_admin_fee,COALESCE(creation_source,'member') FROM loan_requests WHERE id = $1`+rowLockClause(s.db),
 		requestID,
-	).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.RequestedAdminFee)
+	).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.RequestedAdminFee, &request.CreationSource)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
@@ -419,12 +420,14 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		if err := tx.QueryRow(`SELECT id,member_type FROM members WHERE id = $1`+rowLockClause(s.db), request.MemberID).Scan(&lockedMemberID, &memberType); err != nil {
 			return LoanApprovalResult{}, err
 		}
-		summary, err := savingSummary(tx, request.MemberID)
-		if err != nil {
-			return LoanApprovalResult{}, err
-		}
-		if req.ApprovedAmount > maxLoanAmountForMemberSavings(memberType, summary.WajibBalance, summary.SukarelaBalance) {
-			return LoanApprovalResult{}, errLoanAmountLimitExceeded
+		if request.CreationSource != "admin" {
+			summary, err := savingSummary(tx, request.MemberID)
+			if err != nil {
+				return LoanApprovalResult{}, err
+			}
+			if req.ApprovedAmount > maxLoanAmountForMemberSavings(memberType, summary.WajibBalance, summary.SukarelaBalance) {
+				return LoanApprovalResult{}, errLoanAmountLimitExceeded
+			}
 		}
 		var calc LoanScheduleCalculation
 		var adminFeePolicy string
@@ -508,12 +511,14 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 	if memberStatus != "active" {
 		return LoanApprovalResult{}, errInactiveLoanMember
 	}
-	summary, err := savingSummary(tx, request.MemberID)
-	if err != nil {
-		return LoanApprovalResult{}, err
-	}
-	if request.ProposedApprovedAmount > maxLoanAmountForMemberSavings(memberType, summary.WajibBalance, summary.SukarelaBalance) {
-		return LoanApprovalResult{}, errLoanAmountLimitExceeded
+	if request.CreationSource != "admin" {
+		summary, err := savingSummary(tx, request.MemberID)
+		if err != nil {
+			return LoanApprovalResult{}, err
+		}
+		if request.ProposedApprovedAmount > maxLoanAmountForMemberSavings(memberType, summary.WajibBalance, summary.SukarelaBalance) {
+			return LoanApprovalResult{}, errLoanAmountLimitExceeded
+		}
 	}
 
 	if err := validateLoanFeeSnapshot(request.ProposedAdminFeePolicy, request.ProposedApprovedAmount, request.ProposedDurationMonths, request.ProposedMonthlyAdminFee, request.ProposedTotalAdminFee, request.ProposedTotalObligation); err != nil {
@@ -608,8 +613,9 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 		ProposedCashCOACode     string
 		ProposedLoanCOACode     string
 		ProposedAdminFeeCOACode string
+		CreationSource          string
 	}
-	err = tx.QueryRow(`SELECT member_id,loan_type,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(CAST(reviewed_at AS TEXT),''),COALESCE(disbursement_date,''),COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,'') FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.Status, &request.Stage, &request.ReviewedBy, &request.ReviewedAt, &request.DisbursementDate, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode)
+	err = tx.QueryRow(`SELECT member_id,loan_type,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(CAST(reviewed_at AS TEXT),''),COALESCE(disbursement_date,''),COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),COALESCE(creation_source,'member') FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.Status, &request.Stage, &request.ReviewedBy, &request.ReviewedAt, &request.DisbursementDate, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.CreationSource)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
@@ -634,12 +640,17 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 	if memberStatus != "active" {
 		return LoanApprovalResult{}, errInactiveLoanMember
 	}
-	summary, err := savingSummary(tx, request.MemberID)
-	if err != nil {
-		return LoanApprovalResult{}, err
-	}
-	if request.ProposedApprovedAmount <= 0 || request.ProposedApprovedAmount > maxLoanAmountForMemberSavings(memberType, summary.WajibBalance, summary.SukarelaBalance) {
+	if request.ProposedApprovedAmount <= 0 {
 		return LoanApprovalResult{}, errLoanAmountLimitExceeded
+	}
+	if request.CreationSource != "admin" {
+		summary, err := savingSummary(tx, request.MemberID)
+		if err != nil {
+			return LoanApprovalResult{}, err
+		}
+		if request.ProposedApprovedAmount > maxLoanAmountForMemberSavings(memberType, summary.WajibBalance, summary.SukarelaBalance) {
+			return LoanApprovalResult{}, errLoanAmountLimitExceeded
+		}
 	}
 	if request.ProposedDurationMonths <= 0 || request.ProposedAdminFeePolicy == "" || request.ProposedTotalObligation <= 0 {
 		return LoanApprovalResult{}, errLoanRequestNotReadyForDisbursement

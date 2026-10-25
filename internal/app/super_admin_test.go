@@ -143,8 +143,15 @@ func TestSuperAdminCanOverrideWithdrawalAndCannotUseMemberArea(t *testing.T) {
 	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM super_admin_overrides WHERE request_type='withdrawal' AND request_id=$1`, requestID).Scan(&overrides); err != nil {
 		t.Fatalf("count withdrawal override: %v", err)
 	}
-	if savingCount != 1 || overrides != 1 {
+	if savingCount != 0 || overrides != 1 {
 		t.Fatalf("unexpected withdrawal override state: saving=%d overrides=%d", savingCount, overrides)
+	}
+	fixture.disburseWithdrawalRequest(t, requestID)
+	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM saving_records WHERE member_id=$1 AND type='withdrawal' AND amount=$2`, member.ID, 25000).Scan(&savingCount); err != nil {
+		t.Fatalf("count disbursed withdrawal saving record: %v", err)
+	}
+	if savingCount != 1 {
+		t.Fatalf("expected one withdrawal saving record after Bendahara disbursement, got %d", savingCount)
 	}
 	memberReq := httptest.NewRequest(http.MethodGet, "/api/member/profile", nil)
 	memberReq.Header.Set("Authorization", "Bearer "+superToken)

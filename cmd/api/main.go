@@ -48,10 +48,6 @@ func main() {
 	if err := app.EnsureSuperAdminUser(db, cfg.SuperAdminEmail, cfg.SuperAdminPassword, cfg.SuperAdminName); err != nil {
 		log.Fatal(err)
 	}
-	if err := app.EnsureKetuaUtamaUser(db, cfg.KetuaUtamaMemberID, cfg.KetuaUtamaEmail, cfg.KetuaUtamaPassword); err != nil {
-		log.Fatal(err)
-	}
-
 	slog.Info("server_starting", "address", cfg.Address, "service", cfg.ServiceName, "version", cfg.ServiceVersion)
 	server := &http.Server{
 		Addr:         cfg.Address,

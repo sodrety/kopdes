@@ -18,7 +18,11 @@ type WithdrawalRequest struct {
 	Note                   string            `json:"note"`
 	Status                 string            `json:"status"`
 	CurrentApprovalStage   string            `json:"current_approval_stage,omitempty"`
+	ReviewedBy             string            `json:"reviewed_by,omitempty"`
 	ReviewedAt             string            `json:"reviewed_at,omitempty"`
+	DisbursementDate       string            `json:"disbursement_date,omitempty"`
+	DisbursedBy            string            `json:"disbursed_by,omitempty"`
+	DisbursedAt            string            `json:"disbursed_at,omitempty"`
 	RejectionReason        string            `json:"rejection_reason,omitempty"`
 	SavingRecordID         string            `json:"saving_record_id,omitempty"`
 	LatestDecision         *ApprovalDecision `json:"latest_decision,omitempty"`
@@ -60,15 +64,23 @@ type approveWithdrawalInput struct {
 	Note        string `json:"note" form:"note"`
 }
 
+type disburseWithdrawalRequestInput struct {
+	DisbursementDate string `json:"disbursement_date" form:"disbursement_date"`
+}
+
 var (
-	errInvalidWithdrawalRequest        = errors.New("invalid withdrawal request")
-	errInactiveWithdrawalMember        = errors.New("inactive withdrawal member")
-	errInsufficientSukarelaBalance     = errors.New("insufficient sukarela balance")
-	errWithdrawalRequestNotFound       = errors.New("withdrawal request not found")
-	errWithdrawalRequestNotPending     = errors.New("withdrawal request not pending")
-	errInvalidWithdrawalRejection      = errors.New("invalid withdrawal rejection")
-	errInvalidSavingWithdrawalCategory = errors.New("invalid saving withdrawal category")
-	errWithdrawalMemberNotFound        = errors.New("withdrawal member not found")
+	errInvalidWithdrawalRequest                 = errors.New("invalid withdrawal request")
+	errInactiveWithdrawalMember                 = errors.New("inactive withdrawal member")
+	errInsufficientSukarelaBalance              = errors.New("insufficient sukarela balance")
+	errWithdrawalRequestNotFound                = errors.New("withdrawal request not found")
+	errWithdrawalRequestNotPending              = errors.New("withdrawal request not pending")
+	errInvalidWithdrawalRejection               = errors.New("invalid withdrawal rejection")
+	errInvalidSavingWithdrawalCategory          = errors.New("invalid saving withdrawal category")
+	errWithdrawalMemberNotFound                 = errors.New("withdrawal member not found")
+	errWithdrawalRequestNotReadyForDisbursement = errors.New("withdrawal request is not ready for disbursement")
+	errInvalidWithdrawalDisbursementDate        = errors.New("invalid withdrawal disbursement date")
+	errWithdrawalDisbursementDateRange          = errors.New("withdrawal disbursement date is outside the allowed range")
+	errWithdrawalDisburserRole                  = errors.New("only bendahara can disburse withdrawals")
 )
 
 func (s *Server) submitWithdrawalRequest(c *gin.Context) {
@@ -208,6 +220,41 @@ func (s *Server) adminWithdrawalRequests(c *gin.Context) {
 		requests[index].CanDecide = requests[index].Status == "pending" && (requests[index].CurrentApprovalStage == approvalStageForOfficer(user.Role) || isSuperAdmin(user))
 	}
 	c.JSON(http.StatusOK, gin.H{"withdrawal_requests": requests})
+}
+
+func (s *Server) disburseWithdrawalRequest(c *gin.Context) {
+	lang := languageFromRequest(c)
+	user, ok := currentUser(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", translate(lang, "error_authentication_required"))
+		return
+	}
+	var req disburseWithdrawalRequestInput
+	if err := c.ShouldBind(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_withdrawal_disbursement_date"))
+		return
+	}
+	request, err := s.disburseWithdrawalRequestByID(c.Param("id"), user, req.DisbursementDate, translate(lang, "journal_withdrawal_disbursement_description"))
+	switch {
+	case errors.Is(err, errWithdrawalRequestNotFound):
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error_withdrawal_request_not_found"))
+	case errors.Is(err, errInvalidWithdrawalDisbursementDate):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_withdrawal_disbursement_date"))
+	case errors.Is(err, errWithdrawalDisbursementDateRange):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_withdrawal_disbursement_date_range"))
+	case errors.Is(err, errWithdrawalRequestNotReadyForDisbursement):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_withdrawal_request_not_ready_for_disbursement"))
+	case errors.Is(err, errWithdrawalDisburserRole):
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(lang, "error_withdrawal_disbursement_bendahara_only"))
+	case errors.Is(err, errInactiveWithdrawalMember):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_inactive_withdrawal_member"))
+	case errors.Is(err, errInsufficientSukarelaBalance):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_withdrawal_amount_over_available"))
+	case err != nil:
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
+	default:
+		respondOKOrHXRedirect(c, "/admin/withdrawal-disbursements", request)
+	}
 }
 
 func (s *Server) approveWithdrawalRequest(c *gin.Context) {
@@ -443,7 +490,7 @@ func (s *Server) updateOfficerWithdrawalRequest(requestID string, req withdrawal
 
 func (s *Server) withdrawalRequestsByMember(memberID string) ([]WithdrawalRequest, error) {
 	rows, err := s.db.Query(
-		`SELECT id, member_id, amount, note, status, COALESCE(current_approval_stage,''), COALESCE(CAST(reviewed_at AS TEXT), ''), rejection_reason, COALESCE(saving_record_id, ''), created_at, updated_at
+		`SELECT id, member_id, amount, note, status, COALESCE(current_approval_stage,''), COALESCE(reviewed_by,''), COALESCE(CAST(reviewed_at AS TEXT), ''), COALESCE(disbursement_date,''), COALESCE(disbursed_by,''), COALESCE(CAST(disbursed_at AS TEXT),''), rejection_reason, COALESCE(saving_record_id, ''), created_at, updated_at
 		FROM withdrawal_requests
 		WHERE member_id = $1
 		ORDER BY created_at DESC`,
@@ -455,7 +502,7 @@ func (s *Server) withdrawalRequestsByMember(memberID string) ([]WithdrawalReques
 	var requests []WithdrawalRequest
 	for rows.Next() {
 		var request WithdrawalRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedBy, &request.ReviewedAt, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt); err != nil {
 			return nil, err
 		}
 		requests = append(requests, request)
@@ -478,7 +525,7 @@ func (s *Server) withdrawalRequestsByMember(memberID string) ([]WithdrawalReques
 
 func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalRequest, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT wr.id, wr.member_id, m.member_no, m.full_name, m.member_type, wr.amount, wr.note, wr.status, COALESCE(wr.current_approval_stage,''), COALESCE(CAST(wr.reviewed_at AS TEXT), ''), wr.rejection_reason, COALESCE(wr.saving_record_id, ''), wr.created_at, wr.updated_at,wr.creation_source
+	query := `SELECT wr.id, wr.member_id, m.member_no, m.full_name, m.member_type, wr.amount, wr.note, wr.status, COALESCE(wr.current_approval_stage,''), COALESCE(wr.reviewed_by,''), COALESCE(CAST(wr.reviewed_at AS TEXT), ''), COALESCE(wr.disbursement_date,''), COALESCE(wr.disbursed_by,''), COALESCE(CAST(wr.disbursed_at AS TEXT),''), wr.rejection_reason, COALESCE(wr.saving_record_id, ''), wr.created_at, wr.updated_at,wr.creation_source
 		FROM withdrawal_requests wr
 		INNER JOIN members m ON m.id = wr.member_id`
 	args := []any{}
@@ -495,7 +542,7 @@ func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalReq
 	var requests []AdminWithdrawalRequest
 	for rows.Next() {
 		var request AdminWithdrawalRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.MemberType, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt, &request.CreationSource); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.MemberType, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedBy, &request.ReviewedAt, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt, &request.CreationSource); err != nil {
 			return nil, err
 		}
 		request.MemberTypeLabel = memberTypeLabel(request.MemberType)
@@ -521,7 +568,6 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	if (strings.TrimSpace(req.COACode) != "" || strings.TrimSpace(req.CashCOACode) != "") && !hasPermission(officer.Role, PermissionAccountingCOAOverride) {
 		return WithdrawalRequest{}, errAccountingCOAOverrideForbidden
 	}
-	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
 
@@ -611,40 +657,11 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 		return WithdrawalRequest{}, errWithdrawalRequestNotPending
 	}
 
-	recordID := newID()
-	if _, err := tx.Exec(
-		`INSERT INTO saving_records (id, member_id, type, category, source, coa_code, amount, record_date, reference_no, note, recorded_by)
-		VALUES ($1, $2, 'withdrawal', 'sukarela', $3, $4, $5, $6, '', $7, $8)`,
-		recordID,
-		request.MemberID,
-		source,
-		nullIfEmpty(request.ProposedSavingsCOACode),
-		request.Amount,
-		time.Now().In(jakartaLocation).Format("2006-01-02"),
-		request.Note,
-		officer.ID,
-	); err != nil {
-		return WithdrawalRequest{}, err
-	}
-	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
-		ReferenceNo: "", TransactionID: recordID, TransactionType: "withdrawal", TransactionDate: time.Now().In(jakartaLocation).Format("2006-01-02"),
-		Source: source, Amount: request.Amount, Category: "sukarela",
-		Components: []accountingJournalComponent{
-			{Component: "savings_liability", Side: accountingDirectionDebit, Amount: request.Amount},
-			{Component: "cash_bank", Side: accountingDirectionCredit, Amount: request.Amount},
-		},
-		COAOverrides: map[string]string{"cash_bank": request.ProposedCashCOACode, "savings_liability": request.ProposedSavingsCOACode},
-		Description:  "Penarikan sukarela", RecordedBy: officer.ID,
-	}); err != nil {
-		return WithdrawalRequest{}, err
-	}
-
 	result, err := tx.Exec(
 		`UPDATE withdrawal_requests
-		SET status = 'approved', current_approval_stage=NULL, reviewed_by = $1, reviewed_at = CURRENT_TIMESTAMP, saving_record_id = $2, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $3 AND status = 'pending' AND current_approval_stage='ketua_utama'`,
+		SET status = 'approved', current_approval_stage=NULL, reviewed_by = $1, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2 AND status = 'pending' AND current_approval_stage='ketua_utama'`,
 		officer.ID,
-		recordID,
 		request.ID,
 	)
 	if err != nil {
@@ -653,16 +670,124 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	if affected, _ := result.RowsAffected(); affected != 1 {
 		return WithdrawalRequest{}, errWithdrawalRequestNotPending
 	}
-	if _, err := tx.Exec(`UPDATE withdrawal_reservations SET status='consumed',updated_at=CURRENT_TIMESTAMP WHERE request_id=$1 AND status='active'`, requestID); err != nil {
+	if err := createMemberOutcomeNotification(tx, "withdrawal", requestID, request.MemberID, "approved", "/member/withdrawal-requests"); err != nil {
 		return WithdrawalRequest{}, err
 	}
-	if err := createMemberOutcomeNotification(tx, "withdrawal", requestID, request.MemberID, "approved", "/member/withdrawal-requests"); err != nil {
+	if err := createWithdrawalDisbursementReadyNotification(tx, requestID); err != nil {
 		return WithdrawalRequest{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return WithdrawalRequest{}, err
 	}
 	return s.withdrawalRequestByID(request.ID)
+}
+
+func (s *Server) disburseWithdrawalRequestByID(requestID string, officer User, disbursementDate, description string) (WithdrawalRequest, error) {
+	if officer.Role != "bendahara" || !hasPermission(officer.Role, PermissionLoansManage) {
+		return WithdrawalRequest{}, errWithdrawalDisburserRole
+	}
+	dateText := strings.TrimSpace(disbursementDate)
+	disbursementDay, parseErr := parseLoanDate(dateText)
+	if parseErr != nil {
+		return WithdrawalRequest{}, errInvalidWithdrawalDisbursementDate
+	}
+	today := time.Now().In(jakartaLocation)
+	today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, jakartaLocation)
+	if disbursementDay.After(today) {
+		return WithdrawalRequest{}, errWithdrawalDisbursementDateRange
+	}
+	s.financialMu.Lock()
+	defer s.financialMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var memberForLock string
+	if err := tx.QueryRow(`SELECT member_id FROM withdrawal_requests WHERE id=$1`, requestID).Scan(&memberForLock); errors.Is(err, sql.ErrNoRows) {
+		return WithdrawalRequest{}, errWithdrawalRequestNotFound
+	} else if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if _, err := tx.Exec(`UPDATE members SET updated_at=updated_at WHERE id=$1`, memberForLock); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	var request WithdrawalRequest
+	err = tx.QueryRow(`SELECT id,member_id,amount,note,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(CAST(reviewed_at AS TEXT),''),COALESCE(disbursement_date,''),COALESCE(disbursed_by,''),COALESCE(CAST(disbursed_at AS TEXT),''),COALESCE(saving_record_id,''),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_savings_coa_code,'') FROM withdrawal_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.ID, &request.MemberID, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedBy, &request.ReviewedAt, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.SavingRecordID, &request.ProposedCashCOACode, &request.ProposedSavingsCOACode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WithdrawalRequest{}, errWithdrawalRequestNotFound
+	}
+	if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if request.Status != "approved" || request.CurrentApprovalStage != "" || request.ReviewedBy == "" || request.DisbursementDate != "" || request.DisbursedBy != "" || request.DisbursedAt != "" || request.SavingRecordID != "" {
+		return WithdrawalRequest{}, errWithdrawalRequestNotReadyForDisbursement
+	}
+	approvedAt, parseErr := parseDatabaseTime(request.ReviewedAt)
+	if parseErr != nil {
+		return WithdrawalRequest{}, errWithdrawalRequestNotReadyForDisbursement
+	}
+	approvedDay := approvedAt.In(jakartaLocation)
+	approvedDay = time.Date(approvedDay.Year(), approvedDay.Month(), approvedDay.Day(), 0, 0, 0, 0, jakartaLocation)
+	if disbursementDay.Before(approvedDay) {
+		return WithdrawalRequest{}, errWithdrawalDisbursementDateRange
+	}
+	var memberStatus string
+	if err := tx.QueryRow(`SELECT status FROM members WHERE id=$1`+rowLockClause(s.db), request.MemberID).Scan(&memberStatus); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if memberStatus != "active" {
+		return WithdrawalRequest{}, errInactiveWithdrawalMember
+	}
+	summary, err := savingSummary(tx, request.MemberID)
+	if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if request.Amount > maxWithdrawalAmountForSukarelaBalance(summary.SukarelaBalance) {
+		return WithdrawalRequest{}, errInsufficientSukarelaBalance
+	}
+	var reservationAmount int64
+	var reservationStatus string
+	if err := tx.QueryRow(`SELECT amount,status FROM withdrawal_reservations WHERE request_id=$1`+rowLockClause(s.db), requestID).Scan(&reservationAmount, &reservationStatus); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if reservationStatus != "active" || reservationAmount != request.Amount {
+		return WithdrawalRequest{}, errWithdrawalRequestNotReadyForDisbursement
+	}
+	source := transactionSourceBank
+	recordID := newID()
+	if _, err := tx.Exec(`INSERT INTO saving_records (id,member_id,type,category,source,coa_code,amount,record_date,reference_no,note,recorded_by) VALUES ($1,$2,'withdrawal','sukarela',$3,$4,$5,$6,'',$7,$8)`, recordID, request.MemberID, source, nullIfEmpty(request.ProposedSavingsCOACode), request.Amount, dateText, request.Note, officer.ID); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if err := s.createFinancialJournalTx(tx, accountingJournalInput{
+		TransactionID: recordID, TransactionType: "withdrawal", TransactionDate: dateText, Source: source, Amount: request.Amount, Category: "sukarela",
+		Components: []accountingJournalComponent{
+			{Component: "savings_liability", Side: accountingDirectionDebit, Amount: request.Amount},
+			{Component: "cash_bank", Side: accountingDirectionCredit, Amount: request.Amount},
+		},
+		COAOverrides: map[string]string{"cash_bank": request.ProposedCashCOACode, "savings_liability": request.ProposedSavingsCOACode},
+		Description:  description, RecordedBy: officer.ID,
+	}); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	result, err := tx.Exec(`UPDATE withdrawal_requests SET disbursement_date=$1,disbursed_by=$2,disbursed_at=CURRENT_TIMESTAMP,saving_record_id=$3,updated_at=CURRENT_TIMESTAMP WHERE id=$4 AND status='approved' AND current_approval_stage IS NULL AND disbursement_date='' AND disbursed_by IS NULL AND disbursed_at IS NULL AND saving_record_id IS NULL`, dateText, officer.ID, recordID, requestID)
+	if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return WithdrawalRequest{}, errWithdrawalRequestNotReadyForDisbursement
+	}
+	result, err = tx.Exec(`UPDATE withdrawal_reservations SET status='consumed',updated_at=CURRENT_TIMESTAMP WHERE request_id=$1 AND status='active' AND amount=$2`, requestID, request.Amount)
+	if err != nil {
+		return WithdrawalRequest{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return WithdrawalRequest{}, errWithdrawalRequestNotReadyForDisbursement
+	}
+	if err := tx.Commit(); err != nil {
+		return WithdrawalRequest{}, err
+	}
+	return s.withdrawalRequestByID(requestID)
 }
 
 func (s *Server) rejectWithdrawalRequestByID(requestID string, officer User, req rejectWithdrawalInput) (WithdrawalRequest, error) {
@@ -786,11 +911,11 @@ func (s *Server) cancelWithdrawalRequestByID(requestID, memberID string) (Withdr
 func (s *Server) withdrawalRequestByID(id string) (WithdrawalRequest, error) {
 	var request WithdrawalRequest
 	err := s.db.QueryRow(
-		`SELECT id, member_id, amount, note, status, COALESCE(current_approval_stage,''), COALESCE(CAST(reviewed_at AS TEXT), ''), rejection_reason, COALESCE(saving_record_id, ''), created_at, updated_at
+		`SELECT id, member_id, amount, note, status, COALESCE(current_approval_stage,''), COALESCE(reviewed_by,''), COALESCE(CAST(reviewed_at AS TEXT), ''), COALESCE(disbursement_date,''), COALESCE(disbursed_by,''), COALESCE(CAST(disbursed_at AS TEXT),''), rejection_reason, COALESCE(saving_record_id, ''), created_at, updated_at
 		FROM withdrawal_requests
 		WHERE id = $1`,
 		id,
-	).Scan(&request.ID, &request.MemberID, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt)
+	).Scan(&request.ID, &request.MemberID, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedBy, &request.ReviewedAt, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt)
 	if err == nil {
 		request.LatestDecision, err = latestDecisionWithOverrides(s.db, "withdrawal_request_approvals", "withdrawal", request.ID)
 	}

@@ -21,6 +21,12 @@ services:
         generateValue: true
       - key: COOKIE_SECURE
         value: "true"
+      - key: SUPER_ADMIN_EMAIL
+        sync: false
+      - key: SUPER_ADMIN_PASSWORD
+        sync: false
+      - key: SUPER_ADMIN_NAME
+        sync: false
       - key: SERVICE_NAME
         value: kopdes-staging
       - key: SERVICE_VERSION
@@ -34,12 +40,6 @@ services:
       - key: TRACING_ENDPOINT
         sync: false
       - key: TRACING_INSECURE
-        sync: false
-      - key: KETUA_UTAMA_MEMBER_ID
-        sync: false
-      - key: KETUA_UTAMA_EMAIL
-        sync: false
-      - key: KETUA_UTAMA_PASSWORD
         sync: false
       - key: LEGACY_OFFICER_MEMBER_MAPPINGS
         sync: false
