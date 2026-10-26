@@ -163,8 +163,6 @@
             <th>{{t $.Lang "date"}}</th>
             <th>{{t $.Lang "repayment_type"}}</th>
             <th>{{t $.Lang "amount"}}</th>
-            <th>{{t $.Lang "reference"}}</th>
-            <th>{{t $.Lang "note"}}</th>
           </tr>
         </thead>
         <tbody>
@@ -173,8 +171,6 @@
             <td>{{.RecordDate}}</td>
             <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
             <td>{{nominal .Amount}}</td>
-            <td>{{.ReferenceNo}}</td>
-            <td>{{.Note}}</td>
           </tr>
           {{end}}
         </tbody>
@@ -268,8 +264,6 @@
             <th>{{t $.Lang "saving_category"}}</th>
             <th>{{t $.Lang "type"}}</th>
             <th>{{t $.Lang "amount"}}</th>
-            <th>{{t $.Lang "reference"}}</th>
-            <th>{{t $.Lang "note"}}</th>
           </tr>
         </thead>
         <tbody>
@@ -279,8 +273,6 @@
             <td>{{t $.Lang (printf "simpanan_%s" .Category)}}</td>
             <td>{{t $.Lang .Type}}</td>
             <td>{{nominal .Amount}}</td>
-            <td>{{.ReferenceNo}}</td>
-            <td>{{.Note}}</td>
           </tr>
           {{end}}
         </tbody>
@@ -298,8 +290,6 @@
             <th>{{t $.Lang "date"}}</th>
             <th>{{t $.Lang "repayment_type"}}</th>
             <th>{{t $.Lang "amount"}}</th>
-            <th>{{t $.Lang "reference"}}</th>
-            <th>{{t $.Lang "note"}}</th>
           </tr>
         </thead>
         <tbody>
@@ -308,8 +298,6 @@
             <td>{{.RecordDate}}</td>
             <td>{{t $.Lang (printf "repayment_type_%s" .Type)}}</td>
             <td>{{nominal .Amount}}</td>
-            <td>{{.ReferenceNo}}</td>
-            <td>{{.Note}}</td>
           </tr>
           {{end}}
         </tbody>
