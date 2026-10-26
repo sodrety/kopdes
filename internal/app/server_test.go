@@ -2049,9 +2049,14 @@ func TestSavingPagesRenderDepositFormAndMemberBalance(t *testing.T) {
 		t.Fatalf("expected member profile page status 200, got %d: %s", profileRec.Code, profileRec.Body.String())
 	}
 	profileBody := profileRec.Body.String()
-	for _, text := range []string{"Saving balance", "750.000", "Simpanan Sukarela", "Saving history", "table-scroll", "TRF-PAGE", "Page deposit"} {
+	for _, text := range []string{"Saving balance", "750.000", "Simpanan Sukarela", "Saving history", "table-scroll"} {
 		if !strings.Contains(profileBody, text) {
 			t.Fatalf("expected member profile page to include %q, got %s", text, profileBody)
+		}
+	}
+	for _, text := range []string{"<th>Reference</th>", "<th>Note</th>", "TRF-PAGE", "Page deposit"} {
+		if strings.Contains(profileBody, text) {
+			t.Fatalf("expected member profile page not to include %q, got %s", text, profileBody)
 		}
 	}
 }
@@ -3308,9 +3313,14 @@ func TestMemberCanOpenLoanRequestDetailAndSeeRepaymentHistory(t *testing.T) {
 		t.Fatalf("expected loan detail page status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{"Loan detail", "Approved loan", loan.ID, "Repayment history", "200.000", "RPY-TEST", "Test repayment", "Historical adjustment", "Deferral (Penangguhan)", "-500"} {
+	for _, text := range []string{"Loan detail", "Approved loan", loan.ID, "Repayment history", "200.000", "Historical adjustment", "Deferral (Penangguhan)", "-500"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected loan detail page to include %q, got %s", text, body)
+		}
+	}
+	for _, text := range []string{"<th>Reference</th>", "<th>Note</th>", "RPY-TEST", "Test repayment", "DETAIL-NEG", "Historical refund", "DETAIL-ZERO", "Historical penangguhan"} {
+		if strings.Contains(body, text) {
+			t.Fatalf("expected loan detail page not to include %q, got %s", text, body)
 		}
 	}
 }
@@ -4084,9 +4094,14 @@ func TestRepaymentHistoryIsMemberIsolatedAndPagesRender(t *testing.T) {
 		t.Fatalf("expected member profile status 200, got %d: %s", profileRec.Code, profileRec.Body.String())
 	}
 	profileBody := profileRec.Body.String()
-	for _, text := range []string{"Repayment history", "200.000", "RPY-TEST", "Test repayment", "632.000"} {
+	for _, text := range []string{"Repayment history", "200.000", "632.000"} {
 		if !strings.Contains(profileBody, text) {
 			t.Fatalf("expected member profile to include %q, got %s", text, profileBody)
+		}
+	}
+	for _, text := range []string{"<th>Reference</th>", "<th>Note</th>", "RPY-TEST", "Test repayment"} {
+		if strings.Contains(profileBody, text) {
+			t.Fatalf("expected member profile not to include %q, got %s", text, profileBody)
 		}
 	}
 
