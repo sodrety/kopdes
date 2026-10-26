@@ -2,11 +2,84 @@ package app_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestAdminLoanApprovalAndDisbursementUseKetuaUtamaThreshold(t *testing.T) {
+	tests := []struct {
+		name          string
+		amount        int64
+		finalStage    string
+		approvalCount int
+	}{
+		{name: "twenty million", amount: 20_000_000, approvalCount: 3},
+		{name: "just below threshold", amount: 24_999_999, approvalCount: 3},
+		{name: "at threshold", amount: 25_000_000, finalStage: "ketua_utama", approvalCount: 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newTestFixture(t)
+			managerToken := f.login(t, "admin@coop.test", "password")
+			superToken := establishSuperAdmin(t, f)
+			_, adminToken := provisionAdminOfficer(t, f, superToken, managerToken)
+			member := f.createMember(t, managerToken, `{"member_no":"LOAN-THRESHOLD","full_name":"Approval Threshold Borrower","join_date":"2026-01-01","status":"active"}`)
+
+			createBody := fmt.Sprintf(`{"member_no":"LOAN-THRESHOLD","loan_type":"regular","requested_amount":%d,"duration_months":24,"purpose":"Approval threshold regression","acknowledge_warnings":true,"idempotency_key":"approval-threshold-%d"}`, tt.amount, tt.amount)
+			created := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/on-behalf", adminToken, createBody)
+			if created.Code != http.StatusCreated {
+				t.Fatalf("create admin-origin loan: %d %s", created.Code, created.Body.String())
+			}
+			var requestID string
+			if err := f.db.QueryRow(`SELECT id FROM loan_requests WHERE member_id=$1`, member.ID).Scan(&requestID); err != nil {
+				t.Fatalf("read created loan request: %v", err)
+			}
+
+			startDate := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
+			managerApproval := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, fmt.Sprintf(`{"approved_amount":%d,"duration_months":24,"start_date":"%s"}`, tt.amount, startDate))
+			if managerApproval.Code != http.StatusOK {
+				t.Fatalf("manager approval: %d %s", managerApproval.Code, managerApproval.Body.String())
+			}
+			for _, approver := range []string{"ketua-ii@coop.test", "ketua-i@coop.test"} {
+				response := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", f.login(t, approver, "password"), `{}`)
+				if response.Code != http.StatusOK {
+					t.Fatalf("%s approval: %d %s", approver, response.Code, response.Body.String())
+				}
+			}
+
+			var status, finalStage string
+			if err := f.db.QueryRow(`SELECT status,COALESCE(current_approval_stage,'') FROM loan_requests WHERE id=$1`, requestID).Scan(&status, &finalStage); err != nil {
+				t.Fatalf("read request after Ketua I approval: %v", err)
+			}
+			if tt.finalStage == "" {
+				if status != "approved" || finalStage != "" {
+					t.Fatalf("amount below threshold should be final at Ketua I, got status=%q stage=%q", status, finalStage)
+				}
+			} else if status != "pending" || finalStage != tt.finalStage {
+				t.Fatalf("amount at threshold should continue to %s, got status=%q stage=%q", tt.finalStage, status, finalStage)
+			}
+
+			if tt.finalStage != "" {
+				response := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", f.login(t, "ketua-utama@coop.test", "password"), `{}`)
+				if response.Code != http.StatusOK {
+					t.Fatalf("Ketua Utama approval: %d %s", response.Code, response.Body.String())
+				}
+			}
+
+			var approvalCount int
+			if err := f.db.QueryRow(`SELECT COUNT(*) FROM loan_request_approvals WHERE request_id=$1 AND decision='approved'`, requestID).Scan(&approvalCount); err != nil {
+				t.Fatalf("count loan approvals: %v", err)
+			}
+			if approvalCount != tt.approvalCount {
+				t.Fatalf("expected %d approvals, got %d", tt.approvalCount, approvalCount)
+			}
+			f.disburseLoanRequest(t, requestID, startDate)
+		})
+	}
+}
 
 func TestAdminLoanPageSupportsOfficerStagesAndMemberSelection(t *testing.T) {
 	f := newTestFixture(t)
