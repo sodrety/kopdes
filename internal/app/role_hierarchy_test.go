@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sodrety/kopdes/internal/app"
 )
 
 func TestConcurrentLoanApprovalsCreateOneDecisionPerStageAndOneLoan(t *testing.T) {
@@ -248,7 +250,6 @@ func TestWithdrawalReservationsReleaseUntilBendaharaDisbursement(t *testing.T) {
 		managerToken,
 		fixture.login(t, "ketua-ii@coop.test", "password"),
 		fixture.login(t, "ketua-i@coop.test", "password"),
-		fixture.login(t, "ketua-utama@coop.test", "password"),
 	}
 	for index, token := range stages {
 		if index == 1 {
@@ -258,9 +259,11 @@ func TestWithdrawalReservationsReleaseUntilBendaharaDisbursement(t *testing.T) {
 		if index == 2 {
 			assertAdminPageApprovalAction("ketua-ii@coop.test", false)
 			assertAdminPageApprovalAction("ketua-i@coop.test", true)
-		}
-		if index == 3 {
 			assertAdminPageApprovalAction("ketua-utama@coop.test", false)
+			response = hierarchyRequest(fixture, http.MethodPost, "/api/admin/withdrawal-requests/"+secondID+"/approve", fixture.login(t, "ketua-utama@coop.test", "password"), `{"note":"not part of withdrawal flow"}`)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("Ketua Utama must not approve after Ketua II; got %d: %s", response.Code, response.Body.String())
+			}
 		}
 		response = hierarchyRequest(fixture, http.MethodPost, "/api/admin/withdrawal-requests/"+secondID+"/approve", token, `{"note":"verified"}`)
 		if response.Code != http.StatusOK {
@@ -273,6 +276,13 @@ func TestWithdrawalReservationsReleaseUntilBendaharaDisbursement(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("stage %d created a withdrawal record before Bendahara disbursement: %d", index, count)
 		}
+	}
+	var approvalCount, ketuaUtamaApprovalCount int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*),COUNT(CASE WHEN stage='ketua_utama' THEN 1 END) FROM withdrawal_request_approvals WHERE request_id=$1`, secondID).Scan(&approvalCount, &ketuaUtamaApprovalCount); err != nil {
+		t.Fatalf("count withdrawal approvals: %v", err)
+	}
+	if approvalCount != 3 || ketuaUtamaApprovalCount != 0 {
+		t.Fatalf("expected three approvals without Ketua Utama, got total=%d ketua_utama=%d", approvalCount, ketuaUtamaApprovalCount)
 	}
 	fixture.disburseWithdrawalRequest(t, secondID)
 	var disbursedCount int
@@ -293,6 +303,55 @@ func TestWithdrawalReservationsReleaseUntilBendaharaDisbursement(t *testing.T) {
 	if firstReservation != "released" || secondReservation != "consumed" {
 		t.Fatalf("unexpected reservation states: first=%s second=%s", firstReservation, secondReservation)
 	}
+
+	legacyID := fixture.createWithdrawalRequest(t, memberToken, 100, "Legacy request awaiting removed stage")
+	for _, approval := range []struct {
+		email string
+		stage string
+	}{
+		{"admin@coop.test", "manager"},
+		{"ketua-ii@coop.test", "ketua_ii"},
+		{"ketua-i@coop.test", "ketua_i"},
+	} {
+		var officerID, officerName, officerRole string
+		if err := fixture.db.QueryRow(`SELECT id,full_name,role FROM users WHERE email=$1`, approval.email).Scan(&officerID, &officerName, &officerRole); err != nil {
+			t.Fatalf("load %s approver: %v", approval.stage, err)
+		}
+		if _, err := fixture.db.Exec(`INSERT INTO withdrawal_request_approvals (id,request_id,stage,decision,officer_id,officer_name,officer_role,note,reason) VALUES ($1,$2,$3,'approved',$4,$5,$6,'verified before workflow change','')`, "legacy-approval-"+approval.stage, legacyID, approval.stage, officerID, officerName, approval.stage); err != nil {
+			t.Fatalf("record legacy %s approval: %v", approval.stage, err)
+		}
+	}
+	if _, err := fixture.db.Exec(`UPDATE withdrawal_requests SET current_approval_stage='ketua_utama' WHERE id=$1`, legacyID); err != nil {
+		t.Fatalf("move legacy request to removed stage: %v", err)
+	}
+	if _, err := fixture.db.Exec(`DELETE FROM schema_migrations WHERE version=46`); err != nil {
+		t.Fatalf("reset version 46 migration marker: %v", err)
+	}
+	if err := app.Migrate(fixture.db); err != nil {
+		t.Fatalf("migrate legacy withdrawal past Ketua Utama: %v", err)
+	}
+	var legacyStatus, legacyStage, legacyReviewedBy, legacyDisbursementDate string
+	if err := fixture.db.QueryRow(`SELECT status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),disbursement_date FROM withdrawal_requests WHERE id=$1`, legacyID).Scan(&legacyStatus, &legacyStage, &legacyReviewedBy, &legacyDisbursementDate); err != nil {
+		t.Fatalf("read migrated legacy withdrawal: %v", err)
+	}
+	if legacyStatus != "approved" || legacyStage != "" || legacyReviewedBy != "ketua-i-user-id" || legacyDisbursementDate != "" {
+		t.Fatalf("legacy withdrawal should be approved by its existing Ketua I decision and remain undistributed, got status=%s stage=%s reviewer=%s disbursement=%s", legacyStatus, legacyStage, legacyReviewedBy, legacyDisbursementDate)
+	}
+	var legacyApprovalCount, legacyKetuaUtamaApprovalCount int
+	if err := fixture.db.QueryRow(`SELECT COUNT(*),COUNT(CASE WHEN stage='ketua_utama' THEN 1 END) FROM withdrawal_request_approvals WHERE request_id=$1`, legacyID).Scan(&legacyApprovalCount, &legacyKetuaUtamaApprovalCount); err != nil {
+		t.Fatalf("count migrated legacy withdrawal approvals: %v", err)
+	}
+	if legacyApprovalCount != 3 || legacyKetuaUtamaApprovalCount != 0 {
+		t.Fatalf("migration must preserve exactly the three existing approvals; got total=%d ketua_utama=%d", legacyApprovalCount, legacyKetuaUtamaApprovalCount)
+	}
+	var migratedOutcomeEvents, migratedDisbursementEvents int
+	if err := fixture.db.QueryRow(`SELECT COUNT(CASE WHEN event_type='request_approved' THEN 1 END),COUNT(CASE WHEN event_type='withdrawal_disbursement_ready' THEN 1 END) FROM notification_events WHERE request_type='withdrawal' AND request_id=$1`, legacyID).Scan(&migratedOutcomeEvents, &migratedDisbursementEvents); err != nil {
+		t.Fatalf("count migrated withdrawal notifications: %v", err)
+	}
+	if migratedOutcomeEvents != 1 || migratedDisbursementEvents != 1 {
+		t.Fatalf("migration should notify the member and Bendahara after approval; got outcome=%d disbursement=%d", migratedOutcomeEvents, migratedDisbursementEvents)
+	}
+	fixture.disburseWithdrawalRequest(t, legacyID)
 }
 
 func TestOfficerPermissionsForcedPasswordChangeAndImmediateSessionInvalidation(t *testing.T) {

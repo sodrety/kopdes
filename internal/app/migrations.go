@@ -615,6 +615,7 @@ var migrations = []migration{
 	{Version: 43, Name: "add_voucher_loans"},
 	{Version: 44, Name: "add_loan_suspensions", Statements: loanSuspensionMigrationStatements},
 	{Version: 45, Name: "admin_loan_limit_override_and_withdrawal_disbursement"},
+	{Version: 46, Name: "remove_ketua_utama_from_withdrawal_approval"},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -958,6 +959,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 	}
 	if migration.Version == 45 {
 		if err := addAdminLoanLimitOverrideAndWithdrawalDisbursement(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 46 {
+		if err := finalizeLegacyWithdrawalsAwaitingKetuaUtama(tx, isSQLite); err != nil {
 			return err
 		}
 	}

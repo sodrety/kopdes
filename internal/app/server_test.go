@@ -206,16 +206,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 45 {
-		t.Fatalf("expected forty-five tracked migrations, got %d", migrationCount)
+	if migrationCount != 46 {
+		t.Fatalf("expected forty-six tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 45`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 46`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "admin_loan_limit_override_and_withdrawal_disbursement" {
-		t.Fatalf("expected latest admin loan override and withdrawal disbursement migration, got %q", latestName)
+	if latestName != "remove_ketua_utama_from_withdrawal_approval" {
+		t.Fatalf("expected latest withdrawal approval migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -5128,7 +5128,6 @@ func (f testFixture) approveWithdrawalRequest(t *testing.T, managerToken, reques
 		managerToken,
 		f.login(t, "ketua-ii@coop.test", "password"),
 		f.login(t, "ketua-i@coop.test", "password"),
-		f.login(t, "ketua-utama@coop.test", "password"),
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/api/admin/withdrawal-requests/"+requestID+"/approve", bytes.NewBufferString(`{}`))
 		req.Header.Set("Content-Type", "application/json")

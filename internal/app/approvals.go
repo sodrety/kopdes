@@ -70,8 +70,6 @@ func nextWithdrawalApprovalStage(stage string) string {
 		return approvalStageKetuaII
 	case approvalStageKetuaII:
 		return approvalStageKetuaI
-	case approvalStageKetuaI:
-		return approvalStageKetuaUtama
 	default:
 		return ""
 	}

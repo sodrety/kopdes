@@ -660,7 +660,7 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	result, err := tx.Exec(
 		`UPDATE withdrawal_requests
 		SET status = 'approved', current_approval_stage=NULL, reviewed_by = $1, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $2 AND status = 'pending' AND current_approval_stage='ketua_utama'`,
+		WHERE id = $2 AND status = 'pending' AND current_approval_stage='ketua_i'`,
 		officer.ID,
 		request.ID,
 	)
