@@ -426,9 +426,11 @@ func (s *Server) adminLoanDisbursementsPage(c *gin.Context) {
 			waiting = append(waiting, request)
 		}
 	}
+	current, _ := currentUser(c)
 	renderPage(c, "admin-loan-disbursements", pageData(c, translate(languageFromRequest(c), "loan_disbursements"), "loan-disbursements", "loan_disbursements", "loan_disbursements_description", gin.H{
 		"LoanRequests": waiting,
 		"CurrentDate":  time.Now().In(jakartaLocation).Format("2006-01-02"),
+		"CanDisburse":  current.Role == "bendahara",
 	}))
 }
 

@@ -93,7 +93,7 @@
           <th>{{t $.Lang "approved_amount"}}</th>
           <th>{{t $.Lang "duration"}}</th>
           <th>{{t $.Lang "purpose"}}</th>
-          <th>{{t $.Lang "loan_disbursement_date"}}</th>
+          <th>{{t $.Lang "disbursement_actions"}}</th>
         </tr>
       </thead>
       <tbody>
@@ -105,13 +105,30 @@
           <td>{{if gt .ProposedApprovedAmount 0}}{{nominal .ProposedApprovedAmount}}{{else}}{{nominal .RequestedAmount}}{{end}}</td>
           <td>{{if gt .ProposedDurationMonths 0}}{{.ProposedDurationMonths}}{{else}}{{.DurationMonths}}{{end}} {{t $.Lang "months"}}</td>
           <td>{{.Purpose}}</td>
-          <td>
-            <form method="post" action="/api/admin/loan-requests/{{.ID}}/disburse" hx-post="/api/admin/loan-requests/{{.ID}}/disburse" hx-target="#loan-disbursement-error" hx-swap="innerHTML">
-              <label>{{t $.Lang "loan_disbursement_date"}}
-                <input name="disbursement_date" type="date" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "loan_disbursement_date"}}">
-              </label>
-              <button type="submit">{{t $.Lang "record_loan_disbursement"}}</button>
-            </form>
+          <td class="review-cell">
+            {{if $.CanDisburse}}
+            <a class="button-link button-link-secondary" href="#loan-disbursement-{{.ID}}">{{t $.Lang "open_disbursement_modal"}}</a>
+            <div id="loan-disbursement-{{.ID}}" class="review-modal" role="dialog" aria-modal="true" aria-labelledby="loan-disbursement-title-{{.ID}}">
+              <a class="review-modal-backdrop" href="#" aria-label="{{t $.Lang "close"}}"></a>
+              <div class="review-modal-card">
+                <header class="review-modal-header">
+                  <h2 id="loan-disbursement-title-{{.ID}}">{{t $.Lang "loan_disbursement_modal_title"}}</h2>
+                  <a class="review-modal-close" href="#" aria-label="{{t $.Lang "close"}}">×</a>
+                </header>
+                <div class="review-modal-actions">
+                  <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/disbursement-form.pdf" download>{{t $.Lang "download_loan_disbursement_form"}}</a>
+                </div>
+                <form method="post" action="/api/admin/loan-requests/{{.ID}}/disburse" hx-post="/api/admin/loan-requests/{{.ID}}/disburse" hx-target="#loan-disbursement-error" hx-swap="innerHTML">
+                  <label>{{t $.Lang "loan_disbursement_date"}}
+                    <input name="disbursement_date" type="date" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "loan_disbursement_date"}}">
+                  </label>
+                  <button type="submit">{{t $.Lang "record_loan_disbursement"}}</button>
+                </form>
+              </div>
+            </div>
+            {{else}}
+            {{t $.Lang "loan_waiting_for_treasurer"}}
+            {{end}}
           </td>
         </tr>
         {{end}}
@@ -139,7 +156,7 @@
           <th>{{t $.Lang "bank_account"}}</th>
           <th>{{t $.Lang "amount"}}</th>
           <th>{{t $.Lang "note"}}</th>
-          <th>{{t $.Lang "withdrawal_disbursement_date"}}</th>
+          <th>{{t $.Lang "disbursement_actions"}}</th>
         </tr>
       </thead>
       <tbody>
@@ -152,12 +169,25 @@
           <td>{{.Note}}</td>
           <td>
             {{if $.CanDisburse}}
-            <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/disburse" hx-post="/api/admin/withdrawal-requests/{{.ID}}/disburse" hx-target="#withdrawal-disbursement-error" hx-swap="innerHTML">
-              <label>{{t $.Lang "withdrawal_disbursement_date"}}
-                <input name="disbursement_date" type="date" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "withdrawal_disbursement_date"}}">
-              </label>
-              <button type="submit">{{t $.Lang "record_withdrawal_disbursement"}}</button>
-            </form>
+            <a class="button-link button-link-secondary" href="#withdrawal-disbursement-{{.ID}}">{{t $.Lang "open_disbursement_modal"}}</a>
+            <div id="withdrawal-disbursement-{{.ID}}" class="review-modal" role="dialog" aria-modal="true" aria-labelledby="withdrawal-disbursement-title-{{.ID}}">
+              <a class="review-modal-backdrop" href="#" aria-label="{{t $.Lang "close"}}"></a>
+              <div class="review-modal-card">
+                <header class="review-modal-header">
+                  <h2 id="withdrawal-disbursement-title-{{.ID}}">{{t $.Lang "withdrawal_disbursement_modal_title"}}</h2>
+                  <a class="review-modal-close" href="#" aria-label="{{t $.Lang "close"}}">×</a>
+                </header>
+                <div class="review-modal-actions">
+                  <a class="button-link button-link-secondary" href="/api/admin/withdrawal-requests/{{.ID}}/disbursement-form.pdf" download>{{t $.Lang "download_withdrawal_disbursement_form"}}</a>
+                </div>
+                <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/disburse" hx-post="/api/admin/withdrawal-requests/{{.ID}}/disburse" hx-target="#withdrawal-disbursement-error" hx-swap="innerHTML">
+                  <label>{{t $.Lang "withdrawal_disbursement_date"}}
+                    <input name="disbursement_date" type="date" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "withdrawal_disbursement_date"}}">
+                  </label>
+                  <button type="submit">{{t $.Lang "record_withdrawal_disbursement"}}</button>
+                </form>
+              </div>
+            </div>
             {{else}}
             {{t $.Lang "withdrawal_waiting_for_disbursement"}}
             {{end}}
