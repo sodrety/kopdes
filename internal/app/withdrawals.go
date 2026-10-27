@@ -36,6 +36,8 @@ type AdminWithdrawalRequest struct {
 	WithdrawalRequest
 	MemberNo        string             `json:"member_no"`
 	FullName        string             `json:"full_name"`
+	BankName        string             `json:"-"`
+	BankAccount     string             `json:"-"`
 	MemberType      string             `json:"member_type"`
 	MemberTypeLabel string             `json:"member_type_label"`
 	ApprovalHistory []ApprovalDecision `json:"approval_history"`
@@ -525,7 +527,7 @@ func (s *Server) withdrawalRequestsByMember(memberID string) ([]WithdrawalReques
 
 func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalRequest, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT wr.id, wr.member_id, m.member_no, m.full_name, m.member_type, wr.amount, wr.note, wr.status, COALESCE(wr.current_approval_stage,''), COALESCE(wr.reviewed_by,''), COALESCE(CAST(wr.reviewed_at AS TEXT), ''), COALESCE(wr.disbursement_date,''), COALESCE(wr.disbursed_by,''), COALESCE(CAST(wr.disbursed_at AS TEXT),''), wr.rejection_reason, COALESCE(wr.saving_record_id, ''), wr.created_at, wr.updated_at,wr.creation_source
+	query := `SELECT wr.id, wr.member_id, m.member_no, m.full_name, m.member_type, wr.amount, wr.note, wr.status, COALESCE(wr.current_approval_stage,''), COALESCE(wr.reviewed_by,''), COALESCE(CAST(wr.reviewed_at AS TEXT), ''), COALESCE(wr.disbursement_date,''), COALESCE(wr.disbursed_by,''), COALESCE(CAST(wr.disbursed_at AS TEXT),''), wr.rejection_reason, COALESCE(wr.saving_record_id, ''), wr.created_at, wr.updated_at,wr.creation_source, COALESCE(NULLIF(TRIM(m.bank_name),''),''), COALESCE(NULLIF(TRIM(m.bank_account),''),'')
 		FROM withdrawal_requests wr
 		INNER JOIN members m ON m.id = wr.member_id`
 	args := []any{}
@@ -542,7 +544,7 @@ func (s *Server) withdrawalRequestsForAdmin(status string) ([]AdminWithdrawalReq
 	var requests []AdminWithdrawalRequest
 	for rows.Next() {
 		var request AdminWithdrawalRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.MemberType, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedBy, &request.ReviewedAt, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt, &request.CreationSource); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.MemberType, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedBy, &request.ReviewedAt, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.SavingRecordID, &request.CreatedAt, &request.UpdatedAt, &request.CreationSource, &request.BankName, &request.BankAccount); err != nil {
 			return nil, err
 		}
 		request.MemberTypeLabel = memberTypeLabel(request.MemberType)

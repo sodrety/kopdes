@@ -88,6 +88,8 @@
       <thead>
         <tr>
           <th>{{t $.Lang "member"}}</th>
+          <th>{{t $.Lang "bank_name"}}</th>
+          <th>{{t $.Lang "bank_account"}}</th>
           <th>{{t $.Lang "approved_amount"}}</th>
           <th>{{t $.Lang "duration"}}</th>
           <th>{{t $.Lang "purpose"}}</th>
@@ -98,6 +100,8 @@
         {{range .LoanRequests}}
         <tr>
           <td>{{template "member-table-cell" .}}</td>
+          <td>{{if .BankName}}{{.BankName}}{{else}}{{t $.Lang "bank_details_not_provided"}}{{end}}</td>
+          <td>{{if .BankAccount}}{{.BankAccount}}{{else}}{{t $.Lang "bank_details_not_provided"}}{{end}}</td>
           <td>{{if gt .ProposedApprovedAmount 0}}{{nominal .ProposedApprovedAmount}}{{else}}{{nominal .RequestedAmount}}{{end}}</td>
           <td>{{if gt .ProposedDurationMonths 0}}{{.ProposedDurationMonths}}{{else}}{{.DurationMonths}}{{end}} {{t $.Lang "months"}}</td>
           <td>{{.Purpose}}</td>
@@ -131,6 +135,8 @@
       <thead>
         <tr>
           <th>{{t $.Lang "member"}}</th>
+          <th>{{t $.Lang "bank_name"}}</th>
+          <th>{{t $.Lang "bank_account"}}</th>
           <th>{{t $.Lang "amount"}}</th>
           <th>{{t $.Lang "note"}}</th>
           <th>{{t $.Lang "withdrawal_disbursement_date"}}</th>
@@ -140,6 +146,8 @@
         {{range .WithdrawalRequests}}
         <tr>
           <td>{{template "member-table-cell" .}}</td>
+          <td>{{if .BankName}}{{.BankName}}{{else}}{{t $.Lang "bank_details_not_provided"}}{{end}}</td>
+          <td>{{if .BankAccount}}{{.BankAccount}}{{else}}{{t $.Lang "bank_details_not_provided"}}{{end}}</td>
           <td>{{nominal .Amount}}</td>
           <td>{{.Note}}</td>
           <td>
