@@ -100,7 +100,6 @@ var (
 	errLoanRequestNotPending              = errors.New("loan request not pending")
 	errLoanRequestNotFound                = errors.New("loan request not found")
 	errLoanRequestNotReadyForDisbursement = errors.New("loan request is not ready for disbursement")
-	errLoanDisbursementDateRange          = errors.New("loan disbursement date is outside the allowed range")
 	errInvalidLoanApprovalCalculated      = errors.New("invalid calculated installment")
 	errInvalidLoanStartDate               = errors.New("invalid loan start date")
 	errInvalidLoanDisbursementDate        = errors.New("invalid loan disbursement date")
@@ -198,10 +197,6 @@ func (s *Server) disburseLoanRequest(c *gin.Context) {
 	result, err := s.disburseLoanRequestByID(c.Param("id"), user, req.DisbursementDate, translate(lang, "journal_loan_disbursement_description"))
 	if errors.Is(err, errInvalidLoanDisbursementDate) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_loan_disbursement_date"))
-		return
-	}
-	if errors.Is(err, errLoanDisbursementDateRange) {
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_disbursement_date_range"))
 		return
 	}
 	if errors.Is(err, errLoanRequestNotReadyForDisbursement) {
@@ -570,14 +565,8 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 		return LoanApprovalResult{}, errWrongApprovalStage
 	}
 	dateText := strings.TrimSpace(disbursementDate)
-	disbursementDay, parseErr := parseLoanDate(dateText)
-	if parseErr != nil {
+	if _, parseErr := parseLoanDate(dateText); parseErr != nil {
 		return LoanApprovalResult{}, errInvalidLoanDisbursementDate
-	}
-	today := time.Now().In(jakartaLocation)
-	today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, jakartaLocation)
-	if disbursementDay.After(today) {
-		return LoanApprovalResult{}, errLoanDisbursementDateRange
 	}
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
@@ -602,7 +591,6 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 		Status                  string
 		Stage                   string
 		ReviewedBy              string
-		ReviewedAt              string
 		DisbursementDate        string
 		ProposedApprovedAmount  int64
 		ProposedDurationMonths  int
@@ -615,7 +603,7 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 		ProposedAdminFeeCOACode string
 		CreationSource          string
 	}
-	err = tx.QueryRow(`SELECT member_id,loan_type,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(CAST(reviewed_at AS TEXT),''),COALESCE(disbursement_date,''),COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),COALESCE(creation_source,'member') FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.Status, &request.Stage, &request.ReviewedBy, &request.ReviewedAt, &request.DisbursementDate, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.CreationSource)
+	err = tx.QueryRow(`SELECT member_id,loan_type,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(disbursement_date,''),COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),COALESCE(creation_source,'member') FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.Status, &request.Stage, &request.ReviewedBy, &request.DisbursementDate, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.CreationSource)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
@@ -625,14 +613,6 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 	if request.Status != "approved" || request.Stage != "" || request.DisbursementDate != "" || request.ReviewedBy == "" {
 		return LoanApprovalResult{}, errLoanRequestNotReadyForDisbursement
 	}
-	approvedAt, parseErr := parseDatabaseTime(request.ReviewedAt)
-	if parseErr != nil {
-		return LoanApprovalResult{}, errLoanRequestNotReadyForDisbursement
-	}
-	if disbursementDay.Before(time.Date(approvedAt.In(jakartaLocation).Year(), approvedAt.In(jakartaLocation).Month(), approvedAt.In(jakartaLocation).Day(), 0, 0, 0, 0, jakartaLocation)) {
-		return LoanApprovalResult{}, errLoanDisbursementDateRange
-	}
-
 	var memberType, memberStatus string
 	if err := tx.QueryRow(`SELECT member_type,status FROM members WHERE id=$1`+rowLockClause(s.db), request.MemberID).Scan(&memberType, &memberStatus); err != nil {
 		return LoanApprovalResult{}, err

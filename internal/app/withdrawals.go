@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -81,7 +80,6 @@ var (
 	errWithdrawalMemberNotFound                 = errors.New("withdrawal member not found")
 	errWithdrawalRequestNotReadyForDisbursement = errors.New("withdrawal request is not ready for disbursement")
 	errInvalidWithdrawalDisbursementDate        = errors.New("invalid withdrawal disbursement date")
-	errWithdrawalDisbursementDateRange          = errors.New("withdrawal disbursement date is outside the allowed range")
 	errWithdrawalDisburserRole                  = errors.New("only bendahara can disburse withdrawals")
 )
 
@@ -242,8 +240,6 @@ func (s *Server) disburseWithdrawalRequest(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error_withdrawal_request_not_found"))
 	case errors.Is(err, errInvalidWithdrawalDisbursementDate):
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_withdrawal_disbursement_date"))
-	case errors.Is(err, errWithdrawalDisbursementDateRange):
-		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_withdrawal_disbursement_date_range"))
 	case errors.Is(err, errWithdrawalRequestNotReadyForDisbursement):
 		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_withdrawal_request_not_ready_for_disbursement"))
 	case errors.Is(err, errWithdrawalDisburserRole):
@@ -689,14 +685,8 @@ func (s *Server) disburseWithdrawalRequestByID(requestID string, officer User, d
 		return WithdrawalRequest{}, errWithdrawalDisburserRole
 	}
 	dateText := strings.TrimSpace(disbursementDate)
-	disbursementDay, parseErr := parseLoanDate(dateText)
-	if parseErr != nil {
+	if _, parseErr := parseLoanDate(dateText); parseErr != nil {
 		return WithdrawalRequest{}, errInvalidWithdrawalDisbursementDate
-	}
-	today := time.Now().In(jakartaLocation)
-	today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, jakartaLocation)
-	if disbursementDay.After(today) {
-		return WithdrawalRequest{}, errWithdrawalDisbursementDateRange
 	}
 	s.financialMu.Lock()
 	defer s.financialMu.Unlock()
@@ -715,7 +705,7 @@ func (s *Server) disburseWithdrawalRequestByID(requestID string, officer User, d
 		return WithdrawalRequest{}, err
 	}
 	var request WithdrawalRequest
-	err = tx.QueryRow(`SELECT id,member_id,amount,note,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(CAST(reviewed_at AS TEXT),''),COALESCE(disbursement_date,''),COALESCE(disbursed_by,''),COALESCE(CAST(disbursed_at AS TEXT),''),COALESCE(saving_record_id,''),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_savings_coa_code,'') FROM withdrawal_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.ID, &request.MemberID, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedBy, &request.ReviewedAt, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.SavingRecordID, &request.ProposedCashCOACode, &request.ProposedSavingsCOACode)
+	err = tx.QueryRow(`SELECT id,member_id,amount,note,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(disbursement_date,''),COALESCE(disbursed_by,''),COALESCE(CAST(disbursed_at AS TEXT),''),COALESCE(saving_record_id,''),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_savings_coa_code,'') FROM withdrawal_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.ID, &request.MemberID, &request.Amount, &request.Note, &request.Status, &request.CurrentApprovalStage, &request.ReviewedBy, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.SavingRecordID, &request.ProposedCashCOACode, &request.ProposedSavingsCOACode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return WithdrawalRequest{}, errWithdrawalRequestNotFound
 	}
@@ -724,15 +714,6 @@ func (s *Server) disburseWithdrawalRequestByID(requestID string, officer User, d
 	}
 	if request.Status != "approved" || request.CurrentApprovalStage != "" || request.ReviewedBy == "" || request.DisbursementDate != "" || request.DisbursedBy != "" || request.DisbursedAt != "" || request.SavingRecordID != "" {
 		return WithdrawalRequest{}, errWithdrawalRequestNotReadyForDisbursement
-	}
-	approvedAt, parseErr := parseDatabaseTime(request.ReviewedAt)
-	if parseErr != nil {
-		return WithdrawalRequest{}, errWithdrawalRequestNotReadyForDisbursement
-	}
-	approvedDay := approvedAt.In(jakartaLocation)
-	approvedDay = time.Date(approvedDay.Year(), approvedDay.Month(), approvedDay.Day(), 0, 0, 0, 0, jakartaLocation)
-	if disbursementDay.Before(approvedDay) {
-		return WithdrawalRequest{}, errWithdrawalDisbursementDateRange
 	}
 	var memberStatus string
 	if err := tx.QueryRow(`SELECT status FROM members WHERE id=$1`+rowLockClause(s.db), request.MemberID).Scan(&memberStatus); err != nil {

@@ -108,7 +108,7 @@
           <td>
             <form method="post" action="/api/admin/loan-requests/{{.ID}}/disburse" hx-post="/api/admin/loan-requests/{{.ID}}/disburse" hx-target="#loan-disbursement-error" hx-swap="innerHTML">
               <label>{{t $.Lang "loan_disbursement_date"}}
-                <input name="disbursement_date" type="date" max="{{$.CurrentDate}}" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "loan_disbursement_date"}}">
+                <input name="disbursement_date" type="date" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "loan_disbursement_date"}}">
               </label>
               <button type="submit">{{t $.Lang "record_loan_disbursement"}}</button>
             </form>
@@ -154,7 +154,7 @@
             {{if $.CanDisburse}}
             <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/disburse" hx-post="/api/admin/withdrawal-requests/{{.ID}}/disburse" hx-target="#withdrawal-disbursement-error" hx-swap="innerHTML">
               <label>{{t $.Lang "withdrawal_disbursement_date"}}
-                <input name="disbursement_date" type="date" max="{{$.CurrentDate}}" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "withdrawal_disbursement_date"}}">
+                <input name="disbursement_date" type="date" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "withdrawal_disbursement_date"}}">
               </label>
               <button type="submit">{{t $.Lang "record_withdrawal_disbursement"}}</button>
             </form>
