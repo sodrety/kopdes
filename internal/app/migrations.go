@@ -617,6 +617,7 @@ var migrations = []migration{
 	{Version: 45, Name: "admin_loan_limit_override_and_withdrawal_disbursement"},
 	{Version: 46, Name: "remove_ketua_utama_from_withdrawal_approval"},
 	{Version: 47, Name: "align_loan_approval_threshold_integrity"},
+	{Version: 48, Name: "member_type_loan_limit_total_savings"},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -970,6 +971,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 	}
 	if migration.Version == 47 {
 		if err := addLoanApprovalDisbursementIntegrity(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 48 {
+		if err := updateMemberTypeLoanLimitCalculation(tx, isSQLite); err != nil {
 			return err
 		}
 	}
