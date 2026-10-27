@@ -206,16 +206,16 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 47 {
-		t.Fatalf("expected forty-seven tracked migrations, got %d", migrationCount)
+	if migrationCount != 48 {
+		t.Fatalf("expected forty-eight tracked migrations, got %d", migrationCount)
 	}
 
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 47`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 48`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "align_loan_approval_threshold_integrity" {
-		t.Fatalf("expected latest loan approval threshold migration, got %q", latestName)
+	if latestName != "member_type_loan_limit_total_savings" {
+		t.Fatalf("expected latest member-type loan limit migration, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
@@ -2617,7 +2617,7 @@ func TestAdminProfitLossReportMimicsKopkarlytaReport(t *testing.T) {
 		t.Fatalf("expected profit/loss report status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, text := range []string{`<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, `name="date_from"`, `name="date_to"`, "Apply filters", "Reset", "Total income", "Total cost", "Net profit", "Data export", "Export CSV", "Export PDF", "Print report", "Income detail", "Cost detail", "Monthly breakdown", "Income breakdown", "Cost breakdown", "Insights &amp; analysis", "Financial composition", "Monthly performance", "Rp 443.750", "Rp 75.000", "Rp 368.750"} {
+	for _, text := range []string{`<h1>Profit/loss report</h1>`, `<span class="sidebar-group-label">Reports</span>`, `name="date_from"`, `name="date_to"`, "Apply filters", "Reset", "Total income", "Total cost", "Net profit", "Data export", "Export CSV", "Export PDF", "Print report", "Income detail", "Cost detail", "Monthly breakdown", "Income breakdown", "Cost breakdown", "Insights &amp; analysis", "Financial composition", "Monthly performance", "Rp 440.000", "Rp 75.000", "Rp 365.000"} {
 		if !strings.Contains(body, text) {
 			t.Fatalf("expected profit/loss report to include %q, got %s", text, body)
 		}

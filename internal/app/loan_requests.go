@@ -87,14 +87,14 @@ func maxLoanAmountForMemberSavings(memberType string, wajibBalance, sukarelaBala
 		sukarelaBalance = 0
 	}
 	const maxInt64Value int64 = 1<<63 - 1
-	if wajibBalance > maxInt64Value/multiplier {
+	if sukarelaBalance > maxInt64Value-wajibBalance {
 		return maxInt64Value
 	}
-	wajibLimit := wajibBalance * multiplier
-	if sukarelaBalance > maxInt64Value-wajibLimit {
+	totalSavings := wajibBalance + sukarelaBalance
+	if totalSavings > maxInt64Value/multiplier {
 		return maxInt64Value
 	}
-	return wajibLimit + sukarelaBalance
+	return totalSavings * multiplier
 }
 
 func (s *Server) submitLoanRequest(c *gin.Context) {
