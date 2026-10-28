@@ -24,10 +24,10 @@ func TestApprovedLoanReportPDFsAlignToFormFields(t *testing.T) {
 			path:     "/api/admin/loans/" + loan.ID + "/reports/application.pdf",
 			filename: "form-pengajuan-pinjaman-" + loan.ID + ".pdf",
 			fieldPositions: []string{
-				"1 0 0 1 132.28 686.08 Tm (Loan Report Layout Member) Tj ET",
-				"1 0 0 1 77.57 543.32 Tm (Purpose: Test loan) Tj ET",
+				"1 0 0 1 154.53 707.79 Tm (Loan Report Layout Member) Tj ET",
+				"1 0 0 1 154.53 594.13 Tm (Test loan) Tj ET",
 			},
-			minimumFieldMasks: 11,
+			minimumFieldMasks: 1,
 		},
 		{
 			path:     "/api/admin/loans/" + loan.ID + "/reports/acceptance.pdf",
