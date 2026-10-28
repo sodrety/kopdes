@@ -215,11 +215,19 @@ func (s *Server) exportWithdrawalDisbursementApplicationFormPDF(c *gin.Context) 
 }
 
 func (s *Server) withdrawalDisbursementApplicationFormData(requestID string) (disbursementApplicationFormData, error) {
+	return s.withdrawalApplicationFormData(requestID, true)
+}
+
+func (s *Server) withdrawalRequestApplicationFormData(requestID string) (disbursementApplicationFormData, error) {
+	return s.withdrawalApplicationFormData(requestID, false)
+}
+
+func (s *Server) withdrawalApplicationFormData(requestID string, requireDisbursementReady bool) (disbursementApplicationFormData, error) {
 	request, err := s.withdrawalRequestByID(requestID)
 	if err != nil {
 		return disbursementApplicationFormData{}, err
 	}
-	if request.Status != "approved" || request.DisbursementDate != "" || request.SavingRecordID != "" {
+	if requireDisbursementReady && (request.Status != "approved" || request.DisbursementDate != "" || request.SavingRecordID != "") {
 		return disbursementApplicationFormData{}, errDisbursementApplicationFormUnavailable
 	}
 	member, err := s.disbursementFormMember(request.MemberID)
@@ -251,6 +259,27 @@ func (s *Server) withdrawalDisbursementApplicationFormData(requestID string) (di
 	}
 	report.AvailableWithdrawalLimit += report.Savings.AvailableWithdrawalBalance
 	return report, nil
+}
+
+func (s *Server) exportWithdrawalRequestApplicationFormPDF(c *gin.Context) {
+	lang := languageFromRequest(c)
+	report, err := s.withdrawalRequestApplicationFormData(c.Param("id"))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error.Withdrawal request not found"))
+			return
+		}
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
+		return
+	}
+	pdf, err := buildWithdrawalDisbursementApplicationFormPDF(report)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
+		return
+	}
+	filename := "form-penarikan-simpanan-" + safeLoanReportFilename(report.ID) + ".pdf"
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Data(http.StatusOK, "application/pdf", pdf)
 }
 
 func (s *Server) disbursementFormMember(memberID string) (disbursementFormMember, error) {
