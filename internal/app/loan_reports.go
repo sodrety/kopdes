@@ -70,13 +70,35 @@ func (s *Server) exportLoanApplicationFormPDF(c *gin.Context) {
 	if !ok {
 		return
 	}
-	background, err := loanReportTemplates.ReadFile("templates/loan-application-form.jpg")
+	member, err := s.disbursementFormMember(report.Loan.MemberID)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
-	texts := loanApplicationFormText(report)
-	pdf, err := buildLoanFormPDF(background, texts, loanApplicationFormMasks(report))
+	application := disbursementApplicationFormData{
+		ID:                 report.Loan.ID,
+		MemberID:           report.Loan.MemberID,
+		MemberNo:           member.MemberNo,
+		FullName:           report.MemberName,
+		MemberType:         report.MemberType,
+		MemberStatus:       report.MemberStatus,
+		BankName:           member.BankName,
+		BankAccount:        member.BankAccount,
+		Purpose:            report.Purpose,
+		RequestDate:        report.RequestDate,
+		RequestedAmount:    report.RequestAmount,
+		RequestedDuration:  report.RequestDuration,
+		ApprovedAmount:     report.Loan.ApprovedAmount,
+		ApprovedDuration:   report.Loan.DurationMonths,
+		TotalAdminFee:      report.Loan.TotalAdminFee,
+		TotalObligation:    report.Loan.TotalObligation,
+		MonthlyInstallment: report.Loan.MonthlyInstallment,
+		Savings:            report.Savings,
+		PriorCashLoan:      report.PriorCashLoan,
+		PriorGoodsLoan:     report.PriorGoodsLoan,
+		Approvals:          report.Approvals,
+	}
+	pdf, err := buildLoanApplicationFormPDF(application)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return

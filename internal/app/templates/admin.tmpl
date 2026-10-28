@@ -2374,6 +2374,9 @@
                       <div class="loan-review-purpose"><span>{{t $.Lang "purpose"}}</span><strong>{{.Purpose}}</strong></div>
                       <div class="loan-review-provenance"><span>{{t $.Lang "admin_loan_provenance"}}</span><strong>{{t $.Lang (printf "admin_loan_source_%s" .CreationSource)}} · {{if .CreatedByName}}{{.CreatedByName}}{{else}}{{t $.Lang "admin_loan_source_member"}}{{end}}{{if .BatchID}} · <a href="/admin/loan-request-batches/{{.BatchID}}">{{.BatchID}}</a>{{end}}</strong></div>
                     </div>
+                    <div class="review-modal-actions">
+                      <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/application-form.pdf">{{t $.Lang "loan_application_pdf"}}</a>
+                    </div>
                     {{if and (eq $.Role "super_admin") (index $.Permissions "requests.override") (eq .Status "pending")}}
                     <div class="review-modal-actions">
                       <p><strong>{{t $.Lang "super_admin_override"}}</strong> — {{t $.Lang "super_admin_override_help"}}</p>

@@ -70,15 +70,7 @@ func (s *Server) exportLoanDisbursementApplicationFormPDF(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
 		return
 	}
-	background, err := disbursementApplicationFormTemplate.ReadFile("templates/loan-disbursement-application-form.jpg")
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
-		return
-	}
-	pdf, err := buildLoanFormPDF(background, loanDisbursementApplicationFormText(report), []loanPDFMask{
-		// Clear the template's signature rule so the member name replaces it.
-		{x: 70, y: 686, width: 236, height: 14},
-	})
+	pdf, err := buildLoanApplicationFormPDF(report)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
 		return
@@ -86,6 +78,35 @@ func (s *Server) exportLoanDisbursementApplicationFormPDF(c *gin.Context) {
 	filename := "form-pengajuan-pinjaman-" + safeLoanReportFilename(report.ID) + ".pdf"
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	c.Data(http.StatusOK, "application/pdf", pdf)
+}
+
+func (s *Server) exportLoanRequestApplicationFormPDF(c *gin.Context) {
+	lang := languageFromRequest(c)
+	report, err := s.loanRequestApplicationFormData(c.Param("id"))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, errDisbursementApplicationFormUnavailable) {
+			respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error.Loan request not found"))
+			return
+		}
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
+		return
+	}
+	pdf, err := buildLoanApplicationFormPDF(report)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
+		return
+	}
+	filename := "form-pengajuan-pinjaman-" + safeLoanReportFilename(report.ID) + ".pdf"
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Data(http.StatusOK, "application/pdf", pdf)
+}
+
+func (s *Server) loanRequestApplicationFormData(requestID string) (disbursementApplicationFormData, error) {
+	request, err := s.loanRequestByID(requestID)
+	if err != nil {
+		return disbursementApplicationFormData{}, err
+	}
+	return s.loanApplicationFormDataFromRequest(request)
 }
 
 func (s *Server) loanDisbursementApplicationFormData(requestID string) (disbursementApplicationFormData, error) {
@@ -96,6 +117,10 @@ func (s *Server) loanDisbursementApplicationFormData(requestID string) (disburse
 	if request.Status != "approved" || request.DisbursementDate != "" {
 		return disbursementApplicationFormData{}, errDisbursementApplicationFormUnavailable
 	}
+	return s.loanApplicationFormDataFromRequest(request)
+}
+
+func (s *Server) loanApplicationFormDataFromRequest(request LoanRequest) (disbursementApplicationFormData, error) {
 	member, err := s.disbursementFormMember(request.MemberID)
 	if err != nil {
 		return disbursementApplicationFormData{}, err
@@ -151,6 +176,16 @@ func (s *Server) loanDisbursementApplicationFormData(requestID string) (disburse
 		return disbursementApplicationFormData{}, err
 	}
 	return report, nil
+}
+
+func buildLoanApplicationFormPDF(report disbursementApplicationFormData) ([]byte, error) {
+	background, err := disbursementApplicationFormTemplate.ReadFile("templates/loan-disbursement-application-form.jpg")
+	if err != nil {
+		return nil, err
+	}
+	// Clear the template's signature rule so the member name replaces it.
+	masks := []loanPDFMask{{x: 70, y: 686, width: 236, height: 14}}
+	return buildLoanFormPDF(background, loanDisbursementApplicationFormText(report), masks)
 }
 
 func (s *Server) exportWithdrawalDisbursementApplicationFormPDF(c *gin.Context) {
