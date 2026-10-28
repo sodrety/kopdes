@@ -2203,46 +2203,67 @@
               <td>{{.Note}}</td>
               <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}{{if .CurrentApprovalStage}}<small>{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}</small>{{end}}</td>
               <td class="review-cell">
-                {{if and $.CanManage (eq .CreationSource "officer") (eq .Status "pending") (eq .CurrentApprovalStage "manager")}}
-                <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/update" hx-post="/api/admin/withdrawal-requests/{{.ID}}/update" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
-                  <label>{{t $.Lang "amount"}} <input name="amount" type="text" inputmode="numeric" value="{{nominal .Amount}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" required></label>
-                  <label>{{t $.Lang "note"}} <input name="note" maxlength="500" value="{{.Note}}"></label>
-                  <button class="button-secondary" type="submit">{{t $.Lang "save"}}</button>
-                </form>
-                {{end}}
-                {{if and (eq $.Role "super_admin") (index $.Permissions "requests.override") (eq .Status "pending")}}
-                <div class="table-actions">
-                  <strong>{{t $.Lang "super_admin_override"}}</strong>
-                  <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/override-approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/override-approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
-                    {{if index $.Permissions "accounting_coa.override"}}
-                    <label>{{t $.Lang "cash_bank_account"}} <select name="cash_coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
-                    <label>{{t $.Lang "savings_liability_account"}} <select name="coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                <a class="button-link button-link-secondary" href="#withdrawal-request-review-{{.ID}}">{{t $.Lang "review"}}</a>
+                <div id="withdrawal-request-review-{{.ID}}" class="review-modal withdrawal-review-modal" role="dialog" aria-modal="true" aria-labelledby="withdrawal-request-review-title-{{.ID}}">
+                  <a class="review-modal-backdrop" href="#" aria-label="{{t $.Lang "close"}}"></a>
+                  <div class="review-modal-card">
+                    <header class="review-modal-header">
+                      <h2 id="withdrawal-request-review-title-{{.ID}}">{{t $.Lang "withdrawal_request_review_title"}}</h2>
+                      <a class="review-modal-close" href="#" aria-label="{{t $.Lang "close"}}">×</a>
+                    </header>
+                    <div class="detail-grid review-detail-grid">
+                      <div class="withdrawal-review-member"><span>{{t $.Lang "member"}}</span><strong>{{.FullName}} · {{.MemberNo}}</strong></div>
+                      <div><span>{{t $.Lang "status"}}</span><strong>{{t $.Lang (printf "status_%s" .Status)}}{{if .CurrentApprovalStage}} · {{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}{{end}}</strong></div>
+                      <div><span>{{t $.Lang "amount"}}</span><strong>Rp {{nominal .Amount}}</strong></div>
+                      <div class="withdrawal-review-note"><span>{{t $.Lang "note"}}</span><strong>{{if .Note}}{{.Note}}{{else}}{{t $.Lang "none"}}{{end}}</strong></div>
+                    </div>
+                    <div class="review-modal-actions">
+                      <a class="button-link button-link-secondary" href="/api/admin/withdrawal-requests/{{.ID}}/application-form.pdf">{{t $.Lang "withdrawal_application_pdf"}}</a>
+                    </div>
+                    {{if and $.CanManage (eq .CreationSource "officer") (eq .Status "pending") (eq .CurrentApprovalStage "manager")}}
+                    <div class="review-modal-actions">
+                      <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/update" hx-post="/api/admin/withdrawal-requests/{{.ID}}/update" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                        <label>{{t $.Lang "amount"}} <input name="amount" type="text" inputmode="numeric" value="{{nominal .Amount}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" required></label>
+                        <label>{{t $.Lang "note"}} <input name="note" maxlength="500" value="{{.Note}}"></label>
+                        <button class="button-secondary" type="submit">{{t $.Lang "save"}}</button>
+                      </form>
+                    </div>
                     {{end}}
-                    <input name="note" placeholder="{{t $.Lang "approval_note_optional"}}" aria-label="{{t $.Lang "approval_note_optional"}}">
-                    <button type="submit">{{t $.Lang "super_admin_approve"}}</button>
-                  </form>
-                  <form class="inline-rejection-form" method="post" action="/api/admin/withdrawal-requests/{{.ID}}/override-reject" hx-post="/api/admin/withdrawal-requests/{{.ID}}/override-reject" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
-                    <input name="rejection_reason" placeholder="{{t $.Lang "rejection_reason"}}" aria-label="{{t $.Lang "rejection_reason"}}">
-                    <button class="button-secondary" type="submit">{{t $.Lang "super_admin_reject"}}</button>
-                  </form>
+                    {{if and (eq $.Role "super_admin") (index $.Permissions "requests.override") (eq .Status "pending")}}
+                    <div class="review-modal-actions">
+                      <p><strong>{{t $.Lang "super_admin_override"}}</strong></p>
+                      <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/override-approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/override-approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                        {{if index $.Permissions "accounting_coa.override"}}
+                        <label>{{t $.Lang "cash_bank_account"}} <select name="cash_coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        <label>{{t $.Lang "savings_liability_account"}} <select name="coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        {{end}}
+                        <input name="note" placeholder="{{t $.Lang "approval_note_optional"}}" aria-label="{{t $.Lang "approval_note_optional"}}">
+                        <button type="submit">{{t $.Lang "super_admin_approve"}}</button>
+                      </form>
+                      <form class="inline-rejection-form" method="post" action="/api/admin/withdrawal-requests/{{.ID}}/override-reject" hx-post="/api/admin/withdrawal-requests/{{.ID}}/override-reject" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                        <input name="rejection_reason" placeholder="{{t $.Lang "rejection_reason"}}" aria-label="{{t $.Lang "rejection_reason"}}">
+                        <button class="button-secondary" type="submit">{{t $.Lang "super_admin_reject"}}</button>
+                      </form>
+                    </div>
+                    {{else if and (index $.Permissions "requests.decide") (or (and (eq .CurrentApprovalStage "manager") (or (eq $.Role "manager") (eq $.Role "admin"))) (and (eq .CurrentApprovalStage "ketua_ii") (eq $.Role "ketua_ii")) (and (eq .CurrentApprovalStage "ketua_i") (eq $.Role "ketua_i")))}}
+                    <div class="review-modal-actions">
+                      <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                        {{if index $.Permissions "accounting_coa.override"}}
+                        <label>{{t $.Lang "cash_bank_account"}} <select name="cash_coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        <label>{{t $.Lang "savings_liability_account"}} <select name="coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
+                        {{end}}
+                        <input name="note" placeholder="{{t $.Lang "approval_note_optional"}}" aria-label="{{t $.Lang "approval_note_optional"}}">
+                        <button type="submit">{{t $.Lang "approve"}}</button>
+                      </form>
+                      <form class="inline-rejection-form" method="post" action="/api/admin/withdrawal-requests/{{.ID}}/reject" hx-post="/api/admin/withdrawal-requests/{{.ID}}/reject" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
+                        <input name="rejection_reason" placeholder="{{t $.Lang "rejection_reason"}}" aria-label="{{t $.Lang "rejection_reason"}}" required>
+                        <button class="button-secondary" type="submit">{{t $.Lang "reject"}}</button>
+                      </form>
+                    </div>
+                    {{else}}<p>{{t $.Lang "read_only"}}</p>{{end}}
+                    {{if .ApprovalHistory}}<details class="review-approval-history"><summary>{{t $.Lang "approval_history"}}</summary><ol>{{range .ApprovalHistory}}<li>{{t $.Lang (printf "role_%s" .OfficerRole)}} — {{t $.Lang (printf "status_%s" .Decision)}} — {{.OfficerName}} — {{.CreatedAt}}{{if .Note}} · {{.Note}}{{end}}{{if .Reason}} · {{.Reason}}{{end}}</li>{{end}}</ol></details>{{end}}
+                  </div>
                 </div>
-                {{else if and (index $.Permissions "requests.decide") (or (and (eq .CurrentApprovalStage "manager") (or (eq $.Role "manager") (eq $.Role "admin"))) (and (eq .CurrentApprovalStage "ketua_ii") (eq $.Role "ketua_ii")) (and (eq .CurrentApprovalStage "ketua_i") (eq $.Role "ketua_i")))}}
-                <div class="table-actions">
-                  <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-post="/api/admin/withdrawal-requests/{{.ID}}/approve" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
-                    {{if index $.Permissions "accounting_coa.override"}}
-                    <label>{{t $.Lang "cash_bank_account"}} <select name="cash_coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
-                    <label>{{t $.Lang "savings_liability_account"}} <select name="coa_code"><option value="">{{t $.Lang "use_mapping"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}">{{.Code}} - {{.Name}}</option>{{end}}</select></label>
-                    {{end}}
-                    <input name="note" placeholder="{{t $.Lang "approval_note_optional"}}" aria-label="{{t $.Lang "approval_note_optional"}}">
-                    <button type="submit">{{t $.Lang "approve"}}</button>
-                  </form>
-                </div>
-                <form class="inline-rejection-form" method="post" action="/api/admin/withdrawal-requests/{{.ID}}/reject" hx-post="/api/admin/withdrawal-requests/{{.ID}}/reject" hx-target="#withdrawal-review-error" hx-swap="innerHTML">
-                  <input name="rejection_reason" placeholder="{{t $.Lang "rejection_reason"}}" aria-label="{{t $.Lang "rejection_reason"}}" required>
-                  <button class="button-secondary" type="submit">{{t $.Lang "reject"}}</button>
-                </form>
-                {{else}}<span>{{t $.Lang "read_only"}}</span>{{end}}
-                {{if .ApprovalHistory}}<details><summary>{{t $.Lang "approval_history"}}</summary><ol>{{range .ApprovalHistory}}<li>{{t $.Lang (printf "role_%s" .OfficerRole)}} — {{t $.Lang (printf "status_%s" .Decision)}} — {{.OfficerName}} — {{.CreatedAt}}{{if .Note}} · {{.Note}}{{end}}{{if .Reason}} · {{.Reason}}{{end}}</li>{{end}}</ol></details>{{end}}
               </td>
             </tr>
             {{end}}
@@ -2373,6 +2394,9 @@
                       <div><span>{{t $.Lang "duration"}}</span><strong>{{.DurationMonths}} {{t $.Lang "months"}}</strong></div>
                       <div class="loan-review-purpose"><span>{{t $.Lang "purpose"}}</span><strong>{{.Purpose}}</strong></div>
                       <div class="loan-review-provenance"><span>{{t $.Lang "admin_loan_provenance"}}</span><strong>{{t $.Lang (printf "admin_loan_source_%s" .CreationSource)}} · {{if .CreatedByName}}{{.CreatedByName}}{{else}}{{t $.Lang "admin_loan_source_member"}}{{end}}{{if .BatchID}} · <a href="/admin/loan-request-batches/{{.BatchID}}">{{.BatchID}}</a>{{end}}</strong></div>
+                    </div>
+                    <div class="review-modal-actions">
+                      <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/application-form.pdf">{{t $.Lang "loan_application_pdf"}}</a>
                     </div>
                     {{if and (eq $.Role "super_admin") (index $.Permissions "requests.override") (eq .Status "pending")}}
                     <div class="review-modal-actions">
