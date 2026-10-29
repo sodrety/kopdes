@@ -1340,8 +1340,8 @@
 {{define "admin-savings"}}
 {{template "admin-shell-start" .}}
       <section class="page-actions">
-        <a class="button-link" href="/admin/savings/new">{{t .Lang "record_saving"}}</a>
-        <a class="button-link button-link-secondary" href="{{.ExportPath}}">{{t .Lang "export_csv"}}</a>
+        {{if index .Permissions "savings.record"}}<a class="button-link" href="/admin/savings/new">{{t .Lang "record_saving"}}</a>{{end}}
+        {{if index .Permissions "reports.view"}}<a class="button-link button-link-secondary" href="{{.ExportPath}}">{{t .Lang "export_csv"}}</a>{{end}}
       </section>
       <section class="panel">
         <h2>{{t .Lang "saving_records"}}</h2>
@@ -1972,6 +1972,35 @@
         {{end}}
       </section>
       <section class="panel">
+        <h2>{{t .Lang "withdrawal_request_history"}}</h2>
+        {{if .WithdrawalRequests}}
+{{template "table-open" .}}
+          <thead>
+            <tr>
+              <th>{{t $.Lang "date"}}</th>
+              <th>{{t $.Lang "amount"}}</th>
+              <th>{{t $.Lang "status"}}</th>
+              <th>{{t $.Lang "note"}}</th>
+              <th>{{t $.Lang "rejection_reason"}}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .WithdrawalRequests}}
+            <tr>
+              <td>{{.CreatedAt}}</td>
+              <td>{{nominal .Amount}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}{{if .CurrentApprovalStage}}<small>{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}</small>{{end}}{{if eq .Status "approved"}}{{if .DisbursementDate}}<small>{{t $.Lang "withdrawal_disbursed_on"}} {{.DisbursementDate}}</small>{{else}}<small>{{t $.Lang "withdrawal_waiting_for_disbursement"}}</small>{{end}}{{end}}</td>
+              <td>{{.Note}}</td>
+              <td>{{.RejectionReason}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+{{template "table-close" .}}
+        {{else}}
+{{template "empty-state" (t .Lang "no_withdrawal_requests")}}
+        {{end}}
+      </section>
+      <section class="panel">
         <h2>{{t .Lang "loan_requests"}}</h2>
         {{if .LoanRequests}}
 {{template "table-open" .}}
@@ -2119,7 +2148,7 @@
 {{define "admin-withdrawal-requests"}}
 {{template "admin-shell-start" .}}
       <section class="page-actions">
-        <a class="button-link button-link-secondary" href="/api/admin/exports/withdrawal-requests.csv?status=pending">{{t .Lang "export_csv"}}</a>
+        {{if index .Permissions "reports.view"}}<a class="button-link button-link-secondary" href="/api/admin/exports/withdrawal-requests.csv">{{t .Lang "export_csv"}}</a>{{end}}
       </section>
       {{if .CanManage}}
       <section class="panel form-panel">
@@ -2203,7 +2232,7 @@
               <td>{{template "member-table-cell" .}}</td>
               <td>{{nominal .Amount}}</td>
               <td>{{.Note}}</td>
-              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}{{if .CurrentApprovalStage}}<small>{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}</small>{{end}}</td>
+              <td>{{template "status-badge" (dict "Lang" $.Lang "Status" .Status)}}{{if .CurrentApprovalStage}}<small>{{t $.Lang "awaiting"}} {{t $.Lang (printf "role_%s" .CurrentApprovalStage)}}</small>{{end}}{{if eq .Status "approved"}}{{if .DisbursementDate}}<small>{{t $.Lang "withdrawal_disbursed_on"}} {{.DisbursementDate}}</small>{{else}}<small>{{t $.Lang "withdrawal_waiting_for_disbursement"}}</small>{{end}}{{end}}</td>
               <td class="review-cell">
                 <a class="button-link button-link-secondary" href="#withdrawal-request-review-{{.ID}}">{{t $.Lang "review"}}</a>
                 <div id="withdrawal-request-review-{{.ID}}" class="review-modal withdrawal-review-modal" role="dialog" aria-modal="true" aria-labelledby="withdrawal-request-review-title-{{.ID}}">
@@ -2273,7 +2302,7 @@
 {{template "table-close" .}}
 {{template "form-error" (dict "ID" "withdrawal-review-error")}}
         {{else}}
-{{template "empty-state" (t .Lang "no_pending_withdrawal_requests")}}
+{{template "empty-state" (t .Lang "no_withdrawal_requests")}}
         {{end}}
       </section>
 {{template "admin-shell-end" .}}

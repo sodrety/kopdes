@@ -73,6 +73,7 @@ var officerPermissions = map[string]map[Permission]bool{
 		PermissionAccountingCOAOverride: true, PermissionTransactionCategoriesManage: true,
 	},
 	"bendahara": {
+		PermissionSavingsView: true, PermissionSavingsRecord: true,
 		PermissionRequestsView: true, PermissionWithdrawalRequestsManage: true,
 		PermissionLoansView: true, PermissionLoansManage: true, PermissionLoanReportsGenerate: true,
 		PermissionRepaymentsView: true, PermissionRepaymentsRecord: true,

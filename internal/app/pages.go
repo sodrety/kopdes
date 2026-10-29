@@ -256,7 +256,7 @@ func (s *Server) adminSavingNewPage(c *gin.Context) {
 }
 
 func (s *Server) adminWithdrawalRequestsPage(c *gin.Context) {
-	requests, err := s.withdrawalRequestsForAdmin("pending")
+	requests, err := s.withdrawalRequestsForAdmin("")
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
@@ -286,7 +286,7 @@ func (s *Server) adminWithdrawalRequestsPage(c *gin.Context) {
 	for index := range deactivationRequests {
 		deactivationRequests[index].CanDecide = hasPermission(current.Role, PermissionRequestsDecide) && deactivationRequests[index].Status == "pending" && deactivationRequests[index].CurrentApprovalStage == approvalStageForOfficer(current.Role)
 	}
-	renderPage(c, "admin-withdrawal-requests", pageData(c, "Penarikan review - KKSUK PD Dharma Jaya", "withdrawal-requests", "withdrawal_request_review", "inspect_pending_withdrawal_requests", gin.H{
+	renderPage(c, "admin-withdrawal-requests", pageData(c, "Penarikan review - KKSUK PD Dharma Jaya", "withdrawal-requests", "withdrawal_request_review", "withdrawal_history_help", gin.H{
 		"WithdrawalRequests":   requests,
 		"DeactivationRequests": deactivationRequests,
 		"COAAccounts":          coaAccounts,
@@ -311,6 +311,11 @@ func (s *Server) adminMemberDetailPage(c *gin.Context) {
 		return
 	}
 	savings, err := s.savingsByMember(member.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	withdrawalRequests, err := s.withdrawalRequestsByMember(member.ID)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
 		return
@@ -367,6 +372,7 @@ func (s *Server) adminMemberDetailPage(c *gin.Context) {
 		"TagihanConfig":          tagihanConfig,
 		"Summary":                summary,
 		"Savings":                savings,
+		"WithdrawalRequests":     withdrawalRequests,
 		"LoanRequests":           requests,
 		"OutstandingLoans":       outstandingLoans,
 		"Repayments":             repayments,
