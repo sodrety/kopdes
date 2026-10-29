@@ -148,6 +148,52 @@ func (s *Server) adminJournalsPage(c *gin.Context) {
 	renderPage(c, "admin-journals", pageData(c, translate(languageFromRequest(c), "journals_page_title"), "journals", "journals", "journals_page_description", data))
 }
 
+func (s *Server) adminJournalPrintPage(c *gin.Context) {
+	var entry FinancialJournalEntryView
+	err := s.db.QueryRow(`SELECT e.id,e.reference_no,e.transaction_type,e.transaction_date,e.description,e.category,e.loan_type,e.status,e.recorded_by,COALESCE(e.reversal_of,''),e.correction_reason,
+		COALESCE(SUM(CASE WHEN l.side='debit' THEN l.amount ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN l.side='credit' THEN l.amount ELSE 0 END),0)
+		FROM financial_journal_entries e LEFT JOIN financial_journal_lines l ON l.journal_id=e.id WHERE e.id=$1 GROUP BY e.id`, c.Param("id")).
+		Scan(&entry.ID, &entry.ReferenceNo, &entry.TransactionType, &entry.Date, &entry.Description, &entry.Category, &entry.LoanType, &entry.Status, &entry.RecordedBy, &entry.ReversalOf, &entry.CorrectionReason, &entry.TotalDebit, &entry.TotalCredit)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_journal_not_found"))
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+
+	rows, err := s.db.Query(`SELECT l.id,COALESCE(l.coa_code,''),COALESCE(a.name,''),l.component,l.side,l.amount,l.mapping_override
+		FROM financial_journal_lines l LEFT JOIN coa_accounts a ON a.code=l.coa_code WHERE l.journal_id=$1 ORDER BY l.created_at,l.id`, entry.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	entry.Lines = make([]FinancialJournalLineView, 0)
+	for rows.Next() {
+		var line FinancialJournalLineView
+		if err := rows.Scan(&line.ID, &line.COACode, &line.COAName, &line.Component, &line.Side, &line.Amount, &line.MappingOverride); err != nil {
+			_ = rows.Close()
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+			return
+		}
+		entry.Lines = append(entry.Lines, line)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	if err := rows.Close(); err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+
+	lang := languageFromRequest(c)
+	renderPage(c, "admin-journal-print", gin.H{"Lang": lang, "Entry": entry})
+}
+
 func (s *Server) financialJournalsForAdmin(dateFrom, dateTo string) ([]FinancialJournalEntryView, error) {
 	query := `SELECT e.id,e.reference_no,e.transaction_type,e.transaction_date,e.description,e.category,e.loan_type,e.status,e.recorded_by,COALESCE(e.reversal_of,''),e.correction_reason,
 		COALESCE(SUM(CASE WHEN l.side='debit' THEN l.amount ELSE 0 END),0),

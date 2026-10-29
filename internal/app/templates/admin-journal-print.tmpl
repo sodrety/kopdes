@@ -1,0 +1,118 @@
+{{define "admin-journal-print"}}
+<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{t .Lang "journal_receipt_title"}} - {{if .Entry.ReferenceNo}}{{.Entry.ReferenceNo}}{{else}}{{.Entry.ID}}{{end}}</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm 14mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #111; background: #eee; font: 16px/1.4 Arial, Helvetica, sans-serif; }
+    .receipt-actions { display: flex; justify-content: center; gap: 12px; padding: 18px; }
+    .receipt-actions a, .receipt-actions button { border: 1px solid #333; border-radius: 4px; background: #fff; color: #111; padding: 9px 14px; font: inherit; text-decoration: none; cursor: pointer; }
+    .receipt { width: min(1100px, calc(100% - 32px)); min-height: 740px; margin: 0 auto 24px; padding: 38px 42px; background: #fff; }
+    .receipt-header { display: flex; align-items: flex-start; justify-content: space-between; min-height: 118px; }
+    .cooperative-identity { display: flex; align-items: center; gap: 18px; }
+    .cooperative-identity img { width: 112px; height: 112px; object-fit: contain; }
+    .cooperative-name { font-size: 19px; line-height: 1.18; }
+    .cooperative-name strong { display: block; font-size: 22px; }
+    .cooperative-address { margin: 5px 0 0; font-size: 14px; line-height: 1.25; }
+    .receipt-number { min-width: 210px; padding-top: 22px; text-align: right; font-size: 17px; }
+    .receipt-number strong { margin-left: 8px; font-weight: 400; }
+    .receipt h1 { margin: 8px 0 34px; text-align: center; font-size: 27px; line-height: 1.15; text-decoration: underline; }
+    .receipt-table { width: 100%; border-collapse: collapse; table-layout: fixed; border-top: 2px solid #111; border-bottom: 2px solid #111; }
+    .receipt-table col:nth-child(1) { width: 24%; }
+    .receipt-table col:nth-child(2) { width: 36%; }
+    .receipt-table col:nth-child(3), .receipt-table col:nth-child(4) { width: 20%; }
+    .receipt-table th, .receipt-table td { padding: 12px 14px; vertical-align: top; font-size: 17px; }
+    .receipt-table th { border-bottom: 2px solid #111; text-align: center; font-weight: 400; }
+    .receipt-table th + th, .receipt-table td + td { border-left: 1.5px solid #111; }
+    .receipt-table .description-cell { white-space: pre-line; }
+    .receipt-table .amount-cell { white-space: nowrap; }
+    .receipt-table .receipt-spacer td { height: 150px; padding: 0; }
+    .receipt-table .receipt-spacer-compact td { height: 24px; }
+    .receipt-table .receipt-total td { border-top: 2px solid #111; border-bottom: 2px solid #111; padding-top: 16px; padding-bottom: 16px; vertical-align: middle; }
+    .receipt-table .receipt-total-label { font-weight: 700; }
+    .receipt-date { margin: 14px 9% 10px 0; text-align: right; font-size: 16px; }
+    .receipt-signatures { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; text-align: center; }
+    .receipt-signature { display: flex; min-height: 160px; flex-direction: column; justify-content: space-between; align-items: center; }
+    .receipt-signature .signature-line { width: 88%; margin-top: auto; border-bottom: 1px dotted #111; }
+    .receipt-signature .signature-name { width: 100%; padding-top: 5px; font-size: 14px; }
+    @media print {
+      body { background: #fff; font-size: 14px; }
+      .receipt-actions { display: none; }
+      .receipt { width: 100%; min-height: 0; margin: 0; padding: 0; }
+      .receipt-header { min-height: 105px; }
+      .cooperative-identity img { width: 100px; height: 100px; }
+      .cooperative-name { font-size: 17px; }
+      .cooperative-name strong { font-size: 20px; }
+      .receipt h1 { margin: 4px 0 24px; font-size: 24px; }
+      .receipt-table th, .receipt-table td { padding: 10px 12px; font-size: 15px; }
+      .receipt-table .receipt-spacer td { height: 125px; }
+      .receipt-table .receipt-spacer-compact td { height: 20px; }
+      .receipt-signature { min-height: 125px; }
+      tr, .receipt-signature { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="receipt-actions" aria-label="{{t .Lang "journal_receipt_title"}}">
+    <a href="/admin/journals?view=journal">{{t .Lang "journal_receipt_back"}}</a>
+    <button type="button" onclick="window.print()">{{t .Lang "journal_receipt_print"}}</button>
+  </nav>
+  <main class="receipt">
+    <header class="receipt-header">
+      <div class="cooperative-identity">
+        <img src="/static/images/lambang-koperasi.png" alt="">
+        <div>
+          <div class="cooperative-name">KOPERASI KONSUMEN<br>SERBA USAHA KARYAWAN<strong>PD DHARMA JAYA</strong></div>
+          <p class="cooperative-address">Jl. Raya Penggilingan, Cakung<br>Jakarta Timur, DKI Jakarta</p>
+        </div>
+      </div>
+      <div class="receipt-number"><span>{{t .Lang "journal_receipt_no"}}</span><strong>{{if .Entry.ReferenceNo}}{{.Entry.ReferenceNo}}{{else}}{{.Entry.ID}}{{end}}</strong></div>
+    </header>
+    <h1>{{t .Lang "journal_receipt_title"}}</h1>
+    <table class="receipt-table">
+      <colgroup><col><col><col><col></colgroup>
+      <thead><tr>
+        <th>{{t .Lang "journal_receipt_description"}}</th>
+        <th>{{t .Lang "journal_receipt_account_details"}}</th>
+        <th>{{t .Lang "debit"}}</th>
+        <th>{{t .Lang "credit"}}</th>
+      </tr></thead>
+      <tbody>
+        {{if .Entry.Lines}}
+          {{range $index, $line := .Entry.Lines}}
+          <tr>
+            {{if eq $index 0}}<td class="description-cell" rowspan="{{len $.Entry.Lines}}">{{if $.Entry.Description}}{{$.Entry.Description}}{{else}}—{{end}}</td>{{end}}
+            <td>{{if $line.COACode}}{{$line.COACode}} — {{$line.COAName}}{{else}}{{t $.Lang "pending_mapping"}}{{end}}</td>
+            <td class="amount-cell">{{if eq $line.Side "debit"}}Rp {{nominal $line.Amount}}{{end}}</td>
+            <td class="amount-cell">{{if eq $line.Side "credit"}}Rp {{nominal $line.Amount}}{{end}}</td>
+          </tr>
+          {{end}}
+          <tr class="receipt-spacer {{if gt (len .Entry.Lines) 5}}receipt-spacer-compact{{end}}"><td></td><td></td><td></td><td></td></tr>
+        {{else}}
+          <tr><td class="description-cell">{{if .Entry.Description}}{{.Entry.Description}}{{else}}—{{end}}</td><td></td><td></td><td></td></tr>
+          <tr class="receipt-spacer"><td></td><td></td><td></td><td></td></tr>
+        {{end}}
+        <tr class="receipt-total">
+          <td></td>
+          <td class="receipt-total-label">{{t .Lang "total"}}</td>
+          <td class="amount-cell">Rp {{nominal .Entry.TotalDebit}}</td>
+          <td class="amount-cell">Rp {{nominal .Entry.TotalCredit}}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="receipt-date">{{t .Lang "journal_receipt_city"}} {{.Entry.Date}}</div>
+    <footer class="receipt-signatures">
+      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_chair"}}</span><span class="signature-line"></span><span class="signature-name">( ........................................ )</span></div>
+      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_treasurer"}}</span><span class="signature-line"></span><span class="signature-name">( ........................................ )</span></div>
+      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_cashier"}}</span><span class="signature-line"></span><span class="signature-name">( ........................................ )</span></div>
+      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_delivered_received"}}</span><span class="signature-line"></span><span class="signature-name">( ........................................ )</span></div>
+    </footer>
+  </main>
+  <script>window.addEventListener("load", function () { window.print(); });</script>
+</body>
+</html>
+{{end}}

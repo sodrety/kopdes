@@ -66,6 +66,23 @@ func TestGeneralJournalAllowsNonCashAccrualEntry(t *testing.T) {
 	if journalStatus != "posted" || transactionType != "manual" || amount != 569019590 {
 		t.Fatalf("expected posted balanced journal, got status=%q type=%q amount=%d", journalStatus, transactionType, amount)
 	}
+	var journalID string
+	if err := fixture.db.QueryRow(`SELECT id FROM financial_journal_entries WHERE transaction_id=$1 AND transaction_type='manual'`, approved.ID).Scan(&journalID); err != nil {
+		t.Fatalf("read posted journal entry ID: %v", err)
+	}
+	printReq := httptest.NewRequest(http.MethodGet, "/admin/journals/"+journalID+"/print", nil)
+	printReq.Header.Set("Authorization", "Bearer "+bendaharaToken)
+	printReq.AddCookie(fixture.setLanguage(t, "id", printReq.URL.Path))
+	printResponse := httptest.NewRecorder()
+	fixture.server.ServeHTTP(printResponse, printReq)
+	if printResponse.Code != http.StatusOK {
+		t.Fatalf("expected journal receipt page status 200, got %d: %s", printResponse.Code, printResponse.Body.String())
+	}
+	for _, expected := range []string{"BUKTI TRANSAKSI", "001/KOKA/IX/2026", "Pencatatan Pendapatan Periode Jan sd Agts 2026 KOKA MART", "TEST-JOURNAL-AR — Piutang Usaha", "298.013.000", "Disetorkan/Diterima", "window.print()"} {
+		if !strings.Contains(printResponse.Body.String(), expected) {
+			t.Fatalf("expected journal receipt to include %q, got %s", expected, printResponse.Body.String())
+		}
+	}
 	var transactionCount int
 	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM manual_cash_transactions WHERE id=$1`, approved.ID).Scan(&transactionCount); err != nil {
 		t.Fatalf("check cash transaction ledger: %v", err)

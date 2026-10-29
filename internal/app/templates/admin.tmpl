@@ -676,7 +676,7 @@
               </div>
             </td>
             <td>Rp {{nominal .TotalDebit}}</td><td>Rp {{nominal .TotalCredit}}</td><td>{{t $.Lang (printf "journal_status_%s" .Status)}}</td>
-            <td>{{if and $.CanRecord .CanReverse}}<form method="post" action="/api/admin/journals/{{.ID}}/reverse" hx-post="/api/admin/journals/{{.ID}}/reverse" hx-target="#journal-reversal-error" hx-swap="innerHTML"><label>{{t $.Lang "correction_reason"}} <input name="reason" maxlength="500" required></label><label>{{t $.Lang "date"}} <input name="date" type="date" value="{{$.DefaultDate}}" required></label><button type="submit">{{t $.Lang "reverse_journal"}}</button></form>{{else if .ReversalOf}}{{t $.Lang "journal_reversed"}}{{else}}—{{end}}</td>
+            <td><a class="button-link button-link-secondary" href="/admin/journals/{{.ID}}/print" target="_blank" rel="noopener">{{t $.Lang "print_transaction_receipt"}}</a>{{if and $.CanRecord .CanReverse}}<form method="post" action="/api/admin/journals/{{.ID}}/reverse" hx-post="/api/admin/journals/{{.ID}}/reverse" hx-target="#journal-reversal-error" hx-swap="innerHTML"><label>{{t $.Lang "correction_reason"}} <input name="reason" maxlength="500" required></label><label>{{t $.Lang "date"}} <input name="date" type="date" value="{{$.DefaultDate}}" required></label><button type="submit">{{t $.Lang "reverse_journal"}}</button></form>{{else if .ReversalOf}}{{t $.Lang "journal_reversed"}}{{end}}</td>
           </tr>{{end}}</tbody>
 {{template "table-close" .}}
         {{else}}{{template "empty-state" (t .Lang "no_journal_entries")}}{{end}}
