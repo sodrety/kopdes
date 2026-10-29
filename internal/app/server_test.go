@@ -3015,6 +3015,8 @@ func TestPenarikanPagesRenderMemberAndAdminFlows(t *testing.T) {
 	memberToken := fixture.login(t, "wd-page@coop.test", "member-password")
 	fixture.recordSavingInCategory(t, adminToken, member.ID, "deposit", "sukarela", 400000, "SUK-PAGE", "Page sukarela")
 	requestID := fixture.createWithdrawalRequest(t, memberToken, 100000, "Page withdrawal")
+	approvedRequestID := fixture.createWithdrawalRequest(t, memberToken, 50000, "Approved withdrawal history")
+	fixture.approveWithdrawalRequest(t, adminToken, approvedRequestID)
 
 	memberCookie := fixture.browserLogin(t, "wd-page@coop.test", "member-password")
 	memberReq := httptest.NewRequest(http.MethodGet, "/member/withdrawal-requests", nil)
@@ -3027,9 +3029,22 @@ func TestPenarikanPagesRenderMemberAndAdminFlows(t *testing.T) {
 		t.Fatalf("expected member withdrawal page status 200, got %d: %s", memberRec.Code, memberRec.Body.String())
 	}
 	memberBody := memberRec.Body.String()
-	for _, text := range []string{"Penarikan", "Submit withdrawal request", `hx-post="/api/member/withdrawal-requests"`, "Simpanan Sukarela", "Page withdrawal", "Menunggu"} {
+	for _, text := range []string{"Penarikan", "Submit withdrawal request", `hx-post="/api/member/withdrawal-requests"`, "Simpanan Sukarela", "Page withdrawal", "Menunggu", "Approved withdrawal history", "Disetujui"} {
 		if !strings.Contains(memberBody, text) {
 			t.Fatalf("expected member withdrawal page to include %q, got %s", text, memberBody)
+		}
+	}
+
+	memberDetailReq := httptest.NewRequest(http.MethodGet, "/admin/members/"+member.ID, nil)
+	memberDetailReq.AddCookie(fixture.browserLogin(t, "admin@coop.test", "password"))
+	memberDetailRec := httptest.NewRecorder()
+	fixture.server.ServeHTTP(memberDetailRec, memberDetailReq)
+	if memberDetailRec.Code != http.StatusOK {
+		t.Fatalf("expected member detail page status 200, got %d: %s", memberDetailRec.Code, memberDetailRec.Body.String())
+	}
+	for _, text := range []string{"Withdrawal request history", "Page withdrawal", "Approved withdrawal history", "Disetujui"} {
+		if !strings.Contains(memberDetailRec.Body.String(), text) {
+			t.Fatalf("expected member detail to retain withdrawal history containing %q, got %s", text, memberDetailRec.Body.String())
 		}
 	}
 
@@ -3044,7 +3059,7 @@ func TestPenarikanPagesRenderMemberAndAdminFlows(t *testing.T) {
 		t.Fatalf("expected admin withdrawal page status 200, got %d: %s", adminRec.Code, adminRec.Body.String())
 	}
 	adminBody := adminRec.Body.String()
-	for _, text := range []string{"Penarikan review", "Withdrawal Page", "M-WD-PAGE", "100.000", "Page withdrawal", "/api/admin/withdrawal-requests/" + requestID + "/approve", "/api/admin/withdrawal-requests/" + requestID + "/reject", "/api/admin/exports/withdrawal-requests.csv?status=pending", "Menunggu"} {
+	for _, text := range []string{"Penarikan review", "Withdrawal Page", "M-WD-PAGE", "100.000", "Page withdrawal", "Approved withdrawal history", "/api/admin/withdrawal-requests/" + requestID + "/approve", "/api/admin/withdrawal-requests/" + requestID + "/reject", `/api/admin/exports/withdrawal-requests.csv`, "Menunggu", "Disetujui"} {
 		if !strings.Contains(adminBody, text) {
 			t.Fatalf("expected admin withdrawal page to include %q, got %s", text, adminBody)
 		}
@@ -4453,8 +4468,17 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 	if pageRec.Code != http.StatusOK {
 		t.Fatalf("expected Bendahara transactions page status 200, got %d: %s", pageRec.Code, pageRec.Body.String())
 	}
-	if !strings.Contains(pageRec.Body.String(), `href="/admin/journals"`) || strings.Contains(pageRec.Body.String(), `href="/admin/savings"`) || strings.Contains(pageRec.Body.String(), `href="/admin/members"`) || strings.Contains(pageRec.Body.String(), `href="/admin/reports/balance"`) {
-		t.Fatalf("expected Bendahara to see the transaction and journal workflows only, got %s", pageRec.Body.String())
+	if !strings.Contains(pageRec.Body.String(), `href="/admin/journals"`) || !strings.Contains(pageRec.Body.String(), `href="/admin/savings"`) || strings.Contains(pageRec.Body.String(), `href="/admin/members"`) || strings.Contains(pageRec.Body.String(), `href="/admin/reports/balance"`) {
+		t.Fatalf("expected Bendahara to see savings, transaction, and journal workflows, got %s", pageRec.Body.String())
+	}
+	for _, path := range []string{"/admin/savings", "/admin/savings/new"} {
+		savingsPageReq := httptest.NewRequest(http.MethodGet, path, nil)
+		savingsPageReq.Header.Set("Authorization", "Bearer "+bendaharaToken)
+		savingsPageRec := httptest.NewRecorder()
+		fixture.server.ServeHTTP(savingsPageRec, savingsPageReq)
+		if savingsPageRec.Code != http.StatusOK {
+			t.Fatalf("expected Bendahara savings page %s status 200, got %d: %s", path, savingsPageRec.Code, savingsPageRec.Body.String())
+		}
 	}
 	journalReq := httptest.NewRequest(http.MethodGet, "/admin/journals", nil)
 	journalReq.Header.Set("Authorization", "Bearer "+bendaharaToken)
@@ -4464,7 +4488,7 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 		t.Fatalf("expected Bendahara to create Jurnal Umum vouchers, got %d: %s", journalRec.Code, journalRec.Body.String())
 	}
 
-	for _, path := range []string{"/api/admin/savings", "/admin/members"} {
+	for _, path := range []string{"/admin/members"} {
 		forbiddenReq := httptest.NewRequest(http.MethodGet, path, nil)
 		forbiddenReq.Header.Set("Authorization", "Bearer "+bendaharaToken)
 		forbiddenRec := httptest.NewRecorder()
@@ -4473,6 +4497,9 @@ func TestManualCashTransactionsSupportCategoriesReferencesReportsAndBendahara(t 
 			t.Fatalf("expected Bendahara forbidden status for %s, got %d: %s", path, forbiddenRec.Code, forbiddenRec.Body.String())
 		}
 	}
+
+	savingsMember := fixture.createMember(t, managerToken, `{"member_no":"M-BEN-SAVING","full_name":"Bendahara Savings Member","join_date":"2026-06-16","status":"active","email":"bendahara-savings-member@coop.test","password":"member-password"}`)
+	fixture.recordSavingInCategory(t, bendaharaToken, savingsMember.ID, "deposit", "sukarela", 125000, "BEN-SAV-001", "Bendahara recorded saving")
 
 	exportReq := httptest.NewRequest(http.MethodGet, "/api/admin/exports/transactions.csv?type=manual", nil)
 	exportReq.Header.Set("Authorization", "Bearer "+bendaharaToken)
