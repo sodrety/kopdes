@@ -655,14 +655,16 @@
           <input type="hidden" name="view" value="journal">
           <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label>
           <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label>
+          <label>{{t .Lang "member"}} <select name="member_id"><option value="">{{t .Lang "all_members"}}</option>{{range .Members}}<option value="{{.ID}}" {{if eq $.SelectedMemberID .ID}}selected{{end}}>{{.MemberNo}} — {{.FullName}}</option>{{end}}</select></label>
           <button type="submit">{{t .Lang "apply_filters"}}</button>
           <a class="button-link button-link-secondary" href="/admin/journals?view=journal">{{t .Lang "reset"}}</a>
         </form>
         {{if .Entries}}
 {{template "table-open" .}}
-          <thead><tr><th>{{t $.Lang "date"}}</th><th>{{t $.Lang "reference"}}</th><th>{{t $.Lang "transaction_type"}}</th><th>{{t $.Lang "description"}}</th><th>{{t $.Lang "journal_lines"}}</th><th>{{t $.Lang "debit"}}</th><th>{{t $.Lang "credit"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
+          <thead><tr><th>{{t $.Lang "date"}}</th><th>{{t $.Lang "reference"}}</th><th>{{t $.Lang "transaction_type"}}</th><th>{{t $.Lang "description"}}</th><th>{{t $.Lang "member"}}</th><th>{{t $.Lang "journal_lines"}}</th><th>{{t $.Lang "debit"}}</th><th>{{t $.Lang "credit"}}</th><th>{{t $.Lang "status"}}</th><th>{{t $.Lang "action"}}</th></tr></thead>
           <tbody>{{range .Entries}}<tr>
             <td>{{.Date}}</td><td>{{.ReferenceNo}}</td><td>{{t $.Lang (printf "transaction_type_%s" .TransactionType)}}</td><td>{{.Description}}{{if .CorrectionReason}}<small>{{t $.Lang "correction_reason"}}: {{.CorrectionReason}}</small>{{end}}{{if .ReversalOf}}<small>{{t $.Lang "reversal_of"}} {{.ReversalOf}}</small>{{end}}</td>
+            <td>{{if .MemberID}}{{.MemberNo}} — {{.MemberName}}{{else}}—{{end}}</td>
             <td>
               <div class="journal-line-groups">
                 <div class="journal-line-group journal-line-group-debit">

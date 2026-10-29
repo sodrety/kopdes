@@ -21,6 +21,7 @@
     .receipt-number { min-width: 210px; padding-top: 22px; text-align: right; font-size: 17px; }
     .receipt-number strong { margin-left: 8px; font-weight: 400; }
     .receipt h1 { margin: 8px 0 34px; text-align: center; font-size: 27px; line-height: 1.15; text-decoration: underline; }
+    .receipt-member { margin: -20px 0 18px; text-align: center; font-size: 15px; }
     .receipt-table { width: 100%; border-collapse: collapse; table-layout: fixed; border-top: 2px solid #111; border-bottom: 2px solid #111; }
     .receipt-table col:nth-child(1) { width: 24%; }
     .receipt-table col:nth-child(2) { width: 36%; }
@@ -48,6 +49,7 @@
       .cooperative-name { font-size: 17px; }
       .cooperative-name strong { font-size: 20px; }
       .receipt h1 { margin: 4px 0 24px; font-size: 24px; }
+      .receipt-member { margin: -14px 0 14px; }
       .receipt-table th, .receipt-table td { padding: 10px 12px; font-size: 15px; }
       .receipt-table .receipt-spacer td { height: 125px; }
       .receipt-table .receipt-spacer-compact td { height: 20px; }
@@ -73,6 +75,7 @@
       <div class="receipt-number"><span>{{t .Lang "journal_receipt_no"}}</span><strong>{{if .Entry.ReferenceNo}}{{.Entry.ReferenceNo}}{{else}}{{.Entry.ID}}{{end}}</strong></div>
     </header>
     <h1>{{t .Lang "journal_receipt_title"}}</h1>
+    {{if .Entry.MemberID}}<div class="receipt-member"><strong>{{t .Lang "member"}}:</strong> {{.Entry.MemberNo}} — {{.Entry.MemberName}}</div>{{end}}
     <table class="receipt-table">
       <colgroup><col><col><col><col></colgroup>
       <thead><tr>

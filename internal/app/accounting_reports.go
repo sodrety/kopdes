@@ -28,6 +28,9 @@ type FinancialJournalEntryView struct {
 	TransactionType  string
 	Date             string
 	Description      string
+	MemberID         string
+	MemberNo         string
+	MemberName       string
 	Category         string
 	LoanType         string
 	Status           string
@@ -65,6 +68,25 @@ var (
 	errJournalAlreadyReversed = errors.New("journal entry already reversed")
 	errInvalidJournalReversal = errors.New("invalid journal reversal")
 )
+
+const financialJournalMemberCTE = `WITH journal_members AS (
+	SELECT e.id AS journal_id,m.id AS member_id,m.member_no,m.full_name
+	FROM financial_journal_entries e
+	LEFT JOIN financial_journal_entries original ON original.id=e.reversal_of
+	LEFT JOIN loans loan_source
+		ON COALESCE(original.transaction_type,e.transaction_type)='loan'
+		AND loan_source.id=COALESCE(original.transaction_id,e.transaction_id)
+	LEFT JOIN saving_records saving_source
+		ON COALESCE(original.transaction_type,e.transaction_type) IN ('savings','withdrawal')
+		AND saving_source.id=COALESCE(original.transaction_id,e.transaction_id)
+	LEFT JOIN loan_repayments repayment_source
+		ON COALESCE(original.transaction_type,e.transaction_type)='repayment'
+		AND repayment_source.id=COALESCE(original.transaction_id,e.transaction_id)
+	LEFT JOIN loan_suspensions suspension_source
+		ON COALESCE(original.transaction_type,e.transaction_type)='loan_suspension_fee'
+		AND suspension_source.id=COALESCE(original.transaction_id,e.transaction_id)
+	LEFT JOIN members m ON m.id=COALESCE(loan_source.member_id,saving_source.member_id,repayment_source.member_id,suspension_source.member_id)
+)`
 
 func (s *Server) adminJournalsPage(c *gin.Context) {
 	if err := s.ensureFinancialJournalsBackfilled(); err != nil {
@@ -109,7 +131,15 @@ func (s *Server) adminJournalsPage(c *gin.Context) {
 		data["TrialDebit"] = totals[0]
 		data["TrialCredit"] = totals[1]
 	default:
-		entries, err := s.financialJournalsForAdmin(dateFrom, dateTo)
+		memberID := strings.TrimSpace(c.Query("member_id"))
+		members, err := s.financialJournalMembersForAdmin()
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+			return
+		}
+		data["Members"] = members
+		data["SelectedMemberID"] = memberID
+		entries, err := s.financialJournalsForAdmin(dateFrom, dateTo, memberID)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 			return
@@ -148,13 +178,40 @@ func (s *Server) adminJournalsPage(c *gin.Context) {
 	renderPage(c, "admin-journals", pageData(c, translate(languageFromRequest(c), "journals_page_title"), "journals", "journals", "journals_page_description", data))
 }
 
+func (s *Server) financialJournalMembersForAdmin() ([]Member, error) {
+	rows, err := s.db.Query(`SELECT id,member_no,full_name FROM members ORDER BY full_name,member_no`)
+	if err != nil {
+		return nil, err
+	}
+	members := make([]Member, 0)
+	for rows.Next() {
+		var member Member
+		if err := rows.Scan(&member.ID, &member.MemberNo, &member.FullName); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		members = append(members, member)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
 func (s *Server) adminJournalPrintPage(c *gin.Context) {
 	var entry FinancialJournalEntryView
-	err := s.db.QueryRow(`SELECT e.id,e.reference_no,e.transaction_type,e.transaction_date,e.description,e.category,e.loan_type,e.status,e.recorded_by,COALESCE(e.reversal_of,''),e.correction_reason,
+	err := s.db.QueryRow(financialJournalMemberCTE+` SELECT e.id,e.reference_no,e.transaction_type,e.transaction_date,e.description,
+		COALESCE(jm.member_id,''),COALESCE(jm.member_no,''),COALESCE(jm.full_name,''),
+		e.category,e.loan_type,e.status,e.recorded_by,COALESCE(e.reversal_of,''),e.correction_reason,
 		COALESCE(SUM(CASE WHEN l.side='debit' THEN l.amount ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN l.side='credit' THEN l.amount ELSE 0 END),0)
-		FROM financial_journal_entries e LEFT JOIN financial_journal_lines l ON l.journal_id=e.id WHERE e.id=$1 GROUP BY e.id`, c.Param("id")).
-		Scan(&entry.ID, &entry.ReferenceNo, &entry.TransactionType, &entry.Date, &entry.Description, &entry.Category, &entry.LoanType, &entry.Status, &entry.RecordedBy, &entry.ReversalOf, &entry.CorrectionReason, &entry.TotalDebit, &entry.TotalCredit)
+		FROM financial_journal_entries e LEFT JOIN journal_members jm ON jm.journal_id=e.id LEFT JOIN financial_journal_lines l ON l.journal_id=e.id
+		WHERE e.id=$1 GROUP BY e.id,jm.member_id,jm.member_no,jm.full_name`, c.Param("id")).
+		Scan(&entry.ID, &entry.ReferenceNo, &entry.TransactionType, &entry.Date, &entry.Description, &entry.MemberID, &entry.MemberNo, &entry.MemberName, &entry.Category, &entry.LoanType, &entry.Status, &entry.RecordedBy, &entry.ReversalOf, &entry.CorrectionReason, &entry.TotalDebit, &entry.TotalCredit)
 	if errors.Is(err, sql.ErrNoRows) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_journal_not_found"))
 		return
@@ -194,12 +251,14 @@ func (s *Server) adminJournalPrintPage(c *gin.Context) {
 	renderPage(c, "admin-journal-print", gin.H{"Lang": lang, "Entry": entry})
 }
 
-func (s *Server) financialJournalsForAdmin(dateFrom, dateTo string) ([]FinancialJournalEntryView, error) {
-	query := `SELECT e.id,e.reference_no,e.transaction_type,e.transaction_date,e.description,e.category,e.loan_type,e.status,e.recorded_by,COALESCE(e.reversal_of,''),e.correction_reason,
+func (s *Server) financialJournalsForAdmin(dateFrom, dateTo, memberID string) ([]FinancialJournalEntryView, error) {
+	query := financialJournalMemberCTE + ` SELECT e.id,e.reference_no,e.transaction_type,e.transaction_date,e.description,
+		COALESCE(jm.member_id,''),COALESCE(jm.member_no,''),COALESCE(jm.full_name,''),
+		e.category,e.loan_type,e.status,e.recorded_by,COALESCE(e.reversal_of,''),e.correction_reason,
 		COALESCE(SUM(CASE WHEN l.side='debit' THEN l.amount ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN l.side='credit' THEN l.amount ELSE 0 END),0),
 		(e.status='posted' AND e.transaction_type<>'loan_suspension_fee' AND NOT EXISTS(SELECT 1 FROM financial_journal_entries r WHERE r.reversal_of=e.id))
-		FROM financial_journal_entries e LEFT JOIN financial_journal_lines l ON l.journal_id=e.id WHERE 1=1`
+		FROM financial_journal_entries e LEFT JOIN journal_members jm ON jm.journal_id=e.id LEFT JOIN financial_journal_lines l ON l.journal_id=e.id WHERE 1=1`
 	args := []any{}
 	if dateFrom != "" {
 		args = append(args, dateFrom)
@@ -209,7 +268,11 @@ func (s *Server) financialJournalsForAdmin(dateFrom, dateTo string) ([]Financial
 		args = append(args, dateTo)
 		query += ` AND e.transaction_date <= $` + strconv.Itoa(len(args))
 	}
-	query += ` GROUP BY e.id ORDER BY e.transaction_date DESC,e.created_at DESC,e.id DESC LIMIT 500`
+	if memberID != "" {
+		args = append(args, memberID)
+		query += ` AND jm.member_id=$` + strconv.Itoa(len(args))
+	}
+	query += ` GROUP BY e.id,jm.member_id,jm.member_no,jm.full_name ORDER BY e.transaction_date DESC,e.created_at DESC,e.id DESC LIMIT 500`
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -217,7 +280,7 @@ func (s *Server) financialJournalsForAdmin(dateFrom, dateTo string) ([]Financial
 	entries := make([]FinancialJournalEntryView, 0)
 	for rows.Next() {
 		var item FinancialJournalEntryView
-		if err := rows.Scan(&item.ID, &item.ReferenceNo, &item.TransactionType, &item.Date, &item.Description, &item.Category, &item.LoanType, &item.Status, &item.RecordedBy, &item.ReversalOf, &item.CorrectionReason, &item.TotalDebit, &item.TotalCredit, &item.CanReverse); err != nil {
+		if err := rows.Scan(&item.ID, &item.ReferenceNo, &item.TransactionType, &item.Date, &item.Description, &item.MemberID, &item.MemberNo, &item.MemberName, &item.Category, &item.LoanType, &item.Status, &item.RecordedBy, &item.ReversalOf, &item.CorrectionReason, &item.TotalDebit, &item.TotalCredit, &item.CanReverse); err != nil {
 			rows.Close()
 			return nil, err
 		}
