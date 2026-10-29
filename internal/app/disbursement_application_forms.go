@@ -2,10 +2,12 @@ package app
 
 import (
 	"bytes"
+	"compress/zlib"
 	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
+	"image/png"
 	"net/http"
 	"strconv"
 	"strings"
@@ -390,11 +392,13 @@ func disbursementApprovalFormText(approvals []ApprovalDecision, stage string) st
 func buildWithdrawalDisbursementApplicationFormPDF(report disbursementApplicationFormData) ([]byte, error) {
 	const pageWidth, pageHeight = 595.28, 841.89
 	var content strings.Builder
-	writeWithdrawalFormText(&content, pageHeight, 42, 36, 9, "KOPERASI KONSUMEN", true)
-	writeWithdrawalFormText(&content, pageHeight, 42, 49, 9, "SERBA USAHA KARYAWAN", true)
-	writeWithdrawalFormText(&content, pageHeight, 42, 65, 14, "PD DHARMA JAYA", true)
-	writeWithdrawalFormText(&content, pageHeight, 42, 80, 8, "Jl. Raya Penggilingan, Cakung", false)
-	writeWithdrawalFormText(&content, pageHeight, 42, 93, 8, "Jakarta Timur, DKI Jakarta", false)
+	const logoX, logoTop, logoSize = 24.0, 16.0, 68.0
+	fmt.Fprintf(&content, "q %.2f 0 0 %.2f %.2f %.2f cm /Im1 Do Q\n", logoSize, logoSize, logoX, pageHeight-logoTop-logoSize)
+	writeWithdrawalFormText(&content, pageHeight, 105, 36, 9, "KOPERASI KONSUMEN", true)
+	writeWithdrawalFormText(&content, pageHeight, 105, 49, 9, "SERBA USAHA KARYAWAN", true)
+	writeWithdrawalFormText(&content, pageHeight, 105, 65, 14, "PD DHARMA JAYA", true)
+	writeWithdrawalFormText(&content, pageHeight, 105, 80, 8, "Jl. Raya Penggilingan, Cakung", false)
+	writeWithdrawalFormText(&content, pageHeight, 105, 93, 8, "Jakarta Timur, DKI Jakarta", false)
 	writeWithdrawalFormText(&content, pageHeight, 180, 119, 14, "SURAT PERMOHONAN PENARIKAN", true)
 	writeWithdrawalFormText(&content, pageHeight, 220, 137, 14, "SIMPANAN MANASUKA", true)
 	writeWithdrawalFormLine(&content, pageHeight, 42, 148, 553, 148)
@@ -451,15 +455,58 @@ func buildWithdrawalDisbursementApplicationFormPDF(report disbursementApplicatio
 	writeWithdrawalFormText(&content, pageHeight, 232, 813, 7, fmt.Sprintf("Disetujui Rp %s", formatLoanReportAmount(report.WithdrawalAmount)), false)
 
 	contentBytes := []byte(content.String())
+	logo, err := withdrawalFormLogoObject()
+	if err != nil {
+		return nil, err
+	}
 	objects := []loanPDFObject{
 		{body: "<< /Type /Catalog /Pages 2 0 R >>"},
 		{body: "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"},
-		{body: fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2f %.2f] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>", pageWidth, pageHeight)},
+		{body: fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2f %.2f] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> /XObject << /Im1 7 0 R >> >> /Contents 4 0 R >>", pageWidth, pageHeight)},
 		{body: fmt.Sprintf("<< /Length %d >>", len(contentBytes)), stream: contentBytes},
 		{body: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"},
 		{body: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"},
+		logo,
 	}
 	return writeDisbursementFormPDF(objects)
+}
+
+func withdrawalFormLogoObject() (loanPDFObject, error) {
+	logoBytes, err := staticAssetFS.ReadFile("static/images/lambang-koperasi.png")
+	if err != nil {
+		return loanPDFObject{}, err
+	}
+	logo, err := png.Decode(bytes.NewReader(logoBytes))
+	if err != nil {
+		return loanPDFObject{}, err
+	}
+	bounds := logo.Bounds()
+	var raw bytes.Buffer
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := logo.At(x, y).RGBA()
+			if a < 65535 {
+				r = (r*a + 65535*(65535-a)) / 65535
+				g = (g*a + 65535*(65535-a)) / 65535
+				b = (b*a + 65535*(65535-a)) / 65535
+			}
+			raw.WriteByte(byte(r >> 8))
+			raw.WriteByte(byte(g >> 8))
+			raw.WriteByte(byte(b >> 8))
+		}
+	}
+	var compressed bytes.Buffer
+	writer := zlib.NewWriter(&compressed)
+	if _, err := writer.Write(raw.Bytes()); err != nil {
+		return loanPDFObject{}, err
+	}
+	if err := writer.Close(); err != nil {
+		return loanPDFObject{}, err
+	}
+	return loanPDFObject{
+		body:   fmt.Sprintf("<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length %d >>", bounds.Dx(), bounds.Dy(), compressed.Len()),
+		stream: compressed.Bytes(),
+	}, nil
 }
 
 func withdrawalFormTable(content *strings.Builder, pageHeight float64, report disbursementApplicationFormData) {
