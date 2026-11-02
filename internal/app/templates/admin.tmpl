@@ -2542,7 +2542,7 @@
     document.querySelectorAll('[data-loan-settlement-preview]').forEach(function (preview) {
       var form = preview.closest('form');
       var toggle = form && form.querySelector('input[name="settle_outstanding_loans"]');
-      var amountField = form && form.querySelector('[name="approved_amount"]');
+      var amountField = form && form.elements.namedItem('approved_amount');
       var payoffOutput = preview.querySelector('[data-loan-payoff-value]');
       var netOutput = preview.querySelector('[data-loan-net-value]');
       var warning = preview.querySelector('[data-loan-payoff-warning]');
