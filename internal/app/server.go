@@ -206,6 +206,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.GET("/admin/loans/:id/print/acceptance", server.requirePermission(PermissionLoanReportsGenerate), server.adminLoanAcceptanceFormPrintPage)
 	router.GET("/admin/loan-requests/:id/print/application", server.requirePermission(PermissionRequestsView), server.adminLoanRequestApplicationFormPrintPage)
 	router.GET("/admin/loan-requests/:id/print/acceptance", server.requirePermission(PermissionRequestsView), server.adminLoanRequestAcceptanceFormPrintPage)
+	router.GET("/admin/withdrawal-requests/:id/print/application", server.requirePermission(PermissionRequestsView), server.adminWithdrawalRequestApplicationFormPrintPage)
 	router.GET("/admin/loan-requests/:id/print/disbursement-form", server.requirePermission(PermissionLoansManage), server.adminLoanDisbursementApplicationFormPrintPage)
 	router.GET("/admin/repayments", server.requirePermission(PermissionRepaymentsView), server.adminRepaymentsPage)
 	router.GET("/admin/coa", server.requirePermission(PermissionCOAView), server.adminCOAPage)

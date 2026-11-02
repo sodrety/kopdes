@@ -2286,7 +2286,7 @@
                       <div class="withdrawal-review-note"><span>{{t $.Lang "note"}}</span><strong>{{if .Note}}{{.Note}}{{else}}{{t $.Lang "none"}}{{end}}</strong></div>
                     </div>
                     <div class="review-modal-actions">
-                      <a class="button-link button-link-secondary" href="/api/admin/withdrawal-requests/{{.ID}}/application-form.pdf">{{t $.Lang "withdrawal_application_pdf"}}</a>
+                      <a class="button-link button-link-secondary" href="/admin/withdrawal-requests/{{.ID}}/print/application" target="_blank" rel="noopener">{{t $.Lang "withdrawal_application_print"}}</a>
                     </div>
                     {{if and $.CanManage (eq .CreationSource "officer") (eq .Status "pending") (eq .CurrentApprovalStage "manager")}}
                     <div class="review-modal-actions">
