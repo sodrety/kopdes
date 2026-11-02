@@ -38,7 +38,6 @@
     .receipt-date { margin: 14px 9% 10px 0; text-align: right; font-size: 16px; }
     .receipt-signatures { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; text-align: center; }
     .receipt-signature { display: flex; min-height: 160px; flex-direction: column; justify-content: space-between; align-items: center; }
-    .receipt-signature .signature-line { width: 88%; margin-top: auto; border-bottom: 1px dotted #111; }
     .receipt-signature .signature-name { width: 100%; padding-top: 5px; font-size: 14px; }
     @media print {
       body { background: #fff; font-size: 14px; }
@@ -109,10 +108,10 @@
     </table>
     <div class="receipt-date">{{t .Lang "journal_receipt_city"}} {{.Entry.Date}}</div>
     <footer class="receipt-signatures">
-      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_chair"}}</span><span class="signature-line"></span><span class="signature-name">( ........................................ )</span></div>
-      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_treasurer"}}</span><span class="signature-line"></span><span class="signature-name">( ........................................ )</span></div>
-      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_cashier"}}</span><span class="signature-line"></span><span class="signature-name">( ........................................ )</span></div>
-      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_delivered_received"}}</span><span class="signature-line"></span><span class="signature-name">( ........................................ )</span></div>
+      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_chair"}}</span><span class="signature-name">( ........................................ )</span></div>
+      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_treasurer"}}</span><span class="signature-name">( ........................................ )</span></div>
+      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_cashier"}}</span><span class="signature-name">( ........................................ )</span></div>
+      <div class="receipt-signature"><span>{{t .Lang "journal_receipt_delivered_received"}}</span><span class="signature-name">( ........................................ )</span></div>
     </footer>
   </main>
   <script>window.addEventListener("load", function () { window.print(); });</script>
