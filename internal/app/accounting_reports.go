@@ -79,13 +79,16 @@ const financialJournalMemberCTE = `WITH journal_members AS (
 	LEFT JOIN saving_records saving_source
 		ON COALESCE(original.transaction_type,e.transaction_type) IN ('savings','withdrawal')
 		AND saving_source.id=COALESCE(original.transaction_id,e.transaction_id)
+	LEFT JOIN saving_record_removals saving_removal_source
+		ON COALESCE(original.transaction_type,e.transaction_type) IN ('savings','withdrawal')
+		AND saving_removal_source.id=COALESCE(original.transaction_id,e.transaction_id)
 	LEFT JOIN loan_repayments repayment_source
 		ON COALESCE(original.transaction_type,e.transaction_type)='repayment'
 		AND repayment_source.id=COALESCE(original.transaction_id,e.transaction_id)
 	LEFT JOIN loan_suspensions suspension_source
 		ON COALESCE(original.transaction_type,e.transaction_type)='loan_suspension_fee'
 		AND suspension_source.id=COALESCE(original.transaction_id,e.transaction_id)
-	LEFT JOIN members m ON m.id=COALESCE(loan_source.member_id,saving_source.member_id,repayment_source.member_id,suspension_source.member_id)
+	LEFT JOIN members m ON m.id=COALESCE(loan_source.member_id,saving_source.member_id,saving_removal_source.member_id,repayment_source.member_id,suspension_source.member_id)
 )`
 
 func (s *Server) adminJournalsPage(c *gin.Context) {

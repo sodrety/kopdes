@@ -1421,6 +1421,14 @@
                   </form>
                   <p id="saving-correction-error-{{.ID}}" class="form-error"></p>
                 </details>
+                <details>
+                  <summary>{{t $.Lang "remove_saving"}}</summary>
+                  <form method="post" action="/api/admin/savings/{{.ID}}/remove" hx-post="/api/admin/savings/{{.ID}}/remove" hx-target="#saving-removal-error-{{.ID}}" hx-swap="innerHTML" hx-confirm="{{t $.Lang "confirm_remove_saving"}}">
+                    <label>{{t $.Lang "correction_reason"}} <input name="reason" maxlength="500" required></label>
+                    <button type="submit">{{t $.Lang "remove_saving"}}</button>
+                  </form>
+                </details>
+                <p id="saving-removal-error-{{.ID}}" class="form-error"></p>
               {{else}}—{{end}}</td>
               {{end}}
             </tr>
