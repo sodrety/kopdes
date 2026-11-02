@@ -40,8 +40,14 @@ func (b slipBalance) total() (int64, error) {
 }
 
 type savingSlipMonth struct {
-	Month  time.Month
-	Stored slipBalance
+	Month       time.Month
+	Stored      slipBalance
+	Values      slipBalance
+	Withdrawals []savingSlipWithdrawal
+}
+
+type savingSlipWithdrawal struct {
+	Amount int64
 	Values slipBalance
 }
 
@@ -195,17 +201,20 @@ func (s *Server) memberSavingSlipData(member Member, period time.Time) (savingSl
 		nextMonth := time.Date(period.Year(), month+1, 1, 0, 0, 0, 0, jakartaLocation)
 		nextMonthDate := nextMonth.Format("2006-01-02")
 		stored := slipBalance{}
+		var withdrawals []savingSlipWithdrawal
 		for index < len(records) && records[index].date < nextMonthDate {
 			item := records[index]
 			if err := applyRecord(item, &balances); err != nil {
 				return savingSlipData{}, err
 			}
-			if err := applyRecord(item, &stored); err != nil {
+			if item.typeName == "withdrawal" {
+				withdrawals = append(withdrawals, savingSlipWithdrawal{Amount: item.amount, Values: balances})
+			} else if err := applyRecord(item, &stored); err != nil {
 				return savingSlipData{}, err
 			}
 			index++
 		}
-		months = append(months, savingSlipMonth{Month: month, Stored: stored, Values: balances})
+		months = append(months, savingSlipMonth{Month: month, Stored: stored, Values: balances, Withdrawals: withdrawals})
 	}
 	current := months[int(period.Month())-1].Values
 	total, err := current.total()
@@ -370,10 +379,16 @@ type slipPDF struct {
 	width   float64
 	height  float64
 	content strings.Builder
+	pages   []string
 }
 
 func newSlipPDF() *slipPDF {
 	return &slipPDF{width: 841.89, height: 595.276}
+}
+
+func (p *slipPDF) nextPage() {
+	p.pages = append(p.pages, p.content.String())
+	p.content.Reset()
 }
 
 func (p *slipPDF) text(x, y, size float64, font, value string) {
@@ -472,14 +487,24 @@ func (p *slipPDF) bytes() ([]byte, error) {
 	}
 	objects := []string{
 		"<< /Type /Catalog /Pages 2 0 R >>",
-		"<< /Type /Pages /Kids [7 0 R] /Count 1 >>",
+		"",
 		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
 		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
 		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique >>",
 		logo,
-		fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2f %.2f] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> /XObject << /Im1 6 0 R >> >> /Contents 8 0 R >>", p.width, p.height),
-		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", p.content.Len(), p.content.String()),
 	}
+	pageContents := append(append([]string(nil), p.pages...), p.content.String())
+	pageReferences := make([]string, 0, len(pageContents))
+	for index, content := range pageContents {
+		pageObjectID := 7 + index*2
+		contentObjectID := pageObjectID + 1
+		pageReferences = append(pageReferences, fmt.Sprintf("%d 0 R", pageObjectID))
+		objects = append(objects,
+			fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2f %.2f] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> /XObject << /Im1 6 0 R >> >> /Contents %d 0 R >>", p.width, p.height, contentObjectID),
+			fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(content), content),
+		)
+	}
+	objects[1] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(pageReferences, " "), len(pageContents))
 	var pdf bytes.Buffer
 	pdf.WriteString("%PDF-1.4\n")
 	offsets := make([]int, len(objects)+1)
@@ -546,66 +571,111 @@ func drawSlipHeader(pdf *slipPDF, lang, title string, period time.Time, member M
 	pdf.text(550, 442, 9.5, "F1", ": -")
 }
 
+type savingSlipRow struct {
+	Label            string
+	Stored           slipBalance
+	Values           slipBalance
+	WithdrawalAmount int64
+}
+
 func drawSavingSlip(pdf *slipPDF, data savingSlipData, lang string) {
-	drawSlipHeader(pdf, lang, translate(lang, "slip_savings_title"), data.Period, data.Member)
-	pdf.text(50, 398, 10, "F2", translate(lang, "slip_principal_savings"))
-	pdf.text(188, 398, 10, "F2", "Rp")
-	pdf.textRight(335, 398, 10, "F2", slipAmount(data.Current.Pokok))
-	pdf.line(50, 382, 790, 382, 1.5)
-	pdf.text(50, 358, 9.5, "F2", translate(lang, "slip_month"))
 	savedLabel := translate(lang, "slip_savings_stored")
 	totalLabel := translate(lang, "slip_savings_total")
 	requiredLabel := translate(lang, "slip_required_savings")
 	voluntaryLabel := translate(lang, "slip_voluntary_savings")
-	pdf.text(190, 358, 9, "F2", fmt.Sprintf("%s %s", savedLabel, requiredLabel))
-	pdf.text(315, 358, 9, "F2", fmt.Sprintf("%s %s", totalLabel, requiredLabel))
-	pdf.text(445, 358, 9, "F2", fmt.Sprintf("%s %s", savedLabel, voluntaryLabel))
-	pdf.text(590, 358, 9, "F2", fmt.Sprintf("%s %s", totalLabel, voluntaryLabel))
-	pdf.line(50, 348, 790, 348, 1.5)
 
 	monthsThroughPeriod := int(data.Period.Month())
 	if monthsThroughPeriod > len(data.Months) {
 		monthsThroughPeriod = len(data.Months)
 	}
-	rows := make([]savingSlipMonth, 0, monthsThroughPeriod+1)
-	rows = append(rows, savingSlipMonth{Month: time.December, Values: data.Opening})
-	rows = append(rows, data.Months[:monthsThroughPeriod]...)
-	for index, row := range rows {
-		y := 332 - float64(index)*13
-		rowValues := row.Values
-		rowStored := row.Stored
-		rowYear := data.Period.Year()
-		if index == 0 {
-			rowYear--
+	rows := make([]savingSlipRow, 0, monthsThroughPeriod+1)
+	rows = append(rows, savingSlipRow{
+		Label:  fmt.Sprintf("S/D %s %d", slipMonthLabel(lang, time.December), data.Period.Year()-1),
+		Values: data.Opening,
+	})
+	for _, month := range data.Months[:monthsThroughPeriod] {
+		for _, withdrawal := range month.Withdrawals {
+			rows = append(rows, savingSlipRow{WithdrawalAmount: withdrawal.Amount, Values: withdrawal.Values})
 		}
-		pdf.text(50, y, 8.5, "F1", fmt.Sprintf("S/D %s %d", slipMonthLabel(lang, row.Month), rowYear))
-		pdf.text(190, y, 8.5, "F1", "Rp")
-		pdf.textRight(300, y, 8.5, "F1", slipAmount(rowStored.Wajib))
-		pdf.text(315, y, 8.5, "F1", "Rp")
-		pdf.textRight(430, y, 8.5, "F1", slipAmount(rowValues.Wajib))
-		pdf.text(445, y, 8.5, "F1", "Rp")
-		pdf.textRight(565, y, 8.5, "F1", slipAmount(rowStored.Sukarela))
-		pdf.text(590, y, 8.5, "F1", "Rp")
-		pdf.textRight(790, y, 8.5, "F1", slipAmount(rowValues.Sukarela))
-		pdf.dashedLine(50, y-5, 790, y-5, 0.35)
+		rows = append(rows, savingSlipRow{
+			Label:  fmt.Sprintf("S/D %s %d", slipMonthLabel(lang, month.Month), data.Period.Year()),
+			Stored: month.Stored,
+			Values: month.Values,
+		})
 	}
 
-	pdf.line(50, 150, 790, 150, 1.4)
-	pdf.line(50, 146, 790, 146, 1.4)
-	pdf.text(50, 158, 9.5, "F2", translate(lang, "slip_through_month"))
-	pdf.text(315, 158, 9.5, "F2", "Rp")
-	pdf.textRight(430, 158, 9.5, "F2", slipAmount(data.Current.Wajib))
-	pdf.text(590, 158, 9.5, "F2", "Rp")
-	pdf.textRight(790, 158, 9.5, "F2", slipAmount(data.Current.Sukarela))
+	pageCount := (len(rows) + 13) / 14
+	baseRowsPerPage := len(rows) / pageCount
+	extraRows := len(rows) % pageCount
+	rowIndex := 0
+	for pageIndex := 0; pageIndex < pageCount; pageIndex++ {
+		if pageIndex > 0 {
+			pdf.nextPage()
+		}
+		drawSlipHeader(pdf, lang, translate(lang, "slip_savings_title"), data.Period, data.Member)
+		pdf.text(50, 398, 10, "F2", translate(lang, "slip_principal_savings"))
+		pdf.text(188, 398, 10, "F2", "Rp")
+		pdf.textRight(335, 398, 10, "F2", slipAmount(data.Current.Pokok))
+		pdf.line(50, 382, 790, 382, 1.5)
+		pdf.text(50, 358, 9.5, "F2", translate(lang, "slip_month"))
+		pdf.text(190, 358, 9, "F2", fmt.Sprintf("%s %s", savedLabel, requiredLabel))
+		pdf.text(315, 358, 9, "F2", fmt.Sprintf("%s %s", totalLabel, requiredLabel))
+		pdf.text(445, 358, 9, "F2", fmt.Sprintf("%s %s", savedLabel, voluntaryLabel))
+		pdf.text(590, 358, 9, "F2", fmt.Sprintf("%s %s", totalLabel, voluntaryLabel))
+		pdf.line(50, 348, 790, 348, 1.5)
 
-	pdf.text(50, 130, 10, "F2", translate(lang, "slip_special_savings"))
-	pdf.rectangle(185, 118, 275, 24, false, 1.5)
-	pdf.text(195, 126, 10, "F2", "Rp")
-	pdf.textRight(450, 126, 10, "F2", slipAmount(data.Special))
-	pdf.text(50, 90, 10, "F2", translate(lang, "slip_total_savings"))
-	pdf.rectangle(185, 78, 275, 24, false, 1.5)
-	pdf.text(195, 86, 10, "F2", "Rp")
-	pdf.textRight(450, 86, 10, "F2", slipAmount(data.Total))
+		rowsOnPage := baseRowsPerPage
+		if pageIndex < extraRows {
+			rowsOnPage++
+		}
+		rowStep := 13.0
+		if rowsOnPage == 14 {
+			rowStep = 12
+		}
+		for index := 0; index < rowsOnPage; index++ {
+			row := rows[rowIndex]
+			rowIndex++
+			y := 332 - float64(index)*rowStep
+			if row.WithdrawalAmount > 0 {
+				label := strings.ToUpper(translate(lang, "transaction_type_withdrawal") + " " + voluntaryLabel)
+				pdf.text(50, y, 8.5, "F1", label)
+				pdf.text(445, y, 8.5, "F1", "Rp")
+				pdf.textRight(565, y, 8.5, "F1", slipAmount(-row.WithdrawalAmount))
+				pdf.text(590, y, 8.5, "F1", "Rp")
+				pdf.textRight(790, y, 8.5, "F1", slipAmount(row.Values.Sukarela))
+			} else {
+				pdf.text(50, y, 8.5, "F1", row.Label)
+				pdf.text(190, y, 8.5, "F1", "Rp")
+				pdf.textRight(300, y, 8.5, "F1", slipAmount(row.Stored.Wajib))
+				pdf.text(315, y, 8.5, "F1", "Rp")
+				pdf.textRight(430, y, 8.5, "F1", slipAmount(row.Values.Wajib))
+				pdf.text(445, y, 8.5, "F1", "Rp")
+				pdf.textRight(565, y, 8.5, "F1", slipAmount(row.Stored.Sukarela))
+				pdf.text(590, y, 8.5, "F1", "Rp")
+				pdf.textRight(790, y, 8.5, "F1", slipAmount(row.Values.Sukarela))
+			}
+			pdf.dashedLine(50, y-5, 790, y-5, 0.35)
+		}
+
+		if pageIndex == pageCount-1 {
+			pdf.line(50, 150, 790, 150, 1.4)
+			pdf.line(50, 146, 790, 146, 1.4)
+			pdf.text(50, 158, 9.5, "F2", translate(lang, "slip_through_month"))
+			pdf.text(315, 158, 9.5, "F2", "Rp")
+			pdf.textRight(430, 158, 9.5, "F2", slipAmount(data.Current.Wajib))
+			pdf.text(590, 158, 9.5, "F2", "Rp")
+			pdf.textRight(790, 158, 9.5, "F2", slipAmount(data.Current.Sukarela))
+
+			pdf.text(50, 130, 10, "F2", translate(lang, "slip_special_savings"))
+			pdf.rectangle(185, 118, 275, 24, false, 1.5)
+			pdf.text(195, 126, 10, "F2", "Rp")
+			pdf.textRight(450, 126, 10, "F2", slipAmount(data.Special))
+			pdf.text(50, 90, 10, "F2", translate(lang, "slip_total_savings"))
+			pdf.rectangle(185, 78, 275, 24, false, 1.5)
+			pdf.text(195, 86, 10, "F2", "Rp")
+			pdf.textRight(450, 86, 10, "F2", slipAmount(data.Total))
+		}
+	}
 }
 
 func drawLoanSlip(pdf *slipPDF, data loanSlipData, lang string) {
