@@ -33,12 +33,14 @@ func TestApprovedLoanReportPDFsAlignToFormFields(t *testing.T) {
 			path:     "/api/admin/loans/" + loan.ID + "/reports/acceptance.pdf",
 			filename: "surat-akseptasi-pinjaman-" + loan.ID + ".pdf",
 			fieldPositions: []string{
-				"1 0 0 1 220.07 603.45 Tm (Loan Report Layout Member \\(M-LOAN-REPORT\\)) Tj ET",
-				"1 0 0 1 138.30 519.27 Tm (500.000) Tj ET",
-				"1 0 0 1 305.46 519.27 Tm (lima ratus ribu rupiah\\)) Tj ET",
-				"1 0 0 1 39.69 76.97 Tm (Purpose: Test loan) Tj ET",
+				"1 0 0 1 226.09 631.42 Tm (Loan Report Layout Member) Tj ET",
+				"1 0 0 1 226.09 614.58 Tm (Pegawai) Tj ET",
+				"1 0 0 1 226.09 597.74 Tm (M-LOAN-REPORT) Tj ET",
+				"1 0 0 1 138.30 547.23 Tm (515.000) Tj ET",
+				"1 0 0 1 196.02 547.23 Tm (\\(lima ratus lima belas ribu rupiah\\)) Tj ET",
+				"1 0 0 1 206.24 102.83 Tm (Test loan) Tj ET",
 			},
-			minimumFieldMasks: 12,
+			minimumFieldMasks: 13,
 		},
 	}
 
