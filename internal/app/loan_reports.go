@@ -24,6 +24,7 @@ type loanReportData struct {
 	Loan            Loan
 	Language        string
 	MemberNo        string
+	MemberNPP       string
 	MemberName      string
 	MemberType      string
 	MemberStatus    string
@@ -113,12 +114,7 @@ func (s *Server) exportLoanAcceptancePDF(c *gin.Context) {
 	if !ok {
 		return
 	}
-	background, err := loanReportTemplates.ReadFile("templates/loan-acceptance-form.jpg")
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
-		return
-	}
-	pdf, err := buildLoanFormPDF(background, loanAcceptanceFormText(report), loanAcceptanceFormMasks(report))
+	pdf, err := buildLoanAcceptanceFormPDF(report)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
@@ -126,6 +122,66 @@ func (s *Server) exportLoanAcceptancePDF(c *gin.Context) {
 	filename := "surat-akseptasi-pinjaman-" + safeLoanReportFilename(report.Loan.ID) + ".pdf"
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	c.Data(http.StatusOK, "application/pdf", pdf)
+}
+
+func (s *Server) exportLoanRequestAcceptancePDF(c *gin.Context) {
+	lang := languageFromRequest(c)
+	report, err := s.loanRequestAcceptanceReportData(c.Param("id"), lang)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error.Loan request not found"))
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
+		return
+	}
+	pdf, err := buildLoanAcceptanceFormPDF(report)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
+		return
+	}
+	filename := "surat-akseptasi-pinjaman-" + safeLoanReportFilename(report.Loan.ID) + ".pdf"
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Data(http.StatusOK, "application/pdf", pdf)
+}
+
+func (s *Server) loanRequestAcceptanceReportData(requestID, language string) (loanReportData, error) {
+	request, err := s.loanRequestByID(requestID)
+	if err != nil {
+		return loanReportData{}, err
+	}
+	application, err := s.loanApplicationFormDataFromRequest(request)
+	if err != nil {
+		return loanReportData{}, err
+	}
+	return loanReportData{
+		Loan: Loan{
+			ID:                 request.ID,
+			LoanRequestID:      request.ID,
+			MemberID:           request.MemberID,
+			ApprovedAmount:     application.ApprovedAmount,
+			DurationMonths:     application.ApprovedDuration,
+			MonthlyInstallment: application.MonthlyInstallment,
+			StartDate:          request.ProposedStartDate,
+			TotalAdminFee:      application.TotalAdminFee,
+			TotalObligation:    application.TotalObligation,
+		},
+		Language:     language,
+		MemberNo:     application.MemberNo,
+		MemberNPP:    application.MemberNo,
+		MemberName:   application.FullName,
+		MemberType:   application.MemberType,
+		MemberStatus: application.MemberStatus,
+		Purpose:      application.Purpose,
+	}, nil
+}
+
+func buildLoanAcceptanceFormPDF(report loanReportData) ([]byte, error) {
+	background, err := loanReportTemplates.ReadFile("templates/loan-acceptance-form.jpg")
+	if err != nil {
+		return nil, err
+	}
+	return buildLoanFormPDF(background, loanAcceptanceFormText(report), loanAcceptanceFormMasks(report))
 }
 
 func (s *Server) loanReportData(c *gin.Context) (loanReportData, bool) {
@@ -143,14 +199,14 @@ func (s *Server) loanReportData(c *gin.Context) (loanReportData, bool) {
 	report := loanReportData{Loan: loan, Language: lang}
 	var requestDate any
 	err = s.db.QueryRow(
-		`SELECT m.member_no, m.full_name, COALESCE(m.member_type,'employee'), COALESCE(m.status,'active'),
+		`SELECT m.member_no, COALESCE(NULLIF(TRIM(m.old_npp),''),m.member_no,''), m.full_name, COALESCE(m.member_type,'employee'), COALESCE(m.status,'active'),
 			COALESCE(r.purpose,''), COALESCE(r.requested_amount,l.approved_amount),
 			COALESCE(r.duration_months,l.duration_months), COALESCE(r.created_at,l.created_at)
 		FROM loans l
 		JOIN members m ON m.id=l.member_id
 		LEFT JOIN loan_requests r ON r.id=l.loan_request_id
 		WHERE l.id=$1`, loan.ID,
-	).Scan(&report.MemberNo, &report.MemberName, &report.MemberType, &report.MemberStatus, &report.Purpose, &report.RequestAmount, &report.RequestDuration, &requestDate)
+	).Scan(&report.MemberNo, &report.MemberNPP, &report.MemberName, &report.MemberType, &report.MemberStatus, &report.Purpose, &report.RequestAmount, &report.RequestDuration, &requestDate)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
 		return loanReportData{}, false
@@ -323,62 +379,61 @@ func loanApprovalFormText(report loanReportData, stage string, y float64) loanPD
 }
 
 func loanAcceptanceFormText(report loanReportData) []loanPDFText {
-	date := loanReportDateLong(report.Loan.StartDate)
-	if date == "" {
-		date = loanReportDateLong(time.Now().In(jakartaLocation).Format("2006-01-02"))
+	acceptanceDate := loanReportDateLong(time.Now().In(jakartaLocation).Format("2006-01-02"))
+	startDate := loanReportDateLong(report.Loan.StartDate)
+	if startDate == "" {
+		startDate = acceptanceDate
 	}
-	amountWords, remainingAmountWords := splitLoanPDFText(indonesianRupiahWords(report.Loan.ApprovedAmount), 58)
-	if remainingAmountWords == "" {
-		amountWords += ")"
+	npp := strings.TrimSpace(report.MemberNPP)
+	if npp == "" {
+		npp = report.MemberNo
+	}
+	memberType := memberTypeLabel(report.MemberType)
+	if memberType == "" {
+		memberType = "Anggota"
+	}
+	acceptedAmount := report.Loan.TotalObligation
+	if acceptedAmount <= 0 {
+		acceptedAmount = report.Loan.ApprovedAmount + report.Loan.TotalAdminFee
+	}
+	if acceptedAmount <= 0 {
+		acceptedAmount = report.Loan.ApprovedAmount
 	}
 	texts := []loanPDFText{
-		{275, 312.5, 8, date, 42},
-		{366, 396.5, 8, report.MemberName + " (" + report.MemberNo + ")", 65},
-		// The membership choices are printed on the source form; the loan profile does not
-		// identify which of those choices to mark.
-		{316, 452.5, 8, "", 0}, // Workplace is not recorded in the member profile.
-		{230, 536.5, 8, formatLoanReportAmount(report.Loan.ApprovedAmount), 32},
-		{508, 536.5, 8, amountWords, 59},
-		{632, 592.4, 8, date, 32},
-		{301, 620.5, 8, strconv.Itoa(report.Loan.DurationMonths), 16},
-		{642, 620.5, 8, formatLoanReportAmount(report.Loan.MonthlyInstallment), 28},
-		{553, 833.2, 8, date, 42},
-		{337, 1098.2, 8, formatLoanReportAmount(report.Loan.ApprovedAmount), 32},
-		{337, 1140.5, 8, formatLoanReportAmount(report.Loan.TotalAdminFee), 32},
-		{337, 1182.7, 8, formatLoanReportAmount(report.Loan.TotalObligation), 32},
-		{66, 1272, 7, translate(report.Language, "purpose") + ": " + report.Purpose, 122},
-	}
-	if remainingAmountWords != "" {
-		texts = append(texts, loanPDFText{126, 564.5, 8, remainingAmountWords, 100})
+		{176, 322, 8.5, acceptanceDate, 32},
+		{376, 350, 8.5, report.MemberName, 50},
+		{376, 378, 8.5, memberType, 24},
+		{376, 406, 8.5, npp, 32},
+		{230, 490, 8.5, formatLoanReportAmount(acceptedAmount), 32},
+		{326, 490, 8.5, "(" + indonesianRupiahWords(acceptedAmount) + ")", 60},
+		{632, 546, 8.5, startDate, 36},
+		{184, 566, 8.5, strconv.Itoa(report.Loan.DurationMonths), 3},
+		{490, 566, 8.5, formatLoanReportAmount(report.Loan.MonthlyInstallment), 12},
+		{610, 788, 8.5, acceptanceDate, 32},
+		{334, 1103, 8.5, formatLoanReportAmount(report.Loan.ApprovedAmount), 32},
+		{338, 1145, 8.5, formatLoanReportAmount(report.Loan.TotalAdminFee), 32},
+		{334, 1187, 8.5, formatLoanReportAmount(acceptedAmount), 32},
+		{343, 1229, 8, report.Purpose, 70},
 	}
 	return texts
 }
 
-func loanAcceptanceFormMasks(report loanReportData) []loanPDFMask {
-	date := loanReportDateLong(report.Loan.StartDate)
-	if date == "" {
-		date = loanReportDateLong(time.Now().In(jakartaLocation).Format("2006-01-02"))
+func loanAcceptanceFormMasks(_ loanReportData) []loanPDFMask {
+	return []loanPDFMask{
+		{x: 175, y: 300, width: 165, height: 23},
+		{x: 375, y: 328, width: 500, height: 23},
+		{x: 375, y: 356, width: 500, height: 23},
+		{x: 375, y: 384, width: 500, height: 23},
+		{x: 230, y: 468, width: 640, height: 23},
+		{x: 631, y: 524, width: 200, height: 23},
+		{x: 184, y: 544, width: 24, height: 23},
+		{x: 490, y: 544, width: 82, height: 23},
+		{x: 610, y: 770, width: 170, height: 19},
+		{x: 334, y: 1083, width: 145, height: 21},
+		{x: 338, y: 1125, width: 145, height: 21},
+		{x: 334, y: 1168, width: 145, height: 21},
+		{x: 343, y: 1210, width: 500, height: 21},
 	}
-	amountWords, remainingAmountWords := splitLoanPDFText(indonesianRupiahWords(report.Loan.ApprovedAmount), 58)
-	var masks []loanPDFMask
-	masks = appendLoanPDFFieldMask(masks, date, 171, 312.5, 235)
-	masks = appendLoanPDFFieldMask(masks, report.MemberName+" ("+report.MemberNo+")", 370, 396.5, 413)
-	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Loan.ApprovedAmount), 230, 536.5, 271)
-	masks = appendLoanPDFFieldMask(masks, amountWords, 507, 536.5, 342)
-	if remainingAmountWords == "" {
-		masks = append(masks, loanPDFMask{x: 126, y: 564.5 - 16, width: 730, height: 22})
-	} else {
-		masks = append(masks, loanPDFMask{x: 126, y: 564.5 - 11, width: 721, height: 14})
-	}
-	masks = appendLoanPDFFieldMask(masks, date, 631, 592.4, 278)
-	masks = appendLoanPDFFieldMask(masks, strconv.Itoa(report.Loan.DurationMonths), 259, 620.5, 80)
-	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Loan.MonthlyInstallment), 640, 620.5, 274)
-	if strings.TrimSpace(date) != "" {
-		masks = append(masks, loanPDFMask{x: 552, y: 833.2 - 16, width: 261, height: 22})
-	}
-	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Loan.ApprovedAmount), 334, 1098.2, 219)
-	masks = appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Loan.TotalAdminFee), 334, 1140.5, 219)
-	return appendLoanPDFFieldMask(masks, formatLoanReportAmount(report.Loan.TotalObligation), 334, 1182.7, 219)
 }
 
 func splitLoanPDFText(value string, maxRunes int) (string, string) {

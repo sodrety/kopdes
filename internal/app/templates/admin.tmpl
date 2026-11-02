@@ -116,6 +116,7 @@
                   <a class="review-modal-close" href="#" aria-label="{{t $.Lang "close"}}">×</a>
                 </header>
                 <div class="review-modal-actions">
+                  <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/acceptance-form.pdf" download>{{t $.Lang "loan_acceptance_pdf"}}</a>
                   <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/disbursement-form.pdf" download>{{t $.Lang "download_loan_disbursement_form"}}</a>
                 </div>
                 <form method="post" action="/api/admin/loan-requests/{{.ID}}/disburse" hx-post="/api/admin/loan-requests/{{.ID}}/disburse" hx-target="#loan-disbursement-error" hx-swap="innerHTML">
@@ -2428,6 +2429,7 @@
                     </div>
                     <div class="review-modal-actions">
                       <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/application-form.pdf">{{t $.Lang "loan_application_pdf"}}</a>
+                      <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/acceptance-form.pdf" download>{{t $.Lang "loan_acceptance_pdf"}}</a>
                     </div>
                     {{if and (eq $.Role "super_admin") (index $.Permissions "requests.override") (eq .Status "pending")}}
                     <div class="review-modal-actions">
