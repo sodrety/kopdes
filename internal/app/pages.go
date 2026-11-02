@@ -432,6 +432,36 @@ func (s *Server) adminLoanDisbursementsPage(c *gin.Context) {
 			waiting = append(waiting, request)
 		}
 	}
+	if len(waiting) > 0 {
+		rows, err := s.db.Query(`SELECT member_id,COALESCE(SUM(remaining_balance),0) FROM loans WHERE status IN ('active','adjustment_due') AND remaining_balance>0 GROUP BY member_id`)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+			return
+		}
+		balances := make(map[string]int64)
+		for rows.Next() {
+			var memberID string
+			var balance int64
+			if err := rows.Scan(&memberID, &balance); err != nil {
+				_ = rows.Close()
+				respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+				return
+			}
+			balances[memberID] = balance
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+			return
+		}
+		if err := rows.Close(); err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+			return
+		}
+		for index := range waiting {
+			waiting[index].Outstanding = balances[waiting[index].MemberID]
+		}
+	}
 	current, _ := currentUser(c)
 	renderPage(c, "admin-loan-disbursements", pageData(c, translate(languageFromRequest(c), "loan_disbursements"), "loan-disbursements", "loan_disbursements", "loan_disbursements_description", gin.H{
 		"LoanRequests": waiting,

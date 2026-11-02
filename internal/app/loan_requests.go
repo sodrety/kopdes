@@ -31,6 +31,8 @@ type LoanRequest struct {
 	ProposedCashCOACode     string            `json:"-"`
 	ProposedLoanCOACode     string            `json:"-"`
 	ProposedAdminFeeCOACode string            `json:"-"`
+	SettleOutstandingLoans  bool              `json:"settle_outstanding_loans"`
+	LoanPayoffAmount        int64             `json:"loan_payoff_amount"`
 	DisbursementDate        string            `json:"disbursement_date,omitempty"`
 	DisbursedBy             string            `json:"-"`
 	DisbursedAt             string            `json:"-"`
@@ -48,6 +50,7 @@ type AdminLoanRequest struct {
 	BankAccount     string             `json:"-"`
 	MemberType      string             `json:"member_type"`
 	MaxLoanAmount   int64              `json:"max_loan_amount"`
+	Outstanding     int64              `json:"-"`
 	ApprovalHistory []ApprovalDecision `json:"approval_history"`
 	CanDecide       bool               `json:"can_decide"`
 	CreationSource  string             `json:"creation_source"`
@@ -313,7 +316,7 @@ func (s *Server) insertLoanRequest(member Member, req loanRequestInput) (LoanReq
 
 func (s *Server) loanRequestsByMember(memberID string) ([]LoanRequest, error) {
 	rows, err := s.db.Query(
-		`SELECT id, member_id, requested_amount, duration_months, purpose, status, loan_type, legacy_terms, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_admin_fee_policy,''), proposed_monthly_admin_fee, COALESCE(proposed_total_admin_fee,0), COALESCE(proposed_total_obligation,0), COALESCE(disbursement_date,''), COALESCE(disbursed_by,''), COALESCE(CAST(disbursed_at AS TEXT),''), rejection_reason, created_at, updated_at, requested_admin_fee
+		`SELECT id, member_id, requested_amount, duration_months, purpose, status, loan_type, legacy_terms, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_admin_fee_policy,''), proposed_monthly_admin_fee, COALESCE(proposed_total_admin_fee,0), COALESCE(proposed_total_obligation,0), COALESCE(disbursement_date,''), COALESCE(disbursed_by,''), COALESCE(CAST(disbursed_at AS TEXT),''), rejection_reason, created_at, updated_at, requested_admin_fee, COALESCE(settle_outstanding_loans,FALSE), COALESCE(loan_payoff_amount,0)
 		FROM loan_requests
 		WHERE member_id = $1
 		ORDER BY created_at DESC`,
@@ -325,7 +328,7 @@ func (s *Server) loanRequestsByMember(memberID string) ([]LoanRequest, error) {
 	var requests []LoanRequest
 	for rows.Next() {
 		var request LoanRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.RequestedAdminFee); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.RequestedAdminFee, &request.SettleOutstandingLoans, &request.LoanPayoffAmount); err != nil {
 			return nil, err
 		}
 		requests = append(requests, request)
@@ -352,7 +355,7 @@ func (s *Server) loanRequestsForAdmin(status string) ([]AdminLoanRequest, error)
 
 func (s *Server) loanRequestsForAdminFiltered(status, source, batchID string) ([]AdminLoanRequest, error) {
 	status = strings.TrimSpace(status)
-	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, m.member_type, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.loan_type, lr.legacy_terms, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_admin_fee_policy,''), lr.proposed_monthly_admin_fee, COALESCE(lr.proposed_total_admin_fee,0), COALESCE(lr.proposed_total_obligation,0), COALESCE(lr.proposed_cash_coa_code,''), COALESCE(lr.proposed_loan_coa_code,''), COALESCE(lr.proposed_admin_fee_coa_code,''), COALESCE(lr.disbursement_date,''), COALESCE(lr.disbursed_by,''), COALESCE(CAST(lr.disbursed_at AS TEXT),''), lr.rejection_reason, lr.created_at, lr.updated_at, lr.requested_admin_fee, COALESCE(lr.creation_source,'member'), COALESCE(lr.created_by,''), COALESCE(NULLIF(TRIM(creator_member.full_name),''),NULLIF(TRIM(creator.full_name),''),creator.email,''), COALESCE(lr.batch_id,''), COALESCE(NULLIF(TRIM(m.bank_name),''),''), COALESCE(NULLIF(TRIM(m.bank_account),''),'')
+	query := `SELECT lr.id, lr.member_id, m.member_no, m.full_name, m.member_type, lr.requested_amount, lr.duration_months, lr.purpose, lr.status, lr.loan_type, lr.legacy_terms, COALESCE(lr.current_approval_stage,''), COALESCE(lr.proposed_approved_amount,0), COALESCE(lr.proposed_duration_months,0), lr.proposed_start_date, COALESCE(lr.proposed_admin_fee_policy,''), lr.proposed_monthly_admin_fee, COALESCE(lr.proposed_total_admin_fee,0), COALESCE(lr.proposed_total_obligation,0), COALESCE(lr.proposed_cash_coa_code,''), COALESCE(lr.proposed_loan_coa_code,''), COALESCE(lr.proposed_admin_fee_coa_code,''), COALESCE(lr.disbursement_date,''), COALESCE(lr.disbursed_by,''), COALESCE(CAST(lr.disbursed_at AS TEXT),''), lr.rejection_reason, lr.created_at, lr.updated_at, lr.requested_admin_fee, COALESCE(lr.creation_source,'member'), COALESCE(lr.created_by,''), COALESCE(NULLIF(TRIM(creator_member.full_name),''),NULLIF(TRIM(creator.full_name),''),creator.email,''), COALESCE(lr.batch_id,''), COALESCE(NULLIF(TRIM(m.bank_name),''),''), COALESCE(NULLIF(TRIM(m.bank_account),''),''), COALESCE(lr.settle_outstanding_loans,FALSE), COALESCE(lr.loan_payoff_amount,0), COALESCE((SELECT SUM(l.remaining_balance) FROM loans l WHERE l.member_id=lr.member_id AND l.status IN ('active','adjustment_due') AND l.remaining_balance>0),0)
 		FROM loan_requests lr
 		INNER JOIN members m ON m.id = lr.member_id
 		LEFT JOIN users creator ON creator.id = lr.created_by
@@ -383,7 +386,7 @@ func (s *Server) loanRequestsForAdminFiltered(status, source, batchID string) ([
 	var requests []AdminLoanRequest
 	for rows.Next() {
 		var request AdminLoanRequest
-		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.MemberType, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.RequestedAdminFee, &request.CreationSource, &request.CreatedByID, &request.CreatedByName, &request.BatchID, &request.BankName, &request.BankAccount); err != nil {
+		if err := rows.Scan(&request.ID, &request.MemberID, &request.MemberNo, &request.FullName, &request.MemberType, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.RequestedAdminFee, &request.CreationSource, &request.CreatedByID, &request.CreatedByName, &request.BatchID, &request.BankName, &request.BankAccount, &request.SettleOutstandingLoans, &request.LoanPayoffAmount, &request.Outstanding); err != nil {
 			return nil, err
 		}
 		requests = append(requests, request)
@@ -522,11 +525,11 @@ func (s *Server) cancelLoanRequestByID(requestID, memberID string) (LoanRequest,
 func (s *Server) loanRequestByID(id string) (LoanRequest, error) {
 	var request LoanRequest
 	err := s.db.QueryRow(
-		`SELECT id, member_id, requested_amount, duration_months, purpose, status, loan_type, legacy_terms, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_admin_fee_policy,''), proposed_monthly_admin_fee, COALESCE(proposed_total_admin_fee,0), COALESCE(proposed_total_obligation,0), COALESCE(disbursement_date,''), COALESCE(disbursed_by,''), COALESCE(CAST(disbursed_at AS TEXT),''), rejection_reason, created_at, updated_at, requested_admin_fee
+		`SELECT id, member_id, requested_amount, duration_months, purpose, status, loan_type, legacy_terms, COALESCE(current_approval_stage,''), COALESCE(proposed_approved_amount,0), COALESCE(proposed_duration_months,0), proposed_start_date, COALESCE(proposed_admin_fee_policy,''), proposed_monthly_admin_fee, COALESCE(proposed_total_admin_fee,0), COALESCE(proposed_total_obligation,0), COALESCE(disbursement_date,''), COALESCE(disbursed_by,''), COALESCE(CAST(disbursed_at AS TEXT),''), rejection_reason, created_at, updated_at, requested_admin_fee, COALESCE(settle_outstanding_loans,FALSE), COALESCE(loan_payoff_amount,0)
 		FROM loan_requests
 		WHERE id = $1`,
 		id,
-	).Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.RequestedAdminFee)
+	).Scan(&request.ID, &request.MemberID, &request.RequestedAmount, &request.DurationMonths, &request.Purpose, &request.Status, &request.LoanType, &request.LegacyTerms, &request.CurrentApprovalStage, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.DisbursementDate, &request.DisbursedBy, &request.DisbursedAt, &request.RejectionReason, &request.CreatedAt, &request.UpdatedAt, &request.RequestedAdminFee, &request.SettleOutstandingLoans, &request.LoanPayoffAmount)
 	if err == nil {
 		request.LatestDecision, err = latestDecisionWithOverrides(s.db, "loan_request_approvals", "loan", request.ID)
 	}

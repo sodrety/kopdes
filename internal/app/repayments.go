@@ -172,7 +172,6 @@ func (s *Server) recordRepayment(loanID, adminID string, req repaymentInput) (Lo
 
 func (s *Server) recordRepaymentWithAudit(loanID, adminID string, req repaymentInput, auditReason string) (LoanRepayment, error) {
 	recordDate := strings.TrimSpace(req.RecordDate)
-	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
 	if (strings.TrimSpace(req.COACode) != "" || strings.TrimSpace(req.CashCOACode) != "") && !hasPermission(req.Role, PermissionAccountingCOAOverride) {
 		return LoanRepayment{}, errAccountingCOAOverrideForbidden
 	}
@@ -188,6 +187,26 @@ func (s *Server) recordRepaymentWithAudit(loanID, adminID string, req repaymentI
 		return LoanRepayment{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	repayment, err := s.recordRepaymentTx(tx, loanID, adminID, req, auditReason, "Angsuran pinjaman")
+	if err != nil {
+		return LoanRepayment{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return LoanRepayment{}, err
+	}
+	return s.repaymentByID(repayment.ID)
+}
+
+func (s *Server) recordRepaymentTx(tx *sql.Tx, loanID, adminID string, req repaymentInput, auditReason, journalDescription string) (LoanRepayment, error) {
+	recordDate := strings.TrimSpace(req.RecordDate)
+	source := transactionSourceBank // Kept only for legacy transaction rows; the journal's COA lines are authoritative.
+	if (strings.TrimSpace(req.COACode) != "" || strings.TrimSpace(req.CashCOACode) != "") && !hasPermission(req.Role, PermissionAccountingCOAOverride) {
+		return LoanRepayment{}, errAccountingCOAOverrideForbidden
+	}
+	if req.Amount <= 0 || recordDate == "" {
+		return LoanRepayment{}, errInvalidRepayment
+	}
 
 	var loan struct {
 		MemberID         string
@@ -316,7 +335,7 @@ func (s *Server) recordRepaymentWithAudit(loanID, adminID string, req repaymentI
 			{Component: "loan_receivable", Side: accountingDirectionCredit, Amount: repayment.Amount},
 		},
 		COAOverrides: map[string]string{"cash_bank": strings.TrimSpace(req.CashCOACode), "loan_receivable": repayment.COACode},
-		Description:  "Angsuran pinjaman", RecordedBy: repayment.RecordedBy,
+		Description:  journalDescription, RecordedBy: repayment.RecordedBy,
 	}); err != nil {
 		return LoanRepayment{}, err
 	}
@@ -325,11 +344,7 @@ func (s *Server) recordRepaymentWithAudit(loanID, adminID string, req repaymentI
 			return LoanRepayment{}, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return LoanRepayment{}, err
-	}
-
-	return s.repaymentByID(repayment.ID)
+	return repayment, nil
 }
 
 func (s *Server) repaymentLoansForAdmin() ([]AdminRepaymentLoanOption, error) {

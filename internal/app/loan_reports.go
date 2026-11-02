@@ -76,28 +76,46 @@ func (s *Server) exportLoanApplicationFormPDF(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
+	var settleOutstandingLoans bool
+	var loanPayoffAmount int64
+	if report.Loan.LoanRequestID != "" {
+		if err := s.db.QueryRow(`SELECT COALESCE(settle_outstanding_loans,FALSE),COALESCE(loan_payoff_amount,0) FROM loan_requests WHERE id=$1`, report.Loan.LoanRequestID).Scan(&settleOutstandingLoans, &loanPayoffAmount); err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+			return
+		}
+	}
+	if !settleOutstandingLoans {
+		loanPayoffAmount = 0
+	}
+	netReceivedAmount := report.Loan.ApprovedAmount - loanPayoffAmount
+	if netReceivedAmount < 0 {
+		netReceivedAmount = 0
+	}
 	application := disbursementApplicationFormData{
-		ID:                 report.Loan.ID,
-		MemberID:           report.Loan.MemberID,
-		MemberNo:           member.MemberNo,
-		FullName:           report.MemberName,
-		MemberType:         report.MemberType,
-		MemberStatus:       report.MemberStatus,
-		BankName:           member.BankName,
-		BankAccount:        member.BankAccount,
-		Purpose:            report.Purpose,
-		RequestDate:        report.RequestDate,
-		RequestedAmount:    report.RequestAmount,
-		RequestedDuration:  report.RequestDuration,
-		ApprovedAmount:     report.Loan.ApprovedAmount,
-		ApprovedDuration:   report.Loan.DurationMonths,
-		TotalAdminFee:      report.Loan.TotalAdminFee,
-		TotalObligation:    report.Loan.TotalObligation,
-		MonthlyInstallment: report.Loan.MonthlyInstallment,
-		Savings:            report.Savings,
-		PriorCashLoan:      report.PriorCashLoan,
-		PriorGoodsLoan:     report.PriorGoodsLoan,
-		Approvals:          report.Approvals,
+		ID:                     report.Loan.ID,
+		MemberID:               report.Loan.MemberID,
+		MemberNo:               member.MemberNo,
+		FullName:               report.MemberName,
+		MemberType:             report.MemberType,
+		MemberStatus:           report.MemberStatus,
+		BankName:               member.BankName,
+		BankAccount:            member.BankAccount,
+		Purpose:                report.Purpose,
+		RequestDate:            report.RequestDate,
+		RequestedAmount:        report.RequestAmount,
+		RequestedDuration:      report.RequestDuration,
+		ApprovedAmount:         report.Loan.ApprovedAmount,
+		ApprovedDuration:       report.Loan.DurationMonths,
+		TotalAdminFee:          report.Loan.TotalAdminFee,
+		TotalObligation:        report.Loan.TotalObligation,
+		MonthlyInstallment:     report.Loan.MonthlyInstallment,
+		SettleOutstandingLoans: settleOutstandingLoans,
+		LoanPayoffAmount:       loanPayoffAmount,
+		NetReceivedAmount:      netReceivedAmount,
+		Savings:                report.Savings,
+		PriorCashLoan:          report.PriorCashLoan,
+		PriorGoodsLoan:         report.PriorGoodsLoan,
+		Approvals:              report.Approvals,
 	}
 	pdf, err := buildLoanApplicationFormPDF(application)
 	if err != nil {

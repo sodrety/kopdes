@@ -48,6 +48,9 @@ type disbursementApplicationFormData struct {
 	TotalAdminFee            int64
 	TotalObligation          int64
 	MonthlyInstallment       int64
+	SettleOutstandingLoans   bool
+	LoanPayoffAmount         int64
+	NetReceivedAmount        int64
 	WithdrawalAmount         int64
 	AvailableWithdrawalLimit int64
 	Savings                  SavingSummary
@@ -128,22 +131,24 @@ func (s *Server) loanApplicationFormDataFromRequest(request LoanRequest) (disbur
 		return disbursementApplicationFormData{}, err
 	}
 	report := disbursementApplicationFormData{
-		ID:                request.ID,
-		MemberID:          request.MemberID,
-		MemberNo:          member.MemberNo,
-		FullName:          member.FullName,
-		MemberType:        member.MemberType,
-		MemberStatus:      member.Status,
-		BankName:          member.BankName,
-		BankAccount:       member.BankAccount,
-		Purpose:           strings.TrimSpace(request.Purpose),
-		RequestDate:       loanReportDate(request.CreatedAt),
-		RequestedAmount:   request.RequestedAmount,
-		RequestedDuration: request.DurationMonths,
-		ApprovedAmount:    request.ProposedApprovedAmount,
-		ApprovedDuration:  request.ProposedDurationMonths,
-		TotalAdminFee:     request.ProposedTotalAdminFee,
-		TotalObligation:   request.ProposedTotalObligation,
+		ID:                     request.ID,
+		MemberID:               request.MemberID,
+		MemberNo:               member.MemberNo,
+		FullName:               member.FullName,
+		MemberType:             member.MemberType,
+		MemberStatus:           member.Status,
+		BankName:               member.BankName,
+		BankAccount:            member.BankAccount,
+		Purpose:                strings.TrimSpace(request.Purpose),
+		RequestDate:            loanReportDate(request.CreatedAt),
+		RequestedAmount:        request.RequestedAmount,
+		RequestedDuration:      request.DurationMonths,
+		ApprovedAmount:         request.ProposedApprovedAmount,
+		ApprovedDuration:       request.ProposedDurationMonths,
+		TotalAdminFee:          request.ProposedTotalAdminFee,
+		TotalObligation:        request.ProposedTotalObligation,
+		SettleOutstandingLoans: request.SettleOutstandingLoans,
+		LoanPayoffAmount:       request.LoanPayoffAmount,
 	}
 	if report.ApprovedAmount <= 0 {
 		report.ApprovedAmount = request.RequestedAmount
@@ -176,6 +181,17 @@ func (s *Server) loanApplicationFormDataFromRequest(request LoanRequest) (disbur
 	}
 	if err := s.loadDisbursementFormBalances(&report); err != nil {
 		return disbursementApplicationFormData{}, err
+	}
+	if report.SettleOutstandingLoans {
+		if request.DisbursementDate == "" {
+			report.LoanPayoffAmount = report.PriorCashLoan.RemainingBalance + report.PriorGoodsLoan.RemainingBalance
+		}
+	} else {
+		report.LoanPayoffAmount = 0
+	}
+	report.NetReceivedAmount = report.ApprovedAmount - report.LoanPayoffAmount
+	if report.NetReceivedAmount < 0 {
+		report.NetReceivedAmount = 0
 	}
 	return report, nil
 }
@@ -345,6 +361,8 @@ func loanDisbursementApplicationFormText(report disbursementApplicationFormData)
 		{478, 1121, considerationSize, strconv.Itoa(report.ApprovedDuration), 4},
 		{541, 1121, considerationSize, formatLoanReportAmount(report.TotalObligation), 25},
 		{748, 1121, considerationSize, formatLoanReportAmount(report.MonthlyInstallment), 24},
+		{100, 1178, considerationSize, formatLoanReportAmount(report.LoanPayoffAmount), 24},
+		{304, 1178, considerationSize, formatLoanReportAmount(report.NetReceivedAmount), 24},
 		{336, 1208, considerationSize, disbursementApprovalFormText(report.Approvals, approvalStageManager), 90},
 		{336, 1241, considerationSize, disbursementApprovalFormText(report.Approvals, approvalStageKetuaII), 90},
 		{336, 1274, considerationSize, disbursementApprovalFormText(report.Approvals, approvalStageKetuaI), 90},

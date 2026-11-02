@@ -68,9 +68,10 @@ type AdminLoan struct {
 }
 
 type approveLoanInput struct {
-	ApprovedAmount int64  `json:"approved_amount" form:"approved_amount"`
-	DurationMonths int    `json:"duration_months" form:"duration_months"`
-	Note           string `json:"note" form:"note"`
+	ApprovedAmount         int64  `json:"approved_amount" form:"approved_amount"`
+	DurationMonths         int    `json:"duration_months" form:"duration_months"`
+	SettleOutstandingLoans bool   `json:"settle_outstanding_loans" form:"settle_outstanding_loans"`
+	Note                   string `json:"note" form:"note"`
 }
 
 type LoanApprovalResult struct {
@@ -103,6 +104,7 @@ var (
 	errInvalidLoanApprovalCalculated      = errors.New("invalid calculated installment")
 	errInvalidLoanStartDate               = errors.New("invalid loan start date")
 	errInvalidLoanDisbursementDate        = errors.New("invalid loan disbursement date")
+	errLoanPayoffExceedsDisbursement      = errors.New("loan payoff exceeds new disbursement amount")
 	errLoanStartDateLocked                = errors.New("loan start date locked")
 	errLoanStartDateStatus                = errors.New("loan start date status ineligible")
 )
@@ -140,6 +142,10 @@ func (s *Server) approveLoanRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errLoanAmountLimitExceeded) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_loan_amount_limit"))
+		return
+	}
+	if errors.Is(err, errLoanPayoffExceedsDisbursement) {
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_loan_payoff_exceeds_disbursement"))
 		return
 	}
 	if errors.Is(err, errInvalidLoanStartDate) {
@@ -194,7 +200,14 @@ func (s *Server) disburseLoanRequest(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_loan_disbursement_date"))
 		return
 	}
-	result, err := s.disburseLoanRequestByID(c.Param("id"), user, req.DisbursementDate, translate(lang, "journal_loan_disbursement_description"))
+	result, err := s.disburseLoanRequestByID(
+		c.Param("id"),
+		user,
+		req,
+		translate(lang, "journal_loan_disbursement_description"),
+		translate(lang, "loan_payoff_from_new_disbursement_note"),
+		translate(lang, "journal_loan_payoff_from_new_disbursement_description"),
+	)
 	if errors.Is(err, errInvalidLoanDisbursementDate) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_loan_disbursement_date"))
 		return
@@ -221,6 +234,10 @@ func (s *Server) disburseLoanRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errOutstandingLoanBalance) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_loan_disbursement_outstanding_balance"))
+		return
+	}
+	if errors.Is(err, errLoanPayoffExceedsDisbursement) {
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_loan_payoff_exceeds_disbursement"))
 		return
 	}
 	if err != nil {
@@ -424,6 +441,15 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 				return LoanApprovalResult{}, errLoanAmountLimitExceeded
 			}
 		}
+		var loanPayoffAmount int64
+		if req.SettleOutstandingLoans {
+			if err := tx.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND status IN ('active','adjustment_due') AND remaining_balance>0`, request.MemberID).Scan(&loanPayoffAmount); err != nil {
+				return LoanApprovalResult{}, err
+			}
+			if loanPayoffAmount > req.ApprovedAmount {
+				return LoanApprovalResult{}, errLoanPayoffExceedsDisbursement
+			}
+		}
 		var calc LoanScheduleCalculation
 		var adminFeePolicy string
 		switch request.LoanType {
@@ -461,7 +487,7 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		request.ProposedCashCOACode = ""
 		request.ProposedLoanCOACode = ""
 		request.ProposedAdminFeeCOACode = ""
-		if _, err := tx.Exec(`UPDATE loan_requests SET proposed_approved_amount=$1,proposed_duration_months=$2,proposed_start_date=$3,proposed_admin_fee_policy=$4,proposed_monthly_admin_fee=$5,proposed_total_admin_fee=$6,proposed_total_obligation=$7,proposed_cash_coa_code=$8,proposed_loan_coa_code=$9,proposed_admin_fee_coa_code=$10,updated_at=CURRENT_TIMESTAMP WHERE id=$11 AND status='pending' AND current_approval_stage='manager'`, req.ApprovedAmount, req.DurationMonths, startDate, adminFeePolicy, request.ProposedMonthlyAdminFee, calc.TotalAdminFee, calc.TotalObligation, request.ProposedCashCOACode, request.ProposedLoanCOACode, request.ProposedAdminFeeCOACode, requestID); err != nil {
+		if _, err := tx.Exec(`UPDATE loan_requests SET proposed_approved_amount=$1,proposed_duration_months=$2,proposed_start_date=$3,proposed_admin_fee_policy=$4,proposed_monthly_admin_fee=$5,proposed_total_admin_fee=$6,proposed_total_obligation=$7,proposed_cash_coa_code=$8,proposed_loan_coa_code=$9,proposed_admin_fee_coa_code=$10,settle_outstanding_loans=$11,loan_payoff_amount=$12,updated_at=CURRENT_TIMESTAMP WHERE id=$13 AND status='pending' AND current_approval_stage='manager'`, req.ApprovedAmount, req.DurationMonths, startDate, adminFeePolicy, request.ProposedMonthlyAdminFee, calc.TotalAdminFee, calc.TotalObligation, request.ProposedCashCOACode, request.ProposedLoanCOACode, request.ProposedAdminFeeCOACode, req.SettleOutstandingLoans, loanPayoffAmount, requestID); err != nil {
 			return LoanApprovalResult{}, err
 		}
 	}
@@ -560,11 +586,11 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 	return LoanApprovalResult{Request: updated}, nil
 }
 
-func (s *Server) disburseLoanRequestByID(requestID string, officer User, disbursementDate, description string) (LoanApprovalResult, error) {
+func (s *Server) disburseLoanRequestByID(requestID string, officer User, req disburseLoanRequestInput, description, payoffNote, payoffJournalDescription string) (LoanApprovalResult, error) {
 	if !hasPermission(officer.Role, PermissionLoansManage) {
 		return LoanApprovalResult{}, errWrongApprovalStage
 	}
-	dateText := strings.TrimSpace(disbursementDate)
+	dateText := strings.TrimSpace(req.DisbursementDate)
 	if _, parseErr := parseLoanDate(dateText); parseErr != nil {
 		return LoanApprovalResult{}, errInvalidLoanDisbursementDate
 	}
@@ -602,8 +628,10 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 		ProposedLoanCOACode     string
 		ProposedAdminFeeCOACode string
 		CreationSource          string
+		SettleOutstandingLoans  bool
+		LoanPayoffAmount        int64
 	}
-	err = tx.QueryRow(`SELECT member_id,loan_type,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(disbursement_date,''),COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),COALESCE(creation_source,'member') FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.Status, &request.Stage, &request.ReviewedBy, &request.DisbursementDate, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.CreationSource)
+	err = tx.QueryRow(`SELECT member_id,loan_type,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(disbursement_date,''),COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),COALESCE(creation_source,'member'),COALESCE(settle_outstanding_loans,FALSE),COALESCE(loan_payoff_amount,0) FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.Status, &request.Stage, &request.ReviewedBy, &request.DisbursementDate, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.CreationSource, &request.SettleOutstandingLoans, &request.LoanPayoffAmount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
@@ -655,8 +683,41 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, err
 	}
+	type outstandingLoanForPayoff struct {
+		ID      string
+		Balance int64
+	}
+	var loansToPayOff []outstandingLoanForPayoff
+	var payoffTotal int64
+	if request.SettleOutstandingLoans {
+		rows, err := tx.Query(`SELECT id,remaining_balance FROM loans WHERE member_id=$1 AND status IN ('active','adjustment_due') AND remaining_balance>0 ORDER BY created_at,id`+rowLockClause(s.db), request.MemberID)
+		if err != nil {
+			return LoanApprovalResult{}, err
+		}
+		for rows.Next() {
+			var previous outstandingLoanForPayoff
+			if err := rows.Scan(&previous.ID, &previous.Balance); err != nil {
+				_ = rows.Close()
+				return LoanApprovalResult{}, err
+			}
+			if previous.Balance > request.ProposedApprovedAmount-payoffTotal {
+				_ = rows.Close()
+				return LoanApprovalResult{}, errLoanPayoffExceedsDisbursement
+			}
+			payoffTotal += previous.Balance
+			loansToPayOff = append(loansToPayOff, previous)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return LoanApprovalResult{}, err
+		}
+		if err := rows.Close(); err != nil {
+			return LoanApprovalResult{}, err
+		}
+	}
+	request.LoanPayoffAmount = payoffTotal
 
-	result, err := tx.Exec(`UPDATE loan_requests SET disbursement_date=$1,disbursed_by=$2,disbursed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$3 AND status='approved' AND disbursement_date=''`, dateText, officer.ID, requestID)
+	result, err := tx.Exec(`UPDATE loan_requests SET disbursement_date=$1,disbursed_by=$2,disbursed_at=CURRENT_TIMESTAMP,loan_payoff_amount=$3,updated_at=CURRENT_TIMESTAMP WHERE id=$4 AND status='approved' AND disbursement_date=''`, dateText, officer.ID, request.LoanPayoffAmount, requestID)
 	if err != nil {
 		return LoanApprovalResult{}, err
 	}
@@ -705,6 +766,17 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, disburs
 	}
 	if err := s.createFinancialJournalTx(tx, accountingJournalInput{ReferenceNo: requestID, TransactionID: loan.ID, TransactionType: "loan", TransactionDate: dateText, Source: loan.Source, Amount: loan.TotalObligation, LoanType: loan.LoanType, Components: components, Description: description, RecordedBy: officer.ID}); err != nil {
 		return LoanApprovalResult{}, err
+	}
+	for _, previous := range loansToPayOff {
+		_, err := s.recordRepaymentTx(tx, previous.ID, officer.ID, repaymentInput{
+			Amount:      previous.Balance,
+			RecordDate:  dateText,
+			ReferenceNo: "PELUNASAN-" + requestID + "-" + previous.ID,
+			Note:        payoffNote,
+		}, "", payoffJournalDescription)
+		if err != nil {
+			return LoanApprovalResult{}, err
+		}
 	}
 	if err := resolveRequestNotifications(tx, "loan", requestID); err != nil {
 		return LoanApprovalResult{}, err

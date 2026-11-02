@@ -618,6 +618,10 @@ var migrations = []migration{
 	{Version: 46, Name: "remove_ketua_utama_from_withdrawal_approval"},
 	{Version: 47, Name: "align_loan_approval_threshold_integrity"},
 	{Version: 48, Name: "member_type_loan_limit_total_savings"},
+	{Version: 49, Name: "add_loan_pelunasan_at_manager_approval", Statements: []string{
+		`ALTER TABLE loan_requests ADD COLUMN settle_outstanding_loans BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE loan_requests ADD COLUMN loan_payoff_amount BIGINT NOT NULL DEFAULT 0 CHECK (loan_payoff_amount >= 0)`,
+	}},
 }
 
 func defaultAccountingMappingSeedStatement() string {
