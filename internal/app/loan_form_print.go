@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"html/template"
 	"net/http"
 	"net/url"
 	"strings"
@@ -153,7 +154,7 @@ func renderLoanFormPrintPage(c *gin.Context, title, backURL string, background [
 		"Lang":              languageFromRequest(c),
 		"Title":             title,
 		"BackURL":           backURL,
-		"BackgroundDataURI": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(background),
+		"BackgroundDataURI": template.URL("data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(background)),
 		"Fields":            fields,
 		"Masks":             printMasks,
 	})
