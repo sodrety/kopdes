@@ -220,6 +220,9 @@ func (s *Server) adminJournalPrintPage(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 		return
 	}
+	if date, parseErr := time.Parse("2006-01-02", entry.Date); parseErr == nil {
+		entry.Date = date.Format("02/01/2006")
+	}
 
 	rows, err := s.db.Query(`SELECT l.id,COALESCE(l.coa_code,''),COALESCE(a.name,''),l.component,l.side,l.amount,l.mapping_override
 		FROM financial_journal_lines l LEFT JOIN coa_accounts a ON a.code=l.coa_code WHERE l.journal_id=$1 ORDER BY l.created_at,l.id`, entry.ID)
