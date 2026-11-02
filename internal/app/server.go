@@ -91,6 +91,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	admin.POST("/members/:id/user/update", server.requirePermission(PermissionMemberAccountsManage), server.updateMemberUser)
 	admin.POST("/members/:id/user/reset-password", server.requirePermission(PermissionMemberAccountsManage), server.resetMemberPassword)
 	admin.POST("/savings", server.requirePermission(PermissionSavingsRecord), server.recordSaving)
+	admin.POST("/savings/:id/update", server.requirePermission(PermissionSavingsRecord), server.updateSavingBySuperAdmin)
 	admin.GET("/savings", server.requirePermission(PermissionSavingsView), server.adminSavings)
 	admin.GET("/withdrawal-requests", server.requirePermission(PermissionRequestsView), server.adminWithdrawalRequests)
 	admin.POST("/withdrawal-requests/on-behalf", server.requirePermission(PermissionWithdrawalRequestsManage), server.createAdminWithdrawalRequest)

@@ -1393,6 +1393,7 @@
               <th>{{t $.Lang "type"}}</th>
               <th>{{t $.Lang "amount"}}</th>
               <th>{{t $.Lang "reference"}}</th>
+              {{if eq $.Role "super_admin"}}<th>{{t $.Lang "action"}}</th>{{end}}
             </tr>
           </thead>
           <tbody>
@@ -1404,6 +1405,24 @@
               <td>{{t $.Lang .Type}}</td>
               <td>{{nominal .Amount}}</td>
               <td><span class="reference-value" title="{{.ReferenceNo}}">{{.ReferenceNo}}</span></td>
+              {{if eq $.Role "super_admin"}}
+              <td>{{if eq .Type "deposit"}}
+                <details>
+                  <summary>{{t $.Lang "edit_saving"}}</summary>
+                  <form method="post" action="/api/admin/savings/{{.ID}}/update" hx-post="/api/admin/savings/{{.ID}}/update" hx-target="#saving-correction-error-{{.ID}}" hx-swap="innerHTML">
+                    <label>{{t $.Lang "amount"}}
+                      <input name="amount" type="text" inputmode="numeric" value="{{.Amount}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $.Lang "error_invalid_rupiah_amount"}}" required>
+                    </label>
+                    <label>{{t $.Lang "date"}} <input name="record_date" type="date" value="{{.RecordDate}}" required></label>
+                    <label>{{t $.Lang "reference_number"}} <input name="reference_no" value="{{.ReferenceNo}}"></label>
+                    <label>{{t $.Lang "note"}} <input name="note" value="{{.Note}}"></label>
+                    <label>{{t $.Lang "correction_reason"}} <input name="reason" maxlength="500" required></label>
+                    <button type="submit">{{t $.Lang "save"}}</button>
+                  </form>
+                  <p id="saving-correction-error-{{.ID}}" class="form-error"></p>
+                </details>
+              {{else}}—{{end}}</td>
+              {{end}}
             </tr>
             {{end}}
           </tbody>
