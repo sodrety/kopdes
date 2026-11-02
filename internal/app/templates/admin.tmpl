@@ -116,8 +116,8 @@
                   <a class="review-modal-close" href="#" aria-label="{{t $.Lang "close"}}">×</a>
                 </header>
                 <div class="review-modal-actions">
-                  <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/acceptance-form.pdf" download>{{t $.Lang "loan_acceptance_pdf"}}</a>
-                  <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/disbursement-form.pdf" download>{{t $.Lang "download_loan_disbursement_form"}}</a>
+                  <a class="button-link button-link-secondary" href="/admin/loan-requests/{{.ID}}/print/acceptance" target="_blank" rel="noopener">{{t $.Lang "loan_acceptance_print"}}</a>
+                  <a class="button-link button-link-secondary" href="/admin/loan-requests/{{.ID}}/print/disbursement-form" target="_blank" rel="noopener">{{t $.Lang "loan_application_print"}}</a>
                 </div>
                 <form method="post" action="/api/admin/loan-requests/{{.ID}}/disburse" hx-post="/api/admin/loan-requests/{{.ID}}/disburse" hx-target="#loan-disbursement-error" hx-swap="innerHTML">
                   <label>{{t $.Lang "loan_disbursement_date"}}
@@ -2115,8 +2115,8 @@
       <section class="page-actions">
         {{if index .Permissions "reports.view"}}<a class="button-link button-link-secondary" href="/api/admin/loans/{{.Loan.ID}}/export.pdf">{{t .Lang "export_pdf"}}</a>{{end}}
         {{if index .Permissions "loan_reports.generate"}}
-        <a class="button-link button-link-secondary" href="/api/admin/loans/{{.Loan.ID}}/reports/application.pdf">{{t .Lang "loan_application_pdf"}}</a>
-        <a class="button-link button-link-secondary" href="/api/admin/loans/{{.Loan.ID}}/reports/acceptance.pdf">{{t .Lang "loan_acceptance_pdf"}}</a>
+        <a class="button-link button-link-secondary" href="/admin/loans/{{.Loan.ID}}/print/application" target="_blank" rel="noopener">{{t .Lang "loan_application_print"}}</a>
+        <a class="button-link button-link-secondary" href="/admin/loans/{{.Loan.ID}}/print/acceptance" target="_blank" rel="noopener">{{t .Lang "loan_acceptance_print"}}</a>
         {{end}}
       </section>
       <section class="panel {{if .Loan.IsOverdue}}loan-warning{{end}}">
@@ -2456,8 +2456,8 @@
                       <div class="loan-review-provenance"><span>{{t $.Lang "admin_loan_provenance"}}</span><strong>{{t $.Lang (printf "admin_loan_source_%s" .CreationSource)}} · {{if .CreatedByName}}{{.CreatedByName}}{{else}}{{t $.Lang "admin_loan_source_member"}}{{end}}{{if .BatchID}} · <a href="/admin/loan-request-batches/{{.BatchID}}">{{.BatchID}}</a>{{end}}</strong></div>
                     </div>
                     <div class="review-modal-actions">
-                      <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/application-form.pdf">{{t $.Lang "loan_application_pdf"}}</a>
-                      <a class="button-link button-link-secondary" href="/api/admin/loan-requests/{{.ID}}/acceptance-form.pdf" download>{{t $.Lang "loan_acceptance_pdf"}}</a>
+                      <a class="button-link button-link-secondary" href="/admin/loan-requests/{{.ID}}/print/application" target="_blank" rel="noopener">{{t $.Lang "loan_application_print"}}</a>
+                      <a class="button-link button-link-secondary" href="/admin/loan-requests/{{.ID}}/print/acceptance" target="_blank" rel="noopener">{{t $.Lang "loan_acceptance_print"}}</a>
                     </div>
                     {{if and (eq $.Role "super_admin") (index $.Permissions "requests.override") (eq .Status "pending")}}
                     <div class="review-modal-actions">
