@@ -214,7 +214,7 @@ func (s *Server) recordRepaymentTx(tx *sql.Tx, loanID, adminID string, req repay
 		Status           string
 		LoanType         string
 	}
-	err = tx.QueryRow(
+	err := tx.QueryRow(
 		`SELECT member_id, remaining_balance, status, loan_type FROM loans WHERE id = $1`+rowLockClause(s.db),
 		loanID,
 	).Scan(&loan.MemberID, &loan.RemainingBalance, &loan.Status, &loan.LoanType)
