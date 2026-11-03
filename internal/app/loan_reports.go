@@ -22,6 +22,7 @@ var loanReportTemplates embed.FS
 
 type loanReportData struct {
 	Loan            Loan
+	FirstDueDate    string
 	Language        string
 	MemberNo        string
 	MemberNPP       string
@@ -173,7 +174,7 @@ func (s *Server) loanRequestAcceptanceReportData(requestID, language string) (lo
 	if err != nil {
 		return loanReportData{}, err
 	}
-	return loanReportData{
+	report := loanReportData{
 		Loan: Loan{
 			ID:                 request.ID,
 			LoanRequestID:      request.ID,
@@ -192,7 +193,22 @@ func (s *Server) loanRequestAcceptanceReportData(requestID, language string) (lo
 		MemberType:   application.MemberType,
 		MemberStatus: application.MemberStatus,
 		Purpose:      application.Purpose,
-	}, nil
+	}
+	if err := s.db.QueryRow(`SELECT i.due_date FROM loans l JOIN loan_installments i ON i.loan_id=l.id WHERE l.loan_request_id=$1 AND i.installment_no=1 LIMIT 1`, request.ID).Scan(&report.FirstDueDate); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return loanReportData{}, err
+		}
+		report.FirstDueDate = firstScheduledLoanDueDate(report.Loan.StartDate)
+	}
+	return report, nil
+}
+
+func firstScheduledLoanDueDate(startDate string) string {
+	start, err := parseLoanDate(startDate)
+	if err != nil {
+		return ""
+	}
+	return loanDueDate(start, 1).Format("2006-01-02")
 }
 
 func buildLoanAcceptanceFormPDF(report loanReportData) ([]byte, error) {
@@ -220,15 +236,19 @@ func (s *Server) loanReportData(c *gin.Context) (loanReportData, bool) {
 	err = s.db.QueryRow(
 		`SELECT m.member_no, COALESCE(NULLIF(TRIM(m.old_npp),''),m.member_no,''), m.full_name, COALESCE(m.member_type,'employee'), COALESCE(m.status,'active'),
 			COALESCE(r.purpose,''), COALESCE(r.requested_amount,l.approved_amount),
-			COALESCE(r.duration_months,l.duration_months), COALESCE(r.created_at,l.created_at)
+			COALESCE(r.duration_months,l.duration_months), COALESCE(r.created_at,l.created_at),
+			COALESCE((SELECT i.due_date FROM loan_installments i WHERE i.loan_id=l.id ORDER BY i.installment_no LIMIT 1),'')
 		FROM loans l
 		JOIN members m ON m.id=l.member_id
 		LEFT JOIN loan_requests r ON r.id=l.loan_request_id
 		WHERE l.id=$1`, loan.ID,
-	).Scan(&report.MemberNo, &report.MemberNPP, &report.MemberName, &report.MemberType, &report.MemberStatus, &report.Purpose, &report.RequestAmount, &report.RequestDuration, &requestDate)
+	).Scan(&report.MemberNo, &report.MemberNPP, &report.MemberName, &report.MemberType, &report.MemberStatus, &report.Purpose, &report.RequestAmount, &report.RequestDuration, &requestDate, &report.FirstDueDate)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
 		return loanReportData{}, false
+	}
+	if report.FirstDueDate == "" {
+		report.FirstDueDate = firstScheduledLoanDueDate(loan.StartDate)
 	}
 	report.RequestDate = loanReportDate(requestDate)
 	if strings.TrimSpace(report.Purpose) == "" {
@@ -399,9 +419,9 @@ func loanApprovalFormText(report loanReportData, stage string, y float64) loanPD
 
 func loanAcceptanceFormText(report loanReportData) []loanPDFText {
 	acceptanceDate := loanReportDateLong(time.Now().In(jakartaLocation).Format("2006-01-02"))
-	startDate := loanReportDateLong(report.Loan.StartDate)
-	if startDate == "" {
-		startDate = acceptanceDate
+	firstDueDate := loanReportDateLong(report.FirstDueDate)
+	if firstDueDate == "" {
+		firstDueDate = loanReportDateLong(firstScheduledLoanDueDate(report.Loan.StartDate))
 	}
 	npp := strings.TrimSpace(report.MemberNPP)
 	if npp == "" {
@@ -425,7 +445,7 @@ func loanAcceptanceFormText(report loanReportData) []loanPDFText {
 		{376, 406, 8.5, npp, 32},
 		{230, 490, 8.5, formatLoanReportAmount(acceptedAmount), 32},
 		{326, 490, 8.5, "(" + indonesianRupiahWords(acceptedAmount) + ")", 60},
-		{632, 546, 8.5, startDate, 36},
+		{632, 546, 9.5, firstDueDate, 36},
 		{184, 566, 8.5, strconv.Itoa(report.Loan.DurationMonths), 3},
 		{490, 566, 8.5, formatLoanReportAmount(report.Loan.MonthlyInstallment), 12},
 		{610, 788, 8.5, acceptanceDate, 32},

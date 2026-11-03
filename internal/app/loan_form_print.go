@@ -17,6 +17,13 @@ type loanFormPrintField struct {
 	Top      float64
 	FontSize float64
 	Value    string
+	Style    loanFormPrintFieldStyle
+}
+
+type loanFormPrintFieldStyle struct {
+	TemplateFont bool
+	Bold         bool
+	Italic       bool
 }
 
 type loanFormPrintMask struct {
@@ -56,7 +63,7 @@ func (s *Server) adminLoanAcceptanceFormPrintPage(c *gin.Context) {
 		return
 	}
 	loanID := url.PathEscape(report.Loan.ID)
-	renderLoanFormPrintPage(c, translate(report.Language, "loan_acceptance_print"), "/admin/loans/"+loanID, background, texts, masks)
+	renderLoanFormPrintPage(c, translate(report.Language, "loan_acceptance_print"), "/admin/loans/"+loanID, background, texts, masks, loanAcceptanceFormPrintStyles())
 }
 
 func (s *Server) adminLoanRequestApplicationFormPrintPage(c *gin.Context) {
@@ -88,7 +95,7 @@ func (s *Server) adminLoanRequestAcceptanceFormPrintPage(c *gin.Context) {
 		return
 	}
 	requestID := url.PathEscape(c.Param("id"))
-	renderLoanFormPrintPage(c, translate(lang, "loan_acceptance_print"), "/admin/loan-requests#loan-request-review-"+requestID, background, texts, masks)
+	renderLoanFormPrintPage(c, translate(lang, "loan_acceptance_print"), "/admin/loan-requests#loan-request-review-"+requestID, background, texts, masks, loanAcceptanceFormPrintStyles())
 }
 
 func (s *Server) adminLoanDisbursementApplicationFormPrintPage(c *gin.Context) {
@@ -126,19 +133,24 @@ func respondLoanFormPrintInternalError(c *gin.Context) {
 	respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
 }
 
-func renderLoanFormPrintPage(c *gin.Context, title, backURL string, background []byte, texts []loanPDFText, masks []loanPDFMask) {
+func renderLoanFormPrintPage(c *gin.Context, title, backURL string, background []byte, texts []loanPDFText, masks []loanPDFMask, styleOverrides ...map[int]loanFormPrintFieldStyle) {
 	fields := make([]loanFormPrintField, 0, len(texts))
-	for _, item := range texts {
+	for index, item := range texts {
 		value := strings.TrimSpace(item.value)
 		if value == "" {
 			continue
 		}
 		value = loanPDFASCII(truncateLoanPDFText(value, item.maxRunes))
+		style := loanFormPrintFieldStyle{}
+		if len(styleOverrides) > 0 {
+			style = styleOverrides[0][index]
+		}
 		fields = append(fields, loanFormPrintField{
 			Left:     item.x * 100 / loanFormReferenceWidth,
 			Top:      item.y * 100 / loanFormReferenceHeight,
 			FontSize: item.size,
 			Value:    value,
+			Style:    style,
 		})
 	}
 	printMasks := make([]loanFormPrintMask, 0, len(masks))
@@ -158,6 +170,20 @@ func renderLoanFormPrintPage(c *gin.Context, title, backURL string, background [
 		"Fields":            fields,
 		"Masks":             printMasks,
 	})
+}
+
+func loanAcceptanceFormPrintStyles() map[int]loanFormPrintFieldStyle {
+	styles := make(map[int]loanFormPrintFieldStyle, 14)
+	for index := 0; index < 14; index++ {
+		styles[index] = loanFormPrintFieldStyle{TemplateFont: true}
+	}
+	for _, index := range []int{0, 1, 2, 3} {
+		styles[index] = loanFormPrintFieldStyle{TemplateFont: true, Bold: true}
+	}
+	for _, index := range []int{4, 5, 6, 7, 8, 13} {
+		styles[index] = loanFormPrintFieldStyle{TemplateFont: true, Bold: true, Italic: true}
+	}
+	return styles
 }
 
 func (s *Server) loanApplicationFormPrintDataFromReport(report loanReportData) (disbursementApplicationFormData, error) {
