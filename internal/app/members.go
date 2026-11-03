@@ -280,7 +280,54 @@ func (s *Server) updateMemberUser(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_member_login"))
 		return
 	}
-	result, err := s.db.Exec(`UPDATE users SET email=$1,active=$2,updated_at=CURRENT_TIMESTAMP WHERE member_id=$3 AND historical_identity=FALSE`, strings.ToLower(strings.TrimSpace(req.Email)), *req.Active, c.Param("id"))
+	tx, err := s.db.Begin()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	memberID := c.Param("id")
+	if !*req.Active {
+		rows, err := tx.Query(`SELECT member_id FROM officer_appointments WHERE role='ketua_utama' AND active=TRUE ORDER BY member_id` + rowLockClause(s.db))
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+			return
+		}
+		for rows.Next() {
+			var lockedMemberID string
+			if err := rows.Scan(&lockedMemberID); err != nil {
+				_ = rows.Close()
+				respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+			return
+		}
+		if err := rows.Close(); err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+			return
+		}
+		var isActiveKetuaUtama bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users u JOIN officer_appointments oa ON oa.member_id=u.member_id JOIN members m ON m.id=u.member_id WHERE u.member_id=$1 AND u.historical_identity=FALSE AND u.active=TRUE AND m.status='active' AND oa.role='ketua_utama' AND oa.active=TRUE)`, memberID).Scan(&isActiveKetuaUtama); err != nil {
+			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+			return
+		}
+		if isActiveKetuaUtama {
+			var otherActiveKetuaUtama int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM users u JOIN officer_appointments oa ON oa.member_id=u.member_id JOIN members m ON m.id=u.member_id WHERE u.historical_identity=FALSE AND u.active=TRUE AND m.status='active' AND oa.role='ketua_utama' AND oa.active=TRUE AND u.member_id<>$1`, memberID).Scan(&otherActiveKetuaUtama); err != nil {
+				respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+				return
+			}
+			if otherActiveKetuaUtama == 0 {
+				respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_last_ketua_utama"))
+				return
+			}
+		}
+	}
+	result, err := tx.Exec(`UPDATE users SET email=$1,active=$2,updated_at=CURRENT_TIMESTAMP WHERE member_id=$3 AND historical_identity=FALSE`, strings.ToLower(strings.TrimSpace(req.Email)), *req.Active, memberID)
 	if isUniqueViolation(err) {
 		respondError(c, http.StatusConflict, "DUPLICATE_DATA", translate(languageFromRequest(c), "error_email_exists"))
 		return
@@ -296,7 +343,11 @@ func (s *Server) updateMemberUser(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_member_login_not_found"))
 		return
 	}
-	respondOKOrHXRedirect(c, "/admin/members/"+c.Param("id"), gin.H{"status": "ok"})
+	if err := tx.Commit(); err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error")
+		return
+	}
+	respondOKOrHXRedirect(c, "/admin/members/"+memberID, gin.H{"status": "ok"})
 }
 
 func (s *Server) resetMemberPassword(c *gin.Context) {

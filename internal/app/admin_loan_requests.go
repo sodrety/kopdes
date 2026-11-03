@@ -377,20 +377,17 @@ func (s *Server) activeManagerApproverWarning(tx *sql.Tx) (bool, error) {
 	return count == 0, err
 }
 
+func isAutoApprovedLoanImportType(loanType string) bool {
+	return loanType == "voucher" || loanType == "goods_purchase_paylater"
+}
+
 func (s *Server) validateAdminLoanBatchRows(rows []adminLoanRequestRow) ([]adminLoanRequestRow, []string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	noApprover, err := s.activeManagerApproverWarning(tx)
-	if err != nil {
-		return nil, nil, err
-	}
 	batchWarnings := []string{}
-	if noApprover {
-		batchWarnings = append(batchWarnings, "admin_issue_no_manager_approver")
-	}
 	seen := map[string]bool{}
 	for index := range rows {
 		row := &rows[index]
@@ -405,6 +402,22 @@ func (s *Server) validateAdminLoanBatchRows(rows []adminLoanRequestRow) ([]admin
 			if _, _, err := s.validateAdminLoanRow(tx, row, false, false); err != nil {
 				return nil, nil, err
 			}
+		}
+	}
+	needsApproval := false
+	for _, row := range rows {
+		if len(row.Errors) == 0 && !isAutoApprovedLoanImportType(row.LoanType) {
+			needsApproval = true
+			break
+		}
+	}
+	if needsApproval {
+		noApprover, err := s.activeManagerApproverWarning(tx)
+		if err != nil {
+			return nil, nil, err
+		}
+		if noApprover {
+			batchWarnings = append(batchWarnings, "admin_issue_no_manager_approver")
 		}
 	}
 	return rows, batchWarnings, nil
@@ -714,6 +727,112 @@ func (s *Server) insertAdminLoanRequestTx(tx *sql.Tx, actor User, memberID strin
 	return request, nil
 }
 
+func (s *Server) createAutoApprovedImportedLoanTx(tx *sql.Tx, actor User, memberID string, input adminLoanRequestInput, batchID string) (LoanRequest, error) {
+	if batchID == "" || !isAutoApprovedLoanImportType(input.LoanType) || validateLoanRequestInput(loanRequestInput{LoanType: input.LoanType, RequestedAmount: input.RequestedAmount, DurationMonths: input.DurationMonths, Purpose: input.Purpose}) != nil {
+		return LoanRequest{}, errInvalidLoanRequest
+	}
+	startDate := time.Now().In(jakartaLocation).Format("2006-01-02")
+	var calc LoanScheduleCalculation
+	var adminFeePolicy string
+	switch input.LoanType {
+	case "voucher":
+		if input.AdminFee == nil {
+			return LoanRequest{}, errInvalidLoanRequest
+		}
+		adminFeePolicy = voucherAdminFeePolicy
+		var err error
+		calc, err = calculateVoucherLoanSchedule(input.RequestedAmount, *input.AdminFee, input.DurationMonths, startDate)
+		if err != nil {
+			return LoanRequest{}, errInvalidLoanApprovalCalculated
+		}
+	case "goods_purchase_paylater":
+		if input.AdminFee != nil {
+			return LoanRequest{}, errInvalidLoanRequest
+		}
+		var err error
+		calc, err = calculatePaylaterLoanSchedule(input.RequestedAmount, input.DurationMonths, startDate)
+		if err != nil {
+			return LoanRequest{}, errInvalidLoanApprovalCalculated
+		}
+		adminFeePolicy = paylaterAdminFeePolicy
+	}
+	if err := validateLoanFeeSnapshot(adminFeePolicy, input.RequestedAmount, input.DurationMonths, nil, calc.TotalAdminFee, calc.TotalObligation); err != nil {
+		return LoanRequest{}, errInvalidLoanApprovalCalculated
+	}
+
+	request := LoanRequest{
+		ID:                      newID(),
+		MemberID:                memberID,
+		RequestedAmount:         input.RequestedAmount,
+		DurationMonths:          input.DurationMonths,
+		Purpose:                 strings.TrimSpace(input.Purpose),
+		Status:                  "approved",
+		LoanType:                input.LoanType,
+		ProposedApprovedAmount:  input.RequestedAmount,
+		ProposedDurationMonths:  input.DurationMonths,
+		ProposedStartDate:       startDate,
+		ProposedAdminFeePolicy:  adminFeePolicy,
+		ProposedTotalAdminFee:   calc.TotalAdminFee,
+		ProposedTotalObligation: calc.TotalObligation,
+		DisbursementDate:        startDate,
+	}
+	if _, err := tx.Exec(`INSERT INTO loan_requests (id,member_id,requested_amount,duration_months,purpose,status,loan_type,current_approval_stage,created_by,creation_source,batch_id,requested_admin_fee,auto_approved_import) VALUES ($1,$2,$3,$4,$5,'pending',$6,'manager',$7,'admin',$8,$9,TRUE)`, request.ID, request.MemberID, request.RequestedAmount, request.DurationMonths, request.Purpose, request.LoanType, actor.ID, batchID, input.AdminFee); err != nil {
+		return LoanRequest{}, err
+	}
+	if _, err := tx.Exec(`UPDATE loan_requests SET proposed_approved_amount=$1,proposed_duration_months=$2,proposed_start_date=$3,proposed_admin_fee_policy=$4,proposed_monthly_admin_fee=NULL,proposed_total_admin_fee=$5,proposed_total_obligation=$6,status='approved',current_approval_stage=NULL,reviewed_by=$7,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$8 AND status='pending' AND current_approval_stage='manager' AND auto_approved_import=TRUE`, request.ProposedApprovedAmount, request.ProposedDurationMonths, request.ProposedStartDate, request.ProposedAdminFeePolicy, request.ProposedTotalAdminFee, request.ProposedTotalObligation, actor.ID, request.ID); err != nil {
+		return LoanRequest{}, err
+	}
+	if _, err := tx.Exec(`UPDATE loan_requests SET disbursement_date=$1,disbursed_by=$2,disbursed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$3 AND status='approved' AND disbursement_date='' AND auto_approved_import=TRUE`, startDate, actor.ID, request.ID); err != nil {
+		return LoanRequest{}, err
+	}
+
+	loanSchedule, err := buildLoanScheduleFromObligation(calc.TotalObligation, input.DurationMonths, startDate, 1)
+	if err != nil {
+		return LoanRequest{}, errInvalidLoanApprovalCalculated
+	}
+	loan := Loan{
+		ID:                 newID(),
+		LoanRequestID:      request.ID,
+		MemberID:           memberID,
+		LoanType:           input.LoanType,
+		ApprovedAmount:     input.RequestedAmount,
+		DurationMonths:     input.DurationMonths,
+		MonthlyInstallment: loanSchedule.Installments[0].ScheduledAmount,
+		RemainingBalance:   calc.TotalObligation,
+		StartDate:          startDate,
+		AdminFeePolicy:     adminFeePolicy,
+		TotalAdminFee:      calc.TotalAdminFee,
+		TotalObligation:    calc.TotalObligation,
+		NextDueDate:        loanSchedule.Installments[0].DueDate,
+		FinalDueDate:       loanSchedule.Installments[len(loanSchedule.Installments)-1].DueDate,
+		Status:             "active",
+		Source:             transactionSourceBank,
+		ApprovedBy:         actor.ID,
+	}
+	if _, err := tx.Exec(`INSERT INTO loans (id,loan_request_id,member_id,loan_type,approved_amount,duration_months,monthly_installment,remaining_balance,status,approved_by,source,coa_code,start_date,admin_fee_policy,monthly_admin_fee,total_admin_fee,total_obligation,next_due_date,final_due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10,NULL,$11,$12,NULL,$13,$14,$15,$16)`, loan.ID, loan.LoanRequestID, loan.MemberID, loan.LoanType, loan.ApprovedAmount, loan.DurationMonths, loan.MonthlyInstallment, loan.RemainingBalance, loan.ApprovedBy, loan.Source, loan.StartDate, loan.AdminFeePolicy, loan.TotalAdminFee, loan.TotalObligation, loan.NextDueDate, loan.FinalDueDate); err != nil {
+		return LoanRequest{}, err
+	}
+	for _, installment := range loanSchedule.Installments {
+		if _, err := tx.Exec(`INSERT INTO loan_installments (id,loan_id,installment_no,due_date,scheduled_amount,paid_amount) VALUES ($1,$2,$3,$4,$5,0)`, newID(), loan.ID, installment.Number, installment.DueDate, installment.ScheduledAmount); err != nil {
+			return LoanRequest{}, err
+		}
+	}
+	components := []accountingJournalComponent{
+		{Component: "loan_receivable", Side: accountingDirectionDebit, Amount: loan.TotalObligation},
+		{Component: "cash_bank", Side: accountingDirectionCredit, Amount: loan.ApprovedAmount},
+	}
+	if loan.TotalAdminFee > 0 {
+		components = append(components, accountingJournalComponent{Component: "admin_fee_income", Side: accountingDirectionCredit, Amount: loan.TotalAdminFee})
+	}
+	if err := s.createFinancialJournalTx(tx, accountingJournalInput{ReferenceNo: request.ID, TransactionID: loan.ID, TransactionType: "loan", TransactionDate: startDate, Source: loan.Source, Amount: loan.TotalObligation, LoanType: loan.LoanType, Components: components, Description: request.Purpose, RecordedBy: actor.ID, BatchID: batchID}); err != nil {
+		return LoanRequest{}, err
+	}
+	if err := createMemberOutcomeNotification(tx, "loan", request.ID, memberID, "approved", "/member/loan-requests"); err != nil {
+		return LoanRequest{}, err
+	}
+	return request, nil
+}
+
 func createAdminLoanStageEvent(tx *sql.Tx, requestID string) error {
 	_, err := tx.Exec(`INSERT INTO notification_events (id,event_type,request_type,request_id,payload) VALUES ($1,'approval_stage_ready','loan',$2,'{"stage":"manager","delivery":"batch_summary"}')`, newID(), requestID)
 	return err
@@ -826,14 +945,7 @@ func (s *Server) commitAdminLoanRequestBatch(actor User, batchID string, acknowl
 	for index, row := range rows {
 		validationRows[index] = adminLoanRequestRow{ExcelRow: row.ExcelRow, MemberNo: row.MemberNo, FullName: row.FullName, LoanType: row.LoanType, RequestedAmount: row.RequestedAmount, DurationMonths: row.DurationMonths, Purpose: row.Purpose, AdminFee: row.AdminFee, Warnings: row.Warnings}
 	}
-	noApprover, err := s.activeManagerApproverWarning(tx)
-	if err != nil {
-		return AdminLoanRequestBatch{}, err
-	}
 	newBatchWarnings := []string{}
-	if noApprover {
-		newBatchWarnings = append(newBatchWarnings, "admin_issue_no_manager_approver")
-	}
 	seen := map[string]bool{}
 	for index := range validationRows {
 		row := &validationRows[index]
@@ -847,6 +959,22 @@ func (s *Server) commitAdminLoanRequestBatch(actor User, batchID string, acknowl
 			if _, _, err := s.validateAdminLoanRow(tx, row, true, false); err != nil {
 				return AdminLoanRequestBatch{}, err
 			}
+		}
+	}
+	needsApproval := false
+	for _, row := range validationRows {
+		if len(row.Errors) == 0 && !isAutoApprovedLoanImportType(row.LoanType) {
+			needsApproval = true
+			break
+		}
+	}
+	if needsApproval {
+		noApprover, err := s.activeManagerApproverWarning(tx)
+		if err != nil {
+			return AdminLoanRequestBatch{}, err
+		}
+		if noApprover {
+			newBatchWarnings = append(newBatchWarnings, "admin_issue_no_manager_approver")
 		}
 	}
 	for _, row := range validationRows {
@@ -891,13 +1019,20 @@ func (s *Server) commitAdminLoanRequestBatch(actor User, batchID string, acknowl
 		return batch, errors.Join(errAdminLoanBatchWarnings, loadErr)
 	}
 	created := 0
+	pendingApproval := 0
 	for index, row := range validationRows {
 		input := adminLoanRequestInput{MemberNo: row.MemberNo, LoanType: row.LoanType, RequestedAmount: row.RequestedAmount, DurationMonths: row.DurationMonths, Purpose: row.Purpose, AdminFee: row.AdminFee, AcknowledgeWarnings: acknowledge}
 		memberID, _, err := s.validateAdminLoanRow(tx, &row, true, false)
 		if err != nil {
 			return AdminLoanRequestBatch{}, err
 		}
-		request, err := s.insertAdminLoanRequestTx(tx, actor, memberID, input, batchID)
+		var request LoanRequest
+		if isAutoApprovedLoanImportType(input.LoanType) {
+			request, err = s.createAutoApprovedImportedLoanTx(tx, actor, memberID, input, batchID)
+		} else {
+			request, err = s.insertAdminLoanRequestTx(tx, actor, memberID, input, batchID)
+			pendingApproval++
+		}
 		if err != nil {
 			return AdminLoanRequestBatch{}, err
 		}
@@ -906,8 +1041,10 @@ func (s *Server) commitAdminLoanRequestBatch(actor User, batchID string, acknowl
 		}
 		created++
 	}
-	if err := createAdminLoanBatchNotification(tx, batchID, created); err != nil {
-		return AdminLoanRequestBatch{}, err
+	if pendingApproval > 0 {
+		if err := createAdminLoanBatchNotification(tx, batchID, pendingApproval); err != nil {
+			return AdminLoanRequestBatch{}, err
+		}
 	}
 	if _, err := tx.Exec(`UPDATE loan_request_batches SET status='committed',created_count=$1,error_count=0,warning_count=$2,batch_warnings=$3,warnings_acknowledged=$4,confirmed_by=$5,confirmed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,preview_expires_at=NULL WHERE id=$6`, created, stored.WarningCount, joinAdminLoanIssues(stored.BatchWarnings), acknowledge, actor.ID, batchID); err != nil {
 		return AdminLoanRequestBatch{}, err

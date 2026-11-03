@@ -1,21 +1,24 @@
 (function () {
   "use strict";
+  let nextPickerID = 0;
 
   function enhanceMemberPicker(root) {
     if (root.dataset.memberPickerReady) return;
     const select = root.querySelector("select");
     if (!select) return;
     root.dataset.memberPickerReady = "true";
-    const members = Array.from(select.options).filter(option => option.value).map(option => ({
+    const required = select.required;
+    const members = Array.from(select.options).filter(option => !(option.value === "" && option.disabled)).map(option => ({
       value: option.value,
       label: option.textContent.trim()
     }));
     const input = document.createElement("input");
-    input.id = select.id;
-    select.id += "-value";
+    const originalSelectID = select.id;
+    input.id = originalSelectID || "member-picker-" + (++nextPickerID);
+    if (originalSelectID) select.id = originalSelectID + "-value";
     input.type = "text";
     input.autocomplete = "off";
-    input.required = select.required;
+    input.required = required;
     input.placeholder = root.dataset.placeholder;
     input.setAttribute("role", "combobox");
     input.setAttribute("aria-autocomplete", "list");
@@ -24,7 +27,7 @@
     list.id = input.id + "-results";
     list.className = "member-picker-results";
     list.setAttribute("role", "listbox");
-    list.setAttribute("aria-labelledby", input.id + "-label");
+    list.setAttribute("aria-label", input.placeholder);
     list.hidden = true;
     input.setAttribute("aria-controls", list.id);
     const status = document.createElement("div");
@@ -35,7 +38,7 @@
     select.hidden = true;
     select.required = false;
     input.value = members.find(member => member.value === select.value)?.label || "";
-    input.setCustomValidity(select.value ? "" : root.dataset.invalid);
+    input.setCustomValidity(required && !select.value ? root.dataset.invalid : "");
     let matches = [];
     let active = -1;
 
@@ -94,7 +97,7 @@
     input.addEventListener("click", show);
     input.addEventListener("input", () => {
       select.value = "";
-      input.setCustomValidity(root.dataset.invalid);
+      input.setCustomValidity(required ? root.dataset.invalid : "");
       show();
     });
     input.addEventListener("keydown", event => {
@@ -115,7 +118,7 @@
       // Native controls reset after the reset event has finished.
       setTimeout(() => {
         input.value = members.find(member => member.value === select.value)?.label || "";
-        input.setCustomValidity(select.value ? "" : root.dataset.invalid);
+        input.setCustomValidity(required && !select.value ? root.dataset.invalid : "");
         close();
       }, 0);
     });

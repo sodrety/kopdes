@@ -746,8 +746,13 @@
           <input type="hidden" name="view" value="journal">
           <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label>
           <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label>
-          <label>{{t .Lang "member"}} <select name="member_id"><option value="">{{t .Lang "all_members"}}</option>{{range .Members}}<option value="{{.ID}}" {{if eq $.SelectedMemberID .ID}}selected{{end}}>{{.MemberNo}} — {{.FullName}}</option>{{end}}</select></label>
+          <label>{{t .Lang "member"}}
+            <div class="member-picker" data-member-picker data-placeholder="{{t .Lang "member_picker_search"}}" data-empty="{{t .Lang "member_picker_empty"}}" data-invalid="{{t .Lang "member_picker_invalid"}}">
+              <select name="member_id"><option value="">{{t .Lang "all_members"}}</option>{{range .Members}}<option value="{{.ID}}" {{if eq $.SelectedMemberID .ID}}selected{{end}}>{{.MemberNo}} — {{.FullName}}</option>{{end}}</select>
+            </div>
+          </label>
           <button type="submit">{{t .Lang "apply_filters"}}</button>
+          <button type="submit" name="export" value="xlsx" class="button-secondary">{{t .Lang "export_xlsx"}}</button>
           <a class="button-link button-link-secondary" href="/admin/journals?view=journal">{{t .Lang "reset"}}</a>
         </form>
         {{if .Entries}}
@@ -1438,12 +1443,14 @@
         <h2>{{t .Lang "saving_records"}}</h2>
         <form class="filter-form" method="get" action="/admin/savings">
           <label>{{t .Lang "member"}}
+            <div class="member-picker" data-member-picker data-placeholder="{{t .Lang "member_picker_search"}}" data-empty="{{t .Lang "member_picker_empty"}}" data-invalid="{{t .Lang "member_picker_invalid"}}">
             <select name="member_id">
               <option value="">{{t .Lang "all_members"}}</option>
               {{range .Members}}
               <option value="{{.ID}}" {{if eq $.Filters.MemberID .ID}}selected{{end}}>{{.FullName}} - {{.MemberNo}}</option>
               {{end}}
             </select>
+            </div>
           </label>
           <label>{{t .Lang "saving_category"}}
             <select name="category">
@@ -1529,11 +1536,13 @@
         {{if .Members}}
         <form method="post" action="/api/admin/savings" hx-post="/api/admin/savings" hx-target="#saving-form-error" hx-swap="innerHTML">
           <label>{{t .Lang "member"}}
+            <div class="member-picker" data-member-picker data-placeholder="{{t .Lang "member_picker_search"}}" data-empty="{{t .Lang "member_picker_empty"}}" data-invalid="{{t .Lang "member_picker_invalid"}}">
             <select name="member_id" required>
               {{range .Members}}
               <option value="{{.ID}}">{{.FullName}} - {{.MemberNo}}</option>
               {{end}}
             </select>
+            </div>
           </label>
           <input type="hidden" name="type" value="deposit">
           <label>{{t .Lang "saving_category"}}
@@ -2274,8 +2283,12 @@
         <p class="field-help">{{t .Lang "officer_withdrawal_request_form_help"}}</p>
         <form method="post" action="/api/admin/withdrawal-requests/on-behalf" hx-post="/api/admin/withdrawal-requests/on-behalf" hx-target="#officer-withdrawal-error" hx-swap="innerHTML">
           <label>{{t .Lang "member"}}
-            <input name="member_no" list="withdrawal-request-members" autocomplete="off" required>
-            <datalist id="withdrawal-request-members">{{range .Members}}<option value="{{.MemberNo}}">{{.FullName}}</option>{{end}}</datalist>
+          <div class="member-picker" data-member-picker data-placeholder="{{t .Lang "member_picker_search"}}" data-empty="{{t .Lang "member_picker_empty"}}" data-invalid="{{t .Lang "member_picker_invalid"}}">
+            <select name="member_no" required>
+              <option value="" disabled selected>{{t .Lang "select_member"}}</option>
+              {{range .Members}}<option value="{{.MemberNo}}">{{.FullName}} · {{.MemberNo}}</option>{{end}}
+            </select>
+          </div>
           </label>
           <label>{{t .Lang "amount"}} <input name="amount" type="text" inputmode="numeric" data-rupiah-input data-rupiah-group="{{if eq .Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t .Lang "error_invalid_rupiah_amount"}}" required></label>
           <label>{{t .Lang "note"}} <input name="note" maxlength="500"></label>
@@ -2437,7 +2450,7 @@
             <div class="member-picker" data-member-picker data-placeholder="{{t .Lang "member_picker_search"}}" data-empty="{{t .Lang "member_picker_empty"}}" data-invalid="{{t .Lang "member_picker_invalid"}}">
               <label id="loan-member-label" for="loan-member">{{t .Lang "admin_loan_member"}}</label>
               <select name="member_no" id="loan-member" required>
-                <option value="">{{t .Lang "select_member"}}</option>
+                <option value="" disabled selected>{{t .Lang "select_member"}}</option>
                 {{range .Members}}<option value="{{.MemberNo}}">{{.FullName}} · {{.MemberNo}}</option>{{end}}
               </select>
             </div>
@@ -2652,7 +2665,6 @@
       updateSettlementPreview();
     });
   </script>
-  <script src="/static/vendor/member-picker.js"></script>
 {{template "admin-shell-end" .}}
 {{end}}
 

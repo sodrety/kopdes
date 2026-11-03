@@ -645,6 +645,7 @@ var migrations = []migration{
 		`CREATE INDEX IF NOT EXISTS idx_saving_record_removals_member_date ON saving_record_removals(member_id,record_date,created_at)`,
 		`ALTER TABLE saving_record_removals ENABLE ROW LEVEL SECURITY`,
 	}},
+	{Version: 51, Name: "auto_create_imported_voucher_paylater_loans"},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -1003,6 +1004,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 	}
 	if migration.Version == 48 {
 		if err := updateMemberTypeLoanLimitCalculation(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 51 {
+		if err := allowAutoApprovedImportedLoans(tx, isSQLite); err != nil {
 			return err
 		}
 	}

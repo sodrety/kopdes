@@ -2,11 +2,13 @@
 {{template "member-shell-start" .}}
   <section class="panel form-panel">
     <form method="post" action="/api/account/password" hx-post="/api/account/password" hx-target="#password-change-error" hx-swap="innerHTML">
-      <label>{{t .Lang "new_password"}}<input type="password" name="password" minlength="8" autocomplete="new-password" required></label>
+      <label>{{t .Lang "new_password"}}<input id="password-change-password" type="password" name="password" minlength="8" autocomplete="new-password" required></label>
+      <label class="password-visibility-toggle"><input type="checkbox" data-password-visibility-toggle="password-change-password"> {{t .Lang "show_password"}}</label>
       <button type="submit">{{t .Lang "change_password"}}</button>
     </form>
     {{template "form-error" (dict "ID" "password-change-error")}}
   </section>
+  <script src="/static/vendor/password-toggle.js"></script>
 {{template "member-shell-end" .}}
 {{end}}
 

@@ -14,6 +14,10 @@ var staticAssetFS embed.FS
 const appCSS = `
 .member-picker { position: relative; }
 .member-picker input { width: 100%; }
+.password-visibility-toggle { display: flex; align-items: center; gap: 8px; }
+.password-visibility-toggle input { width: auto; }
+.auth-form-panel form > .password-visibility-toggle { color: var(--body); font-size: 13px; }
+.auth-form-panel .password-visibility-toggle input { min-height: auto; padding: 0; }
 .member-picker-results, .member-picker-status {
   position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
   margin-top: 4px; border: 1px solid var(--line); border-radius: var(--radius-md);

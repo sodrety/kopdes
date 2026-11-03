@@ -142,6 +142,21 @@ func (s *Server) adminJournalsPage(c *gin.Context) {
 		}
 		data["Members"] = members
 		data["SelectedMemberID"] = memberID
+		if c.Query("export") == "xlsx" {
+			entries, err := s.financialJournalsForAdminExport(dateFrom, dateTo, memberID)
+			if err != nil {
+				respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+				return
+			}
+			workbook, err := financialJournalsWorkbook(languageFromRequest(c), entries)
+			if err != nil {
+				respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+				return
+			}
+			c.Header("Content-Disposition", `attachment; filename="jurnal-umum.xlsx"`)
+			c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", workbook)
+			return
+		}
 		entries, err := s.financialJournalsForAdmin(dateFrom, dateTo, memberID)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
@@ -258,6 +273,14 @@ func (s *Server) adminJournalPrintPage(c *gin.Context) {
 }
 
 func (s *Server) financialJournalsForAdmin(dateFrom, dateTo, memberID string) ([]FinancialJournalEntryView, error) {
+	return s.financialJournalsForAdminLimit(dateFrom, dateTo, memberID, 500)
+}
+
+func (s *Server) financialJournalsForAdminExport(dateFrom, dateTo, memberID string) ([]FinancialJournalEntryView, error) {
+	return s.financialJournalsForAdminLimit(dateFrom, dateTo, memberID, 0)
+}
+
+func (s *Server) financialJournalsForAdminLimit(dateFrom, dateTo, memberID string, limit int) ([]FinancialJournalEntryView, error) {
 	query := financialJournalMemberCTE + ` SELECT e.id,e.reference_no,e.transaction_type,e.transaction_date,e.description,
 		COALESCE(jm.member_id,''),COALESCE(jm.member_no,''),COALESCE(jm.full_name,''),
 		e.category,e.loan_type,e.status,e.recorded_by,COALESCE(e.reversal_of,''),e.correction_reason,
@@ -278,7 +301,10 @@ func (s *Server) financialJournalsForAdmin(dateFrom, dateTo, memberID string) ([
 		args = append(args, memberID)
 		query += ` AND jm.member_id=$` + strconv.Itoa(len(args))
 	}
-	query += ` GROUP BY e.id,jm.member_id,jm.member_no,jm.full_name ORDER BY e.transaction_date DESC,e.created_at DESC,e.id DESC LIMIT 500`
+	query += ` GROUP BY e.id,jm.member_id,jm.member_no,jm.full_name ORDER BY e.transaction_date DESC,e.created_at DESC,e.id DESC`
+	if limit > 0 {
+		query += ` LIMIT ` + strconv.Itoa(limit)
+	}
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err

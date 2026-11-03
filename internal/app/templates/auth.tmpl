@@ -22,7 +22,8 @@
       {{template "language-form" .}}
       <form method="post" action="/api/auth/login" hx-post="/api/auth/login" hx-target="#login-error" hx-swap="innerHTML">
         <label>{{t .Lang "email"}} <input name="email" type="email" autocomplete="username" placeholder="{{t .Lang "email_placeholder"}}" required></label>
-        <label>{{t .Lang "password"}} <input name="password" type="password" autocomplete="current-password" placeholder="{{t .Lang "password"}}" required></label>
+        <label>{{t .Lang "password"}} <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="{{t .Lang "password"}}" required></label>
+        <label class="password-visibility-toggle"><input type="checkbox" data-password-visibility-toggle="login-password"> {{t .Lang "show_password"}}</label>
         <label class="remember-field"><input name="remember" type="checkbox"> {{t .Lang "remember_me"}}</label>
         <button type="submit">{{t .Lang "log_in"}}</button>
       </form>
@@ -31,6 +32,7 @@
     </section>
   </main>
 {{template "toast-script" .}}
+  <script src="/static/vendor/password-toggle.js"></script>
 </body>
 </html>
 {{end}}
