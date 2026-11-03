@@ -184,7 +184,7 @@ func (s *Server) loanApplicationFormDataFromRequest(request LoanRequest) (disbur
 	}
 	if report.SettleOutstandingLoans {
 		if request.DisbursementDate == "" {
-			report.LoanPayoffAmount = report.PriorCashLoan.RemainingBalance + report.PriorGoodsLoan.RemainingBalance
+			report.LoanPayoffAmount = report.PriorCashLoan.RemainingBalance
 		}
 	} else {
 		report.LoanPayoffAmount = 0

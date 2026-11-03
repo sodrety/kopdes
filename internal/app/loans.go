@@ -444,7 +444,7 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		settleOutstandingLoans := req.SettleOutstandingLoans && request.LoanType == "regular"
 		var loanPayoffAmount int64
 		if settleOutstandingLoans {
-			if err := tx.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND status IN ('active','adjustment_due') AND remaining_balance>0`, request.MemberID).Scan(&loanPayoffAmount); err != nil {
+			if err := tx.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND loan_type='regular' AND status IN ('active','adjustment_due') AND remaining_balance>0`, request.MemberID).Scan(&loanPayoffAmount); err != nil {
 				return LoanApprovalResult{}, err
 			}
 			if loanPayoffAmount > req.ApprovedAmount {
@@ -692,7 +692,7 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, req dis
 	var loansToPayOff []outstandingLoanForPayoff
 	var payoffTotal int64
 	if settleOutstandingLoans {
-		rows, err := tx.Query(`SELECT id,remaining_balance FROM loans WHERE member_id=$1 AND status IN ('active','adjustment_due') AND remaining_balance>0 ORDER BY created_at,id`+rowLockClause(s.db), request.MemberID)
+		rows, err := tx.Query(`SELECT id,remaining_balance FROM loans WHERE member_id=$1 AND loan_type='regular' AND status IN ('active','adjustment_due') AND remaining_balance>0 ORDER BY created_at,id`+rowLockClause(s.db), request.MemberID)
 		if err != nil {
 			return LoanApprovalResult{}, err
 		}

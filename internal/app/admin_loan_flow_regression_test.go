@@ -93,7 +93,38 @@ func TestRegularLoanPelunasanAdjustsApplicationFormAndKeepsPrincipalFull(t *test
 	superToken := establishSuperAdmin(t, f)
 	_, adminToken := provisionAdminOfficer(t, f, superToken, managerToken)
 	f.ensureLoanCapacityForMember(t, managerToken, member.ID, 5_000_000)
+	previousGoodsRequestID := createAdminLoanRequestForTest(t, f, adminToken, member.MemberNo, "secondary_goods", 1_000_000, 6, "previous-goods-pelunasan-request")
+	previousGoodsApproval := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/"+previousGoodsRequestID+"/approve", managerToken, `{"approved_amount":1000000,"duration_months":6}`)
+	if previousGoodsApproval.Code != http.StatusOK {
+		t.Fatalf("approve previous secondary goods loan: %d %s", previousGoodsApproval.Code, previousGoodsApproval.Body.String())
+	}
+	for _, approver := range []string{"ketua-ii@coop.test", "ketua-i@coop.test"} {
+		response := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/"+previousGoodsRequestID+"/approve", f.login(t, approver, "password"), `{}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s approval for previous secondary goods loan: %d %s", approver, response.Code, response.Body.String())
+		}
+	}
+	date := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
+	previousGoodsLoan := f.disburseLoanRequest(t, previousGoodsRequestID, date)
 	requestID := createAdminLoanRequestForTest(t, f, adminToken, member.MemberNo, "regular", 5_000_000, 12, "regular-pelunasan-request")
+
+	page := adminLoanJSONRequest(f, http.MethodGet, "/admin/loan-requests?status=pending", managerToken, "")
+	if page.Code != http.StatusOK {
+		t.Fatalf("load pending loan requests: %d %s", page.Code, page.Body.String())
+	}
+	approvalAction := `action="/api/admin/loan-requests/` + requestID + `/approve"`
+	approvalStart := strings.Index(page.Body.String(), approvalAction)
+	if approvalStart < 0 {
+		t.Fatalf("missing manager approval form for regular loan %s", requestID)
+	}
+	formEnd := strings.Index(page.Body.String()[approvalStart:], "</form>")
+	if formEnd < 0 {
+		t.Fatal("unterminated manager approval form")
+	}
+	approvalForm := page.Body.String()[approvalStart : approvalStart+formEnd]
+	if !strings.Contains(approvalForm, `data-outstanding="`+strconv.FormatInt(previousLoan.RemainingBalance, 10)+`"`) {
+		t.Fatalf("pelunasan preview should use only regular balance %d", previousLoan.RemainingBalance)
+	}
 
 	approval := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, `{"approved_amount":5000000,"duration_months":12,"settle_outstanding_loans":true}`)
 	if approval.Code != http.StatusOK {
@@ -129,7 +160,6 @@ func TestRegularLoanPelunasanAdjustsApplicationFormAndKeepsPrincipalFull(t *test
 			t.Fatalf("%s approval: %d %s", approver, response.Code, response.Body.String())
 		}
 	}
-	date := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
 	newLoan := f.disburseLoanRequest(t, requestID, date)
 	if newLoan.ApprovedAmount != 5_000_000 {
 		t.Fatalf("new loan principal=%d; pelunasan must not reduce it", newLoan.ApprovedAmount)
@@ -141,6 +171,14 @@ func TestRegularLoanPelunasanAdjustsApplicationFormAndKeepsPrincipalFull(t *test
 	}
 	if previousStatus != "paid" || previousBalance != 0 {
 		t.Fatalf("previous loan after pelunasan: status=%q balance=%d", previousStatus, previousBalance)
+	}
+	var previousGoodsStatus string
+	var previousGoodsBalance int64
+	if err := f.db.QueryRow(`SELECT status,remaining_balance FROM loans WHERE id=$1`, previousGoodsLoan.ID).Scan(&previousGoodsStatus, &previousGoodsBalance); err != nil {
+		t.Fatal(err)
+	}
+	if previousGoodsStatus != "active" || previousGoodsBalance != previousGoodsLoan.RemainingBalance {
+		t.Fatalf("secondary goods loan after regular pelunasan: status=%q balance=%d", previousGoodsStatus, previousGoodsBalance)
 	}
 }
 

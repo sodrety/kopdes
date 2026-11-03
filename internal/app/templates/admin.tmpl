@@ -123,12 +123,12 @@
                   <label>{{t $.Lang "loan_disbursement_date"}}
                     <input name="disbursement_date" type="date" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "loan_disbursement_date"}}">
                   </label>
-                  {{if and (gt .Outstanding 0) (or (ne .LoanType "regular") (not .SettleOutstandingLoans))}}
+                  {{if gt .Outstanding 0}}
                   <p class="field-help">{{t $.Lang "loan_disbursement_outstanding_balance"}}: Rp {{nominal .Outstanding}}</p>
                   {{end}}
                   {{if and (eq .LoanType "regular") .SettleOutstandingLoans}}
-                  <p class="field-help">{{t $.Lang "loan_disbursement_payoff_amount"}}: Rp {{nominal .Outstanding}}</p>
-                  <p class="field-help">{{t $.Lang "loan_disbursement_net_payout"}}: Rp {{if gt .ProposedApprovedAmount 0}}{{if gt .ProposedApprovedAmount .Outstanding}}{{nominal (sub .ProposedApprovedAmount .Outstanding)}}{{else}}0{{end}}{{else}}{{if gt .RequestedAmount .Outstanding}}{{nominal (sub .RequestedAmount .Outstanding)}}{{else}}0{{end}}{{end}}</p>
+                  <p class="field-help">{{t $.Lang "loan_disbursement_payoff_amount"}}: Rp {{nominal .RegularOutstanding}}</p>
+                  <p class="field-help">{{t $.Lang "loan_disbursement_net_payout"}}: Rp {{if gt .ProposedApprovedAmount 0}}{{if gt .ProposedApprovedAmount .RegularOutstanding}}{{nominal (sub .ProposedApprovedAmount .RegularOutstanding)}}{{else}}0{{end}}{{else}}{{if gt .RequestedAmount .RegularOutstanding}}{{nominal (sub .RequestedAmount .RegularOutstanding)}}{{else}}0{{end}}{{end}}</p>
                   {{else}}
                   <p class="field-help">{{t $.Lang "loan_disbursement_net_payout"}}: Rp {{if gt .ProposedApprovedAmount 0}}{{nominal .ProposedApprovedAmount}}{{else}}{{nominal .RequestedAmount}}{{end}}</p>
                   {{end}}
@@ -2492,11 +2492,11 @@
                           <input name="approved_amount" type="text" inputmode="numeric" value="{{.RequestedAmount}}" data-rupiah-input data-loan-amount data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" data-rupiah-invalid="{{t $.Lang "error_invalid_rupiah_amount"}}"{{if ne .CreationSource "admin"}} data-rupiah-max="{{.MaxLoanAmount}}" data-rupiah-max-invalid="{{t $.Lang "error_loan_amount_limit"}}" aria-describedby="approved-amount-hint-{{.ID}}" aria-errormessage="approved-amount-error-{{.ID}}"{{end}} autocomplete="off" spellcheck="false" required>
                         </label>
                         <label>{{t $.Lang "duration"}} <input name="duration_months" type="number" min="1" max="{{if or (eq .LoanType "goods_purchase_paylater") (eq .LoanType "voucher")}}1{{else if eq .LoanType "secondary_goods"}}12{{else}}24{{end}}" value="{{.DurationMonths}}" data-loan-duration aria-label="{{t $.Lang "duration_months"}}"></label>
-                        {{if and (eq .CurrentApprovalStage "manager") (eq .LoanType "regular") (gt .Outstanding 0)}}
+                        {{if and (eq .CurrentApprovalStage "manager") (eq .LoanType "regular") (gt .RegularOutstanding 0)}}
                         <p class="field-help">{{t $.Lang "loan_disbursement_outstanding_balance"}}: Rp {{nominal .Outstanding}}</p>
                         <label class="remember-field"><input name="settle_outstanding_loans" type="checkbox" value="true"{{if .SettleOutstandingLoans}} checked{{end}}> {{t $.Lang "loan_disbursement_settle_previous"}}</label>
                         <p class="field-help">{{t $.Lang "loan_disbursement_settle_previous_help"}}</p>
-                        <div class="loan-fee-preview loan-settlement-preview" data-loan-settlement-preview data-outstanding="{{.Outstanding}}" data-locale="{{if eq $.Lang "id"}}id-ID{{else}}en-US{{end}}">
+                        <div class="loan-fee-preview loan-settlement-preview" data-loan-settlement-preview data-outstanding="{{.RegularOutstanding}}" data-locale="{{if eq $.Lang "id"}}id-ID{{else}}en-US{{end}}">
                           <div>{{t $.Lang "loan_disbursement_payoff_amount"}}: <strong data-loan-payoff-value>Rp 0</strong></div>
                           <div>{{t $.Lang "loan_disbursement_net_payout"}}: <strong data-loan-net-value>Rp {{nominal .RequestedAmount}}</strong></div>
                           <small data-loan-payoff-warning hidden>{{t $.Lang "error_loan_payoff_exceeds_disbursement"}}</small>
