@@ -37,6 +37,7 @@ const (
 	PermissionTransactionCategoriesManage Permission = "transaction_categories.manage"
 	PermissionCOAView                     Permission = "coa.view"
 	PermissionCOAManage                   Permission = "coa.manage"
+	PermissionCOAAccountsManage           Permission = "coa.accounts.manage"
 	PermissionCOAApprove                  Permission = "coa.approve"
 	PermissionAccountingMappingsManage    Permission = "accounting_mappings.manage"
 	PermissionAccountingCOAOverride       Permission = "accounting_coa.override"
@@ -88,6 +89,7 @@ var officerPermissions = map[string]map[Permission]bool{
 		permissions[PermissionJournalsManage] = true
 		permissions[PermissionJournalsApprove] = true
 		permissions[PermissionCOAManage] = true
+		permissions[PermissionCOAAccountsManage] = true
 		permissions[PermissionCOAApprove] = true
 		return permissions
 	}(),
@@ -129,6 +131,7 @@ var allPermissions = []Permission{
 	PermissionTransactionCategoriesManage,
 	PermissionCOAView,
 	PermissionCOAManage,
+	PermissionCOAAccountsManage,
 	PermissionCOAApprove,
 	PermissionAccountingMappingsManage,
 	PermissionAccountingCOAOverride,

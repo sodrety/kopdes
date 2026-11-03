@@ -157,6 +157,290 @@ func (s *Server) adminCOAAccounts(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"accounts": accounts})
 }
 
+type coaAccountMutationRequest struct {
+	Code          string `json:"code" form:"code"`
+	Name          string `json:"name" form:"name"`
+	ParentCode    string `json:"parent_code" form:"parent_code"`
+	AccountType   string `json:"account_type" form:"account_type"`
+	Subtype       string `json:"subtype" form:"subtype"`
+	NormalBalance string `json:"normal_balance" form:"normal_balance"`
+	IsGroup       *bool  `json:"is_group" form:"is_group"`
+	Active        *bool  `json:"active" form:"active"`
+}
+
+var (
+	errInvalidCOAAccount           = errors.New("invalid coa account")
+	errCOAAccountParentNotFound    = errors.New("coa account parent not found")
+	errCOAAccountParentInvalid     = errors.New("coa account parent must be an active group")
+	errCOAAccountParentCycle       = errors.New("coa account parent cycle")
+	errCOAAccountSystemLocked      = errors.New("system coa account is locked")
+	errCOAAccountCodeImmutable     = errors.New("coa account code is immutable")
+	errCOAAccountHasActiveChildren = errors.New("coa account has active children")
+	errCOAAccountHasActiveMapping  = errors.New("coa account has active accounting mappings")
+	errCOAUsedSemanticsLocked      = errors.New("coa account semantics are locked after journal use")
+)
+
+func normalizeCOAAccountMutationRequest(req coaAccountMutationRequest, requireCode bool) (coaAccountMutationRequest, error) {
+	req.Code = strings.TrimSpace(req.Code)
+	req.Name = strings.Join(strings.Fields(strings.TrimSpace(req.Name)), " ")
+	req.ParentCode = strings.TrimSpace(req.ParentCode)
+	req.AccountType = strings.ToLower(strings.TrimSpace(req.AccountType))
+	req.Subtype = strings.Join(strings.Fields(strings.TrimSpace(req.Subtype)), " ")
+	req.NormalBalance = strings.ToUpper(strings.TrimSpace(req.NormalBalance))
+	if req.Name == "" || len(req.Name) > 200 || (requireCode && (req.Code == "" || len(req.Code) > 64)) || len(req.Code) > 64 || len(req.ParentCode) > 64 || len(req.Subtype) > 100 || req.IsGroup == nil || req.Active == nil {
+		return coaAccountMutationRequest{}, errInvalidCOAAccount
+	}
+	switch req.AccountType {
+	case "asset", "liability", "equity", "revenue", "expense":
+	default:
+		return coaAccountMutationRequest{}, errInvalidCOAAccount
+	}
+	if req.NormalBalance != "D" && req.NormalBalance != "C" {
+		return coaAccountMutationRequest{}, errInvalidCOAAccount
+	}
+	if requireCode && req.ParentCode == req.Code && req.Code != "" {
+		return coaAccountMutationRequest{}, errCOAAccountParentCycle
+	}
+	return req, nil
+}
+
+func (s *Server) createCOAAccount(c *gin.Context) {
+	user, ok := currentUser(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", translate(languageFromRequest(c), "error_authentication_required"))
+		return
+	}
+	var req coaAccountMutationRequest
+	if err := c.ShouldBind(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_coa_account"))
+		return
+	}
+	var err error
+	req, err = normalizeCOAAccountMutationRequest(req, true)
+	if err != nil {
+		respondCOAAccountMutationError(c, err)
+		return
+	}
+	account, err := s.insertCOAAccount(user.ID, req)
+	if err != nil {
+		respondCOAAccountMutationError(c, err)
+		return
+	}
+	respondCreatedOrHXRedirect(c, "/admin/coa", account)
+}
+
+func (s *Server) insertCOAAccount(actorID string, req coaAccountMutationRequest) (COAAccount, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return COAAccount{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := validateCOAAccountParentTx(tx, req.Code, req.ParentCode); err != nil {
+		return COAAccount{}, err
+	}
+	account := COAAccount{
+		ID: newID(), Code: req.Code, Name: req.Name, ParentCode: req.ParentCode,
+		AccountType: req.AccountType, Subtype: req.Subtype, NormalBalance: req.NormalBalance,
+		IsGroup: *req.IsGroup, Active: *req.Active,
+	}
+	if _, err := tx.Exec(`INSERT INTO coa_accounts (id,code,name,parent_code,account_type,subtype,normal_balance,is_group,active,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, account.ID, account.Code, account.Name, nullIfEmpty(account.ParentCode), account.AccountType, account.Subtype, account.NormalBalance, account.IsGroup, account.Active, actorID); err != nil {
+		return COAAccount{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return COAAccount{}, err
+	}
+	return account, nil
+}
+
+func (s *Server) updateCOAAccount(c *gin.Context) {
+	var req coaAccountMutationRequest
+	if err := c.ShouldBind(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_coa_account"))
+		return
+	}
+	var err error
+	req, err = normalizeCOAAccountMutationRequest(req, false)
+	if err != nil {
+		respondCOAAccountMutationError(c, err)
+		return
+	}
+	account, err := s.updateCOAAccountByID(c.Param("id"), req)
+	if err != nil {
+		respondCOAAccountMutationError(c, err)
+		return
+	}
+	respondOKOrHXRedirect(c, "/admin/coa", account)
+}
+
+func (s *Server) updateCOAAccountByID(id string, req coaAccountMutationRequest) (COAAccount, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return COAAccount{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var current COAAccount
+	err = tx.QueryRow(`SELECT id,code,name,COALESCE(parent_code,''),account_type,COALESCE(subtype,''),normal_balance,is_group,active,COALESCE(system_key,'') FROM coa_accounts WHERE id=$1`+rowLockClause(s.db), id).Scan(&current.ID, &current.Code, &current.Name, &current.ParentCode, &current.AccountType, &current.Subtype, &current.NormalBalance, &current.IsGroup, &current.Active, &current.SystemKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return COAAccount{}, errCOAAccountNotFound
+	}
+	if err != nil {
+		return COAAccount{}, err
+	}
+	if current.SystemKey != "" {
+		return COAAccount{}, errCOAAccountSystemLocked
+	}
+	if req.Code != "" && req.Code != current.Code {
+		return COAAccount{}, errCOAAccountCodeImmutable
+	}
+	req.Code = current.Code
+	if err := validateCOAAccountParentTx(tx, current.Code, req.ParentCode); err != nil {
+		return COAAccount{}, err
+	}
+	var activeChildren int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM coa_accounts WHERE parent_code=$1 AND active=TRUE`, current.Code).Scan(&activeChildren); err != nil {
+		return COAAccount{}, err
+	}
+	if activeChildren > 0 && (!*req.IsGroup || !*req.Active) {
+		return COAAccount{}, errCOAAccountHasActiveChildren
+	}
+	var usedByJournal int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM financial_journal_lines WHERE coa_code=$1`, current.Code).Scan(&usedByJournal); err != nil {
+		return COAAccount{}, err
+	}
+	semanticChange := current.AccountType != req.AccountType || current.Subtype != req.Subtype || current.NormalBalance != req.NormalBalance || current.ParentCode != req.ParentCode || current.IsGroup != *req.IsGroup
+	if usedByJournal > 0 && semanticChange {
+		return COAAccount{}, errCOAUsedSemanticsLocked
+	}
+	if semanticChange || (current.Active && !*req.Active) {
+		var activeMappings int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM accounting_mappings WHERE coa_code=$1 AND active=TRUE`, current.Code).Scan(&activeMappings); err != nil {
+			return COAAccount{}, err
+		}
+		if activeMappings > 0 {
+			return COAAccount{}, errCOAAccountHasActiveMapping
+		}
+	}
+	if _, err := tx.Exec(`UPDATE coa_accounts SET name=$1,parent_code=$2,account_type=$3,subtype=$4,normal_balance=$5,is_group=$6,active=$7,updated_at=CURRENT_TIMESTAMP WHERE id=$8`, req.Name, nullIfEmpty(req.ParentCode), req.AccountType, req.Subtype, req.NormalBalance, *req.IsGroup, *req.Active, current.ID); err != nil {
+		return COAAccount{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return COAAccount{}, err
+	}
+	current.Name, current.ParentCode, current.AccountType, current.Subtype, current.NormalBalance = req.Name, req.ParentCode, req.AccountType, req.Subtype, req.NormalBalance
+	current.IsGroup, current.Active = *req.IsGroup, *req.Active
+	return current, nil
+}
+
+func (s *Server) deactivateCOAAccount(c *gin.Context) {
+	account, err := s.deactivateCOAAccountByID(c.Param("id"))
+	if err != nil {
+		respondCOAAccountMutationError(c, err)
+		return
+	}
+	respondOKOrHXRedirect(c, "/admin/coa", account)
+}
+
+func (s *Server) deactivateCOAAccountByID(id string) (COAAccount, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return COAAccount{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var account COAAccount
+	err = tx.QueryRow(`SELECT id,code,name,COALESCE(parent_code,''),account_type,COALESCE(subtype,''),normal_balance,is_group,active,COALESCE(system_key,'') FROM coa_accounts WHERE id=$1`+rowLockClause(s.db), id).Scan(&account.ID, &account.Code, &account.Name, &account.ParentCode, &account.AccountType, &account.Subtype, &account.NormalBalance, &account.IsGroup, &account.Active, &account.SystemKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return COAAccount{}, errCOAAccountNotFound
+	}
+	if err != nil {
+		return COAAccount{}, err
+	}
+	if account.SystemKey != "" {
+		return COAAccount{}, errCOAAccountSystemLocked
+	}
+	if !account.Active {
+		return account, tx.Commit()
+	}
+	var activeChildren, activeMappings int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM coa_accounts WHERE parent_code=$1 AND active=TRUE`, account.Code).Scan(&activeChildren); err != nil {
+		return COAAccount{}, err
+	}
+	if activeChildren > 0 {
+		return COAAccount{}, errCOAAccountHasActiveChildren
+	}
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM accounting_mappings WHERE coa_code=$1 AND active=TRUE`, account.Code).Scan(&activeMappings); err != nil {
+		return COAAccount{}, err
+	}
+	if activeMappings > 0 {
+		return COAAccount{}, errCOAAccountHasActiveMapping
+	}
+	if _, err := tx.Exec(`UPDATE coa_accounts SET active=FALSE,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, account.ID); err != nil {
+		return COAAccount{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return COAAccount{}, err
+	}
+	account.Active = false
+	return account, nil
+}
+
+func validateCOAAccountParentTx(tx *sql.Tx, accountCode, parentCode string) error {
+	if parentCode == "" {
+		return nil
+	}
+	visited := map[string]bool{}
+	currentCode := parentCode
+	for currentCode != "" {
+		if currentCode == accountCode || visited[currentCode] {
+			return errCOAAccountParentCycle
+		}
+		visited[currentCode] = true
+		var nextParent string
+		var isGroup, active bool
+		err := tx.QueryRow(`SELECT COALESCE(parent_code,''),is_group,active FROM coa_accounts WHERE code=$1`, currentCode).Scan(&nextParent, &isGroup, &active)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errCOAAccountParentNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !isGroup || !active {
+			return errCOAAccountParentInvalid
+		}
+		currentCode = nextParent
+	}
+	return nil
+}
+
+func respondCOAAccountMutationError(c *gin.Context, err error) {
+	lang := languageFromRequest(c)
+	switch {
+	case errors.Is(err, errInvalidCOAAccount):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_coa_account"))
+	case errors.Is(err, errCOAAccountNotFound):
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error_coa_account_not_found"))
+	case errors.Is(err, errCOAAccountParentNotFound):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_coa_account_parent_not_found"))
+	case errors.Is(err, errCOAAccountParentInvalid):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_coa_account_parent_invalid"))
+	case errors.Is(err, errCOAAccountParentCycle):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_coa_account_parent_cycle"))
+	case errors.Is(err, errCOAAccountSystemLocked):
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_coa_account_system_locked"))
+	case errors.Is(err, errCOAAccountCodeImmutable):
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_coa_account_code_immutable"))
+	case errors.Is(err, errCOAUsedSemanticsLocked):
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_coa_used_semantics_locked"))
+	case errors.Is(err, errCOAAccountHasActiveChildren):
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_coa_account_has_active_children"))
+	case errors.Is(err, errCOAAccountHasActiveMapping):
+		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(lang, "error_coa_account_has_active_mapping"))
+	case isUniqueViolation(err):
+		respondError(c, http.StatusConflict, "DUPLICATE_DATA", translate(lang, "error_coa_account_exists"))
+	default:
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
+	}
+}
+
 func (s *Server) coaAccountForPostingTx(tx *sql.Tx, code string) (COAAccount, error) {
 	var account COAAccount
 	err := tx.QueryRow(`SELECT id,code,name,COALESCE(parent_code,''),account_type,COALESCE(subtype,''),normal_balance,is_group,active,COALESCE(system_key,'') FROM coa_accounts WHERE code=$1`, code).Scan(

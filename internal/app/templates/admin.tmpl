@@ -443,6 +443,42 @@
         </form>
       </section>
       {{end}}
+      {{if index .Permissions "coa.accounts.manage"}}
+      <section class="panel">
+        <h2>{{t .Lang "create_coa_account"}}</h2>
+        <p class="field-help">{{t .Lang "coa_account_crud_description"}}</p>
+        <form class="filter-form" method="post" action="/api/admin/coa/accounts">
+          <label>{{t .Lang "account_code"}} <input name="code" maxlength="64" required></label>
+          <label>{{t .Lang "account_name"}} <input name="name" maxlength="200" required></label>
+          <label>{{t .Lang "parent_account"}}
+            <select name="parent_code">
+              <option value="">{{t .Lang "no_parent_account"}}</option>
+              {{range .COAAccounts}}{{if and .Active .IsGroup}}<option value="{{.Code}}">{{.Code}} — {{.Name}}</option>{{end}}{{end}}
+            </select>
+          </label>
+          <label>{{t .Lang "account_type"}}
+            <select name="account_type" required>
+              <option value="asset">{{t .Lang "account_type_asset"}}</option>
+              <option value="liability">{{t .Lang "account_type_liability"}}</option>
+              <option value="equity">{{t .Lang "account_type_equity"}}</option>
+              <option value="revenue">{{t .Lang "account_type_revenue"}}</option>
+              <option value="expense">{{t .Lang "account_type_expense"}}</option>
+            </select>
+          </label>
+          <label>{{t .Lang "account_subtype"}} <input name="subtype" maxlength="100"></label>
+          <label>{{t .Lang "normal_balance"}}
+            <select name="normal_balance" required><option value="D">{{t .Lang "debit"}} (D)</option><option value="C">{{t .Lang "credit"}} (C)</option></select>
+          </label>
+          <label>{{t .Lang "account_structure"}}
+            <select name="is_group" required><option value="true">{{t .Lang "group_account"}}</option><option value="false">{{t .Lang "posting_account"}}</option></select>
+          </label>
+          <label>{{t .Lang "status"}}
+            <select name="active" required><option value="true">{{t .Lang "active"}}</option><option value="false">{{t .Lang "inactive"}}</option></select>
+          </label>
+          <button type="submit">{{t .Lang "create_coa_account"}}</button>
+        </form>
+      </section>
+      {{end}}
       <section class="panel">
         <h2>{{t .Lang "coa_import_batches"}}</h2>
         {{if .COABatches}}
@@ -456,8 +492,53 @@
         <h2>{{t .Lang "coa_management"}}</h2>
         {{if .COAAccounts}}
 {{template "table-open" .}}
-          <thead><tr><th>{{t $.Lang "account_code"}}</th><th>{{t $.Lang "account_name"}}</th><th>{{t $.Lang "account_type"}}</th><th>{{t $.Lang "normal_balance"}}</th><th>{{t $.Lang "status"}}</th></tr></thead>
-          <tbody>{{range .COAAccounts}}<tr><td>{{.Code}}</td><td>{{.Name}}</td><td>{{t $.Lang (printf "account_type_%s" .AccountType)}}</td><td>{{.NormalBalance}}</td><td>{{if .Active}}{{t $.Lang "active"}}{{else}}{{t $.Lang "inactive"}}{{end}}</td></tr>{{end}}</tbody>
+          <thead><tr><th>{{t $.Lang "account_code"}}</th><th>{{t $.Lang "account_name"}}</th><th>{{t $.Lang "parent_account"}}</th><th>{{t $.Lang "account_type"}}</th><th>{{t $.Lang "account_subtype"}}</th><th>{{t $.Lang "normal_balance"}}</th><th>{{t $.Lang "account_structure"}}</th><th>{{t $.Lang "status"}}</th>{{if index $.Permissions "coa.accounts.manage"}}<th>{{t $.Lang "action"}}</th>{{end}}</tr></thead>
+          <tbody>{{range .COAAccounts}}<tr>
+            <td>{{.Code}}</td><td>{{.Name}}</td><td>{{if .ParentCode}}{{.ParentCode}}{{else}}—{{end}}</td>
+            <td>{{t $.Lang (printf "account_type_%s" .AccountType)}}</td><td>{{.Subtype}}</td><td>{{.NormalBalance}}</td>
+            <td>{{if .IsGroup}}{{t $.Lang "group_account"}}{{else}}{{t $.Lang "posting_account"}}{{end}}</td>
+            <td>{{if .Active}}{{t $.Lang "active"}}{{else}}{{t $.Lang "inactive"}}{{end}}</td>
+            {{if index $.Permissions "coa.accounts.manage"}}
+            <td>
+              {{if .SystemKey}}
+                <span class="field-help">{{t $.Lang "system_coa_account"}}</span>
+              {{else}}
+                <details>
+                  <summary>{{t $.Lang "edit_coa_account"}}</summary>
+                  {{$account := .}}
+                  <form class="filter-form" method="post" action="/api/admin/coa/accounts/{{$account.ID}}/update">
+                    <label>{{t $.Lang "account_code"}} <input name="code" value="{{$account.Code}}" readonly></label>
+                    <label>{{t $.Lang "account_name"}} <input name="name" value="{{$account.Name}}" maxlength="200" required></label>
+                    <label>{{t $.Lang "parent_account"}}
+                      <select name="parent_code"><option value="">{{t $.Lang "no_parent_account"}}</option>{{range $.COAAccounts}}{{if and .Active .IsGroup}}<option value="{{.Code}}" {{if eq .Code $account.ParentCode}}selected{{end}}>{{.Code}} — {{.Name}}</option>{{end}}{{end}}</select>
+                    </label>
+                    <label>{{t $.Lang "account_type"}}
+                      <select name="account_type" required>
+                        <option value="asset" {{if eq $account.AccountType "asset"}}selected{{end}}>{{t $.Lang "account_type_asset"}}</option>
+                        <option value="liability" {{if eq $account.AccountType "liability"}}selected{{end}}>{{t $.Lang "account_type_liability"}}</option>
+                        <option value="equity" {{if eq $account.AccountType "equity"}}selected{{end}}>{{t $.Lang "account_type_equity"}}</option>
+                        <option value="revenue" {{if eq $account.AccountType "revenue"}}selected{{end}}>{{t $.Lang "account_type_revenue"}}</option>
+                        <option value="expense" {{if eq $account.AccountType "expense"}}selected{{end}}>{{t $.Lang "account_type_expense"}}</option>
+                      </select>
+                    </label>
+                    <label>{{t $.Lang "account_subtype"}} <input name="subtype" value="{{$account.Subtype}}" maxlength="100"></label>
+                    <label>{{t $.Lang "normal_balance"}}
+                      <select name="normal_balance" required><option value="D" {{if eq $account.NormalBalance "D"}}selected{{end}}>{{t $.Lang "debit"}} (D)</option><option value="C" {{if eq $account.NormalBalance "C"}}selected{{end}}>{{t $.Lang "credit"}} (C)</option></select>
+                    </label>
+                    <label>{{t $.Lang "account_structure"}}
+                      <select name="is_group" required><option value="true" {{if $account.IsGroup}}selected{{end}}>{{t $.Lang "group_account"}}</option><option value="false" {{if not $account.IsGroup}}selected{{end}}>{{t $.Lang "posting_account"}}</option></select>
+                    </label>
+                    <label>{{t $.Lang "status"}}
+                      <select name="active" required><option value="true" {{if $account.Active}}selected{{end}}>{{t $.Lang "active"}}</option><option value="false" {{if not $account.Active}}selected{{end}}>{{t $.Lang "inactive"}}</option></select>
+                    </label>
+                    <button type="submit">{{t $.Lang "save_coa_account"}}</button>
+                  </form>
+                </details>
+                {{if .Active}}<form method="post" action="/api/admin/coa/accounts/{{.ID}}/deactivate"><button class="button-link-secondary" type="submit">{{t $.Lang "deactivate_coa_account"}}</button></form>{{end}}
+              {{end}}
+            </td>
+            {{end}}
+          </tr>{{end}}</tbody>
 {{template "table-close" .}}
         {{else}}{{template "empty-state" (t .Lang "no_coa_accounts")}}{{end}}
       </section>
