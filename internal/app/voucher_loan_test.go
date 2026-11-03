@@ -81,20 +81,7 @@ func TestVoucherBulkNominalFeeApprovalAndPrimerJournals(t *testing.T) {
 			if err := json.Unmarshal(preview.Body.Bytes(), &batch); err != nil || preview.Code != http.StatusOK || batch.ErrorCount != 0 || len(batch.Rows) != 1 || batch.Rows[0].AdminFee == nil || *batch.Rows[0].AdminFee != fee {
 				t.Fatalf("preview lost nominal fee: %v %d %s", err, preview.Code, preview.Body.String())
 			}
-			commitVoucherBatch(t, fixture, admin, batch.ID)
-			commitVoucherBatch(t, fixture, admin, batch.ID)
-			var requestID string
-			var count int
-			if err := fixture.db.QueryRow(`SELECT MIN(id),COUNT(*) FROM loan_requests WHERE batch_id=$1`, batch.ID).Scan(&requestID, &count); err != nil || count != 1 {
-				t.Fatalf("idempotent Voucher commit: count=%d err=%v", count, err)
-			}
-			if _, err := fixture.db.Exec(`UPDATE loan_requests SET requested_admin_fee=requested_admin_fee+1 WHERE id=$1`, requestID); err == nil {
-				t.Fatal("Voucher intake fee must be immutable")
-			}
-			if _, err := fixture.db.Exec(`UPDATE loan_requests SET batch_id=NULL WHERE id=$1`, requestID); err == nil {
-				t.Fatal("Voucher must retain bulk provenance")
-			}
-			// Configure Paylater mappings only; Voucher must resolve these accounts.
+			// Configure Paylater mappings before the import immediately creates its Voucher loan.
 			for _, code := range []string{"11101", "40101", "BANK"} {
 				if _, err := fixture.db.Exec(`INSERT INTO coa_accounts(id,code,name,account_type,normal_balance,active,is_group) VALUES($1,$1,$1,'asset','D',TRUE,FALSE) ON CONFLICT(code) DO UPDATE SET active=TRUE,is_group=FALSE`, code); err != nil {
 					t.Fatal(err)
@@ -115,9 +102,33 @@ func TestVoucherBulkNominalFeeApprovalAndPrimerJournals(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			loan := fixture.approveLoanRequest(t, manager, requestID, 120000, 1)
-			if loan.AdminFeePolicy != "voucher_nominal_one_time_v1" || loan.TotalAdminFee != fee || loan.TotalObligation != 120000+fee || loan.MonthlyInstallment != 120000+fee {
-				t.Fatalf("fee must remain nominal after principal changes: %+v", loan)
+			commitVoucherBatch(t, fixture, admin, batch.ID)
+			commitVoucherBatch(t, fixture, admin, batch.ID)
+			var requestID string
+			var count int
+			if err := fixture.db.QueryRow(`SELECT MIN(id),COUNT(*) FROM loan_requests WHERE batch_id=$1`, batch.ID).Scan(&requestID, &count); err != nil || count != 1 {
+				t.Fatalf("idempotent Voucher commit: count=%d err=%v", count, err)
+			}
+			if _, err := fixture.db.Exec(`UPDATE loan_requests SET requested_admin_fee=requested_admin_fee+1 WHERE id=$1`, requestID); err == nil {
+				t.Fatal("Voucher intake fee must be immutable")
+			}
+			if _, err := fixture.db.Exec(`UPDATE loan_requests SET batch_id=NULL WHERE id=$1`, requestID); err == nil {
+				t.Fatal("Voucher must retain bulk provenance")
+			}
+			var requestStatus, approvalStage string
+			var autoApproved bool
+			if err := fixture.db.QueryRow(`SELECT status,COALESCE(current_approval_stage,''),auto_approved_import FROM loan_requests WHERE id=$1`, requestID).Scan(&requestStatus, &approvalStage, &autoApproved); err != nil {
+				t.Fatal(err)
+			}
+			if requestStatus != "approved" || approvalStage != "" || !autoApproved {
+				t.Fatalf("Voucher import should be directly approved: status=%q stage=%q auto=%t", requestStatus, approvalStage, autoApproved)
+			}
+			var loan testLoan
+			if err := fixture.db.QueryRow(`SELECT id,loan_request_id,member_id,approved_amount,duration_months,monthly_installment,remaining_balance,admin_fee_policy,COALESCE(monthly_admin_fee,0),total_admin_fee,total_obligation,status FROM loans WHERE loan_request_id=$1`, requestID).Scan(&loan.ID, &loan.LoanRequestID, &loan.MemberID, &loan.ApprovedAmount, &loan.DurationMonths, &loan.MonthlyInstallment, &loan.RemainingBalance, &loan.AdminFeePolicy, &loan.MonthlyAdminFee, &loan.TotalAdminFee, &loan.TotalObligation, &loan.Status); err != nil {
+				t.Fatal(err)
+			}
+			if loan.Status != "active" || loan.AdminFeePolicy != "voucher_nominal_one_time_v1" || loan.ApprovedAmount != 100000 || loan.TotalAdminFee != fee || loan.TotalObligation != 100000+fee || loan.MonthlyInstallment != 100000+fee {
+				t.Fatalf("Voucher should be created from imported terms: %+v", loan)
 			}
 			var loanStatus, receivable string
 			if err := fixture.db.QueryRow(`SELECT e.status,l.coa_code FROM financial_journal_entries e JOIN financial_journal_lines l ON l.journal_id=e.id WHERE e.transaction_type='loan' AND e.loan_type='voucher' AND l.component='loan_receivable'`).Scan(&loanStatus, &receivable); err != nil || loanStatus != "posted" || receivable != "11101" {

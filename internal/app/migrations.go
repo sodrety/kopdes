@@ -646,6 +646,7 @@ var migrations = []migration{
 		`ALTER TABLE saving_record_removals ENABLE ROW LEVEL SECURITY`,
 	}},
 	{Version: 51, Name: "auto_create_imported_voucher_paylater_loans"},
+	{Version: 52, Name: "preserve_loan_approval_integrity_for_auto_imports"},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -1009,6 +1010,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 	}
 	if migration.Version == 51 {
 		if err := allowAutoApprovedImportedLoans(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 52 {
+		if err := refreshAutoApprovedImportedLoanGuards(tx, isSQLite); err != nil {
 			return err
 		}
 	}
