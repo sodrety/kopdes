@@ -120,6 +120,20 @@ func (s *Server) adminJournalsPage(c *gin.Context) {
 			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 			return
 		}
+		if c.Query("export") == "xlsx" {
+			if errors.Is(err, sql.ErrNoRows) {
+				respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "select_coa_account"))
+				return
+			}
+			workbook, err := financialLedgerWorkbook(languageFromRequest(c), ledger, opening, ending, account, dateFrom, dateTo)
+			if err != nil {
+				respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+				return
+			}
+			c.Header("Content-Disposition", `attachment; filename="buku-besar.xlsx"`)
+			c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", workbook)
+			return
+		}
 		data["Ledger"] = ledger
 		data["LedgerOpening"] = opening
 		data["LedgerEnding"] = ending

@@ -1,13 +1,69 @@
 package app_test
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/xuri/excelize/v2"
 )
+
+func TestGeneralLedgerExportsFilteredXLSX(t *testing.T) {
+	fixture := newTestFixture(t)
+	adminToken := fixture.login(t, "admin@coop.test", "password")
+	if _, err := fixture.db.Exec(`INSERT INTO coa_accounts (id,code,name,account_type,normal_balance,is_group,active) VALUES
+		('ledger-export-bank','LEDGER-BANK','Ledger Export Bank','asset','D',FALSE,TRUE),
+		('ledger-export-savings','LEDGER-SUKARELA','Ledger Export Savings','liability','C',FALSE,TRUE)`); err != nil {
+		t.Fatalf("seed ledger export accounts: %v", err)
+	}
+	if _, err := fixture.db.Exec(`INSERT INTO accounting_mappings (id,mapping_key,transaction_type,component,category,loan_type,coa_code,active) VALUES
+		('ledger-export-bank-map','ledger-export-bank-map','savings','cash_bank','','','LEDGER-BANK',TRUE),
+		('ledger-export-savings-map','ledger-export-savings-map','savings','savings_liability','sukarela','','LEDGER-SUKARELA',TRUE)`); err != nil {
+		t.Fatalf("map ledger export accounts: %v", err)
+	}
+	member := fixture.createMember(t, adminToken, `{"member_no":"LEDGER-XLSX","full_name":"Ledger Export Member","join_date":"2026-01-01","status":"active"}`)
+	fixture.recordSavingInCategoryAtDate(t, adminToken, member.ID, "sukarela", 100000, "2026-06-16", "LEDGER-EXPORT", "Ledger export fixture")
+
+	path := "/admin/journals?view=ledger&account=LEDGER-SUKARELA&date_from=2026-06-01&date_to=2026-06-30&export=xlsx"
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("Authorization", "Bearer "+adminToken)
+	request.AddCookie(fixture.setLanguage(t, "en", request.URL.Path))
+	response := httptest.NewRecorder()
+	fixture.server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("export General Ledger workbook: %d %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Header().Get("Content-Disposition"), `filename="buku-besar.xlsx"`) {
+		t.Fatalf("expected Buku Besar attachment, got %q", response.Header().Get("Content-Disposition"))
+	}
+
+	workbook, err := excelize.OpenReader(bytes.NewReader(response.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("open General Ledger workbook: %v", err)
+	}
+	defer workbook.Close()
+	sheet := workbook.GetSheetName(0)
+	rows, err := workbook.GetRows(sheet, excelize.Options{RawCellValue: true})
+	if err != nil {
+		t.Fatalf("read General Ledger workbook: %v", err)
+	}
+	if sheet != "General ledger" || len(rows) < 6 {
+		t.Fatalf("unexpected General Ledger sheet or row count: sheet=%q rows=%#v", sheet, rows)
+	}
+	if rows[0][0] != "Account code" || rows[0][1] != "LEDGER-SUKARELA" || rows[1][1] != "2026-06-01" || rows[1][3] != "2026-06-30" {
+		t.Fatalf("workbook metadata did not preserve the selected account and date filters: %#v", rows[:3])
+	}
+	if strings.Join(rows[4], ",") != "Date,Reference,Description,Debit,Credit,Balance" {
+		t.Fatalf("unexpected General Ledger columns: %#v", rows[4])
+	}
+	if rows[5][1] != "LEDGER-EXPORT" || rows[5][4] != "100000" || rows[5][5] != "100000" {
+		t.Fatalf("export did not include the filtered ledger entry: %#v", rows[5])
+	}
+}
 
 func TestGeneralJournalAllowsNonCashAccrualEntry(t *testing.T) {
 	fixture := newTestFixture(t)
