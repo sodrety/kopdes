@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +80,186 @@ func TestAdminLoanApprovalAndDisbursementUseKetuaUtamaThreshold(t *testing.T) {
 			f.disburseLoanRequest(t, requestID, startDate)
 		})
 	}
+}
+
+func TestRegularLoanPelunasanAdjustsApplicationFormAndKeepsPrincipalFull(t *testing.T) {
+	f := newTestFixture(t)
+	managerToken := f.login(t, "admin@coop.test", "password")
+	member := f.createMember(t, managerToken, `{"member_no":"PELUNASAN-REGULAR","full_name":"Regular Pelunasan Borrower","join_date":"2026-01-01","status":"active","email":"pelunasan-regular@coop.test","password":"member-password","bank_name":"Test Bank","bank_account":"123456"}`)
+	memberToken := f.login(t, "pelunasan-regular@coop.test", "member-password")
+	previousRequestID := f.createLoanRequest(t, memberToken, 1_000_000, 12)
+	previousLoan := f.approveLoanRequest(t, managerToken, previousRequestID, 1_000_000, 12)
+
+	superToken := establishSuperAdmin(t, f)
+	_, adminToken := provisionAdminOfficer(t, f, superToken, managerToken)
+	f.ensureLoanCapacityForMember(t, managerToken, member.ID, 5_000_000)
+	requestID := createAdminLoanRequestForTest(t, f, adminToken, member.MemberNo, "regular", 5_000_000, 12, "regular-pelunasan-request")
+
+	approval := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, `{"approved_amount":5000000,"duration_months":12,"settle_outstanding_loans":true}`)
+	if approval.Code != http.StatusOK {
+		t.Fatalf("approve regular loan with pelunasan: %d %s", approval.Code, approval.Body.String())
+	}
+	var enabled bool
+	var payoffAmount int64
+	if err := f.db.QueryRow(`SELECT settle_outstanding_loans,loan_payoff_amount FROM loan_requests WHERE id=$1`, requestID).Scan(&enabled, &payoffAmount); err != nil {
+		t.Fatal(err)
+	}
+	if !enabled || payoffAmount != previousLoan.RemainingBalance {
+		t.Fatalf("stored regular pelunasan enabled=%t payoff=%d, want enabled with %d", enabled, payoffAmount, previousLoan.RemainingBalance)
+	}
+
+	form := adminLoanJSONRequest(f, http.MethodGet, "/api/admin/loan-requests/"+requestID+"/application-form.pdf", managerToken, "")
+	if form.Code != http.StatusOK {
+		t.Fatalf("export regular application form: %d %s", form.Code, form.Body.String())
+	}
+	netReceived := int64(5_000_000) - previousLoan.RemainingBalance
+	for _, field := range []string{
+		loanFormPDFFieldAt(100, 1121, formatTestRupiah(5_000_000)),
+		loanFormPDFFieldAt(100, 1178, formatTestRupiah(previousLoan.RemainingBalance)),
+		loanFormPDFFieldAt(304, 1178, formatTestRupiah(netReceived)),
+	} {
+		if !strings.Contains(form.Body.String(), field) {
+			t.Errorf("application form missing adjusted field %q", field)
+		}
+	}
+
+	for _, approver := range []string{"ketua-ii@coop.test", "ketua-i@coop.test"} {
+		response := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", f.login(t, approver, "password"), `{}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s approval: %d %s", approver, response.Code, response.Body.String())
+		}
+	}
+	date := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
+	newLoan := f.disburseLoanRequest(t, requestID, date)
+	if newLoan.ApprovedAmount != 5_000_000 {
+		t.Fatalf("new loan principal=%d; pelunasan must not reduce it", newLoan.ApprovedAmount)
+	}
+	var previousStatus string
+	var previousBalance int64
+	if err := f.db.QueryRow(`SELECT status,remaining_balance FROM loans WHERE id=$1`, previousLoan.ID).Scan(&previousStatus, &previousBalance); err != nil {
+		t.Fatal(err)
+	}
+	if previousStatus != "paid" || previousBalance != 0 {
+		t.Fatalf("previous loan after pelunasan: status=%q balance=%d", previousStatus, previousBalance)
+	}
+}
+
+func TestPelunasanIsIgnoredForNonRegularLoans(t *testing.T) {
+	f := newTestFixture(t)
+	managerToken := f.login(t, "admin@coop.test", "password")
+	member := f.createMember(t, managerToken, `{"member_no":"PELUNASAN-SECONDARY","full_name":"Secondary Loan Borrower","join_date":"2026-01-01","status":"active","email":"pelunasan-secondary@coop.test","password":"member-password","bank_name":"Test Bank","bank_account":"654321"}`)
+	memberToken := f.login(t, "pelunasan-secondary@coop.test", "member-password")
+	previousRequestID := f.createLoanRequest(t, memberToken, 1_000_000, 12)
+	previousLoan := f.approveLoanRequest(t, managerToken, previousRequestID, 1_000_000, 12)
+
+	superToken := establishSuperAdmin(t, f)
+	_, adminToken := provisionAdminOfficer(t, f, superToken, managerToken)
+	f.ensureLoanCapacityForMember(t, managerToken, member.ID, 5_000_000)
+	requestID := createAdminLoanRequestForTest(t, f, adminToken, member.MemberNo, "secondary_goods", 5_000_000, 6, "secondary-pelunasan-request")
+
+	page := adminLoanJSONRequest(f, http.MethodGet, "/admin/loan-requests?status=pending", managerToken, "")
+	if page.Code != http.StatusOK {
+		t.Fatalf("load pending loan requests: %d %s", page.Code, page.Body.String())
+	}
+	approvalAction := `action="/api/admin/loan-requests/` + requestID + `/approve"`
+	approvalStart := strings.Index(page.Body.String(), approvalAction)
+	if approvalStart < 0 {
+		t.Fatalf("missing manager approval form for secondary loan %s", requestID)
+	}
+	formEnd := strings.Index(page.Body.String()[approvalStart:], "</form>")
+	if formEnd < 0 {
+		t.Fatal("unterminated manager approval form")
+	}
+	approvalForm := page.Body.String()[approvalStart : approvalStart+formEnd]
+	if strings.Contains(approvalForm, `name="settle_outstanding_loans"`) {
+		t.Fatal("manager approval form exposes pelunasan for a secondary goods loan")
+	}
+
+	approval := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", managerToken, `{"approved_amount":5000000,"duration_months":6,"settle_outstanding_loans":true}`)
+	if approval.Code != http.StatusOK {
+		t.Fatalf("approve secondary goods loan: %d %s", approval.Code, approval.Body.String())
+	}
+	var enabled bool
+	var payoffAmount int64
+	if err := f.db.QueryRow(`SELECT settle_outstanding_loans,loan_payoff_amount FROM loan_requests WHERE id=$1`, requestID).Scan(&enabled, &payoffAmount); err != nil {
+		t.Fatal(err)
+	}
+	if enabled || payoffAmount != 0 {
+		t.Fatalf("secondary goods loan persisted pelunasan enabled=%t payoff=%d", enabled, payoffAmount)
+	}
+
+	form := adminLoanJSONRequest(f, http.MethodGet, "/api/admin/loan-requests/"+requestID+"/application-form.pdf", managerToken, "")
+	if form.Code != http.StatusOK {
+		t.Fatalf("export secondary application form: %d %s", form.Code, form.Body.String())
+	}
+	for _, field := range []string{
+		loanFormPDFFieldAt(100, 1178, "0"),
+		loanFormPDFFieldAt(304, 1178, formatTestRupiah(5_000_000)),
+	} {
+		if !strings.Contains(form.Body.String(), field) {
+			t.Errorf("secondary loan application form has unexpected payoff field; missing %q", field)
+		}
+	}
+
+	for _, approver := range []string{"ketua-ii@coop.test", "ketua-i@coop.test"} {
+		response := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/"+requestID+"/approve", f.login(t, approver, "password"), `{}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s approval: %d %s", approver, response.Code, response.Body.String())
+		}
+	}
+	// Simulate a stale or manually corrupted flag; disbursement must still ignore it.
+	if _, err := f.db.Exec(`UPDATE loan_requests SET settle_outstanding_loans=TRUE,loan_payoff_amount=$1 WHERE id=$2`, previousLoan.RemainingBalance, requestID); err != nil {
+		t.Fatal(err)
+	}
+	date := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).Format("2006-01-02")
+	f.disburseLoanRequest(t, requestID, date)
+	var previousStatus string
+	var previousBalance int64
+	if err := f.db.QueryRow(`SELECT status,remaining_balance FROM loans WHERE id=$1`, previousLoan.ID).Scan(&previousStatus, &previousBalance); err != nil {
+		t.Fatal(err)
+	}
+	if previousStatus != "active" || previousBalance != previousLoan.RemainingBalance {
+		t.Fatalf("non-regular loan affected previous loan: status=%q balance=%d", previousStatus, previousBalance)
+	}
+	if err := f.db.QueryRow(`SELECT settle_outstanding_loans,loan_payoff_amount FROM loan_requests WHERE id=$1`, requestID).Scan(&enabled, &payoffAmount); err != nil {
+		t.Fatal(err)
+	}
+	if enabled || payoffAmount != 0 {
+		t.Fatalf("disbursement retained invalid pelunasan enabled=%t payoff=%d", enabled, payoffAmount)
+	}
+}
+
+func createAdminLoanRequestForTest(t *testing.T, f testFixture, adminToken, memberNo, loanType string, amount, duration int, idempotencyKey string) string {
+	t.Helper()
+	body := fmt.Sprintf(`{"member_no":%q,"loan_type":%q,"requested_amount":%d,"duration_months":%d,"purpose":"Pelunasan regression","acknowledge_warnings":true,"idempotency_key":%q}`, memberNo, loanType, amount, duration, idempotencyKey)
+	response := adminLoanJSONRequest(f, http.MethodPost, "/api/admin/loan-requests/on-behalf", adminToken, body)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create %s loan request: %d %s", loanType, response.Code, response.Body.String())
+	}
+	var payload struct {
+		LoanRequest struct {
+			ID string `json:"id"`
+		} `json:"loan_request"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode %s loan request: %v", loanType, err)
+	}
+	return payload.LoanRequest.ID
+}
+
+func loanFormPDFFieldAt(x, y int, value string) string {
+	const pageWidth, pageHeight = 595.28, 841.89
+	xPosition := float64(x) * pageWidth / 990
+	yPosition := pageHeight - float64(y)*pageHeight/1400
+	return fmt.Sprintf("1 0 0 1 %.2f %.2f Tm (%s) Tj ET", xPosition, yPosition, value)
+}
+
+func formatTestRupiah(amount int64) string {
+	formatted := strconv.FormatInt(amount, 10)
+	for index := len(formatted) - 3; index > 0; index -= 3 {
+		formatted = formatted[:index] + "." + formatted[index:]
+	}
+	return formatted
 }
 
 func TestAdminLoanPageSupportsOfficerStagesAndMemberSelection(t *testing.T) {

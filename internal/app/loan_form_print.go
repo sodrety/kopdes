@@ -172,6 +172,7 @@ func (s *Server) loanApplicationFormPrintDataFromReport(report loanReportData) (
 			return disbursementApplicationFormData{}, err
 		}
 	}
+	settleOutstandingLoans = settleOutstandingLoans && report.Loan.LoanType == "regular"
 	if !settleOutstandingLoans {
 		loanPayoffAmount = 0
 	}

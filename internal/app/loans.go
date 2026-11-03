@@ -441,8 +441,9 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 				return LoanApprovalResult{}, errLoanAmountLimitExceeded
 			}
 		}
+		settleOutstandingLoans := req.SettleOutstandingLoans && request.LoanType == "regular"
 		var loanPayoffAmount int64
-		if req.SettleOutstandingLoans {
+		if settleOutstandingLoans {
 			if err := tx.QueryRow(`SELECT COALESCE(SUM(remaining_balance),0) FROM loans WHERE member_id=$1 AND status IN ('active','adjustment_due') AND remaining_balance>0`, request.MemberID).Scan(&loanPayoffAmount); err != nil {
 				return LoanApprovalResult{}, err
 			}
@@ -487,7 +488,7 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		request.ProposedCashCOACode = ""
 		request.ProposedLoanCOACode = ""
 		request.ProposedAdminFeeCOACode = ""
-		if _, err := tx.Exec(`UPDATE loan_requests SET proposed_approved_amount=$1,proposed_duration_months=$2,proposed_start_date=$3,proposed_admin_fee_policy=$4,proposed_monthly_admin_fee=$5,proposed_total_admin_fee=$6,proposed_total_obligation=$7,proposed_cash_coa_code=$8,proposed_loan_coa_code=$9,proposed_admin_fee_coa_code=$10,settle_outstanding_loans=$11,loan_payoff_amount=$12,updated_at=CURRENT_TIMESTAMP WHERE id=$13 AND status='pending' AND current_approval_stage='manager'`, req.ApprovedAmount, req.DurationMonths, startDate, adminFeePolicy, request.ProposedMonthlyAdminFee, calc.TotalAdminFee, calc.TotalObligation, request.ProposedCashCOACode, request.ProposedLoanCOACode, request.ProposedAdminFeeCOACode, req.SettleOutstandingLoans, loanPayoffAmount, requestID); err != nil {
+		if _, err := tx.Exec(`UPDATE loan_requests SET proposed_approved_amount=$1,proposed_duration_months=$2,proposed_start_date=$3,proposed_admin_fee_policy=$4,proposed_monthly_admin_fee=$5,proposed_total_admin_fee=$6,proposed_total_obligation=$7,proposed_cash_coa_code=$8,proposed_loan_coa_code=$9,proposed_admin_fee_coa_code=$10,settle_outstanding_loans=$11,loan_payoff_amount=$12,updated_at=CURRENT_TIMESTAMP WHERE id=$13 AND status='pending' AND current_approval_stage='manager'`, req.ApprovedAmount, req.DurationMonths, startDate, adminFeePolicy, request.ProposedMonthlyAdminFee, calc.TotalAdminFee, calc.TotalObligation, request.ProposedCashCOACode, request.ProposedLoanCOACode, request.ProposedAdminFeeCOACode, settleOutstandingLoans, loanPayoffAmount, requestID); err != nil {
 			return LoanApprovalResult{}, err
 		}
 	}
@@ -641,6 +642,7 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, req dis
 	if request.Status != "approved" || request.Stage != "" || request.DisbursementDate != "" || request.ReviewedBy == "" {
 		return LoanApprovalResult{}, errLoanRequestNotReadyForDisbursement
 	}
+	settleOutstandingLoans := request.SettleOutstandingLoans && request.LoanType == "regular"
 	var memberType, memberStatus string
 	if err := tx.QueryRow(`SELECT member_type,status FROM members WHERE id=$1`+rowLockClause(s.db), request.MemberID).Scan(&memberType, &memberStatus); err != nil {
 		return LoanApprovalResult{}, err
@@ -689,7 +691,7 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, req dis
 	}
 	var loansToPayOff []outstandingLoanForPayoff
 	var payoffTotal int64
-	if request.SettleOutstandingLoans {
+	if settleOutstandingLoans {
 		rows, err := tx.Query(`SELECT id,remaining_balance FROM loans WHERE member_id=$1 AND status IN ('active','adjustment_due') AND remaining_balance>0 ORDER BY created_at,id`+rowLockClause(s.db), request.MemberID)
 		if err != nil {
 			return LoanApprovalResult{}, err
@@ -717,7 +719,7 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, req dis
 	}
 	request.LoanPayoffAmount = payoffTotal
 
-	result, err := tx.Exec(`UPDATE loan_requests SET disbursement_date=$1,disbursed_by=$2,disbursed_at=CURRENT_TIMESTAMP,loan_payoff_amount=$3,updated_at=CURRENT_TIMESTAMP WHERE id=$4 AND status='approved' AND disbursement_date=''`, dateText, officer.ID, request.LoanPayoffAmount, requestID)
+	result, err := tx.Exec(`UPDATE loan_requests SET disbursement_date=$1,disbursed_by=$2,disbursed_at=CURRENT_TIMESTAMP,settle_outstanding_loans=$3,loan_payoff_amount=$4,updated_at=CURRENT_TIMESTAMP WHERE id=$5 AND status='approved' AND disbursement_date=''`, dateText, officer.ID, settleOutstandingLoans, request.LoanPayoffAmount, requestID)
 	if err != nil {
 		return LoanApprovalResult{}, err
 	}

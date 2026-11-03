@@ -147,7 +147,7 @@ func (s *Server) loanApplicationFormDataFromRequest(request LoanRequest) (disbur
 		ApprovedDuration:       request.ProposedDurationMonths,
 		TotalAdminFee:          request.ProposedTotalAdminFee,
 		TotalObligation:        request.ProposedTotalObligation,
-		SettleOutstandingLoans: request.SettleOutstandingLoans,
+		SettleOutstandingLoans: request.SettleOutstandingLoans && request.LoanType == "regular",
 		LoanPayoffAmount:       request.LoanPayoffAmount,
 	}
 	if report.ApprovedAmount <= 0 {

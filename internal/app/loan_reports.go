@@ -84,6 +84,7 @@ func (s *Server) exportLoanApplicationFormPDF(c *gin.Context) {
 			return
 		}
 	}
+	settleOutstandingLoans = settleOutstandingLoans && report.Loan.LoanType == "regular"
 	if !settleOutstandingLoans {
 		loanPayoffAmount = 0
 	}
