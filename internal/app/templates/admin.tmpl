@@ -709,7 +709,7 @@
             <thead><tr><th>{{t .Lang "coa_account"}}</th><th>{{t .Lang "debit"}}</th><th>{{t .Lang "credit"}}</th><th>{{t .Lang "action"}}</th></tr></thead>
             <tbody data-journal-lines>
               {{range $line := .JournalFormLines}}<tr data-journal-line>
-                <td><select name="line_coa_code" required><option value="">{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}" {{if eq .Code $line.COACode}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></td>
+                <td><div class="member-picker" data-member-picker data-coa-picker data-placeholder="{{t $.Lang "coa_picker_search"}}" data-empty="{{t $.Lang "coa_picker_empty"}}" data-invalid="{{t $.Lang "coa_picker_invalid"}}"><select name="line_coa_code" required><option value="" disabled>{{t $.Lang "select_coa_account"}}</option>{{range $.COAAccounts}}<option value="{{.Code}}" {{if eq .Code $line.COACode}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></div></td>
                 <td><input name="debit_amount" type="text" inputmode="numeric" value="{{$line.Debit}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" aria-label="{{t $.Lang "debit"}}"></td>
                 <td><input name="credit_amount" type="text" inputmode="numeric" value="{{$line.Credit}}" data-rupiah-input data-rupiah-group="{{if eq $.Lang "id"}}.{{else}},{{end}}" aria-label="{{t $.Lang "credit"}}"></td>
                 <td><button type="button" class="button-secondary" data-remove-journal-line>{{t $.Lang "remove_line"}}</button></td>
@@ -744,15 +744,17 @@
         <h2>{{t .Lang "journal_entries"}}</h2>
         <form class="filter-form" method="get" action="/admin/journals">
           <input type="hidden" name="view" value="journal">
-          <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label>
-          <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label>
+          <div class="date-range-controls">
+            <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label>
+            <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label>
+          </div>
           <label>{{t .Lang "member"}}
             <div class="member-picker" data-member-picker data-placeholder="{{t .Lang "member_picker_search"}}" data-empty="{{t .Lang "member_picker_empty"}}" data-invalid="{{t .Lang "member_picker_invalid"}}">
               <select name="member_id"><option value="">{{t .Lang "all_members"}}</option>{{range .Members}}<option value="{{.ID}}" {{if eq $.SelectedMemberID .ID}}selected{{end}}>{{.MemberNo}} — {{.FullName}}</option>{{end}}</select>
             </div>
           </label>
-          <button type="submit">{{t .Lang "apply_filters"}}</button>
-          <button type="submit" name="export" value="xlsx" class="button-secondary">{{t .Lang "export_xlsx"}}</button>
+          <div class="filter-actions"><button type="submit">{{t .Lang "apply_filters"}}</button>
+          <button type="submit" name="export" value="xlsx" class="button-secondary">{{t .Lang "export_xlsx"}}</button></div>
           <a class="button-link button-link-secondary" href="/admin/journals?view=journal">{{t .Lang "reset"}}</a>
         </form>
         {{if .Entries}}
@@ -784,8 +786,9 @@
       <section class="panel">
         <h2>{{t .Lang "general_ledger"}}</h2>
         <form class="filter-form" method="get" action="/admin/journals"><input type="hidden" name="view" value="ledger">
-          <label>{{t .Lang "coa_account"}} <select name="account"><option value="">{{t .Lang "select_coa_account"}}</option>{{range .COAAccounts}}<option value="{{.Code}}" {{if eq $.SelectedAccount .Code}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></label>
-          <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label><label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label><button type="submit">{{t .Lang "apply_filters"}}</button><button type="submit" name="export" value="xlsx" class="button-secondary">{{t .Lang "export_xlsx"}}</button>
+          <label>{{t .Lang "coa_account"}} <div class="member-picker" data-member-picker data-coa-picker data-placeholder="{{t .Lang "coa_picker_search"}}" data-empty="{{t .Lang "coa_picker_empty"}}" data-invalid="{{t .Lang "coa_picker_invalid"}}"><select name="account"><option value="" disabled>{{t .Lang "select_coa_account"}}</option>{{range .COAAccounts}}<option value="{{.Code}}" {{if eq $.SelectedAccount .Code}}selected{{end}}>{{.Code}} - {{.Name}}</option>{{end}}</select></div></label>
+          <div class="date-range-controls"><label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label><label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label></div>
+          <div class="filter-actions"><button type="submit">{{t .Lang "apply_filters"}}</button><button type="submit" name="export" value="xlsx" class="button-secondary">{{t .Lang "export_xlsx"}}</button></div>
         </form>
         {{if .LedgerAccount.Code}}<p><strong>{{.LedgerAccount.Code}} — {{.LedgerAccount.Name}}</strong></p><p>{{t .Lang "opening_balance"}}: Rp {{nominal .LedgerOpening}}</p>
         {{if .Ledger}}{{template "table-open" .}}<thead><tr><th>{{t $.Lang "date"}}</th><th>{{t $.Lang "reference"}}</th><th>{{t $.Lang "description"}}</th><th>{{t $.Lang "debit"}}</th><th>{{t $.Lang "credit"}}</th><th>{{t $.Lang "balance"}}</th></tr></thead><tbody>{{range .Ledger}}<tr><td>{{.Date}}</td><td>{{.ReferenceNo}}</td><td>{{.Description}}</td><td>{{if .Debit}}Rp {{nominal .Debit}}{{else}}—{{end}}</td><td>{{if .Credit}}Rp {{nominal .Credit}}{{else}}—{{end}}</td><td>Rp {{nominal .Balance}}</td></tr>{{end}}</tbody>{{template "table-close" .}}{{else}}{{template "empty-state" (t .Lang "no_journal_entries")}}{{end}}
@@ -794,7 +797,7 @@
       {{else}}
       <section class="panel">
         <h2>{{t .Lang "trial_balance"}}</h2>
-        <form class="filter-form" method="get" action="/admin/journals"><input type="hidden" name="view" value="trial_balance"><label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label><label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label><button type="submit">{{t .Lang "apply_filters"}}</button></form>
+        <form class="filter-form" method="get" action="/admin/journals"><input type="hidden" name="view" value="trial_balance"><div class="date-range-controls"><label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.DateFrom}}"></label><label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.DateTo}}"></label></div><div class="filter-actions"><button type="submit">{{t .Lang "apply_filters"}}</button></div></form>
         {{if .TrialBalance}}{{template "table-open" .}}<thead><tr><th>{{t $.Lang "coa_account"}}</th><th>{{t $.Lang "account_type"}}</th><th>{{t $.Lang "debit"}}</th><th>{{t $.Lang "credit"}}</th><th>{{t $.Lang "balance"}}</th></tr></thead><tbody>{{range .TrialBalance}}<tr><td>{{.Code}} — {{.Name}}</td><td>{{t $.Lang (printf "account_type_%s" .AccountType)}}</td><td>Rp {{nominal .Debit}}</td><td>Rp {{nominal .Credit}}</td><td>Rp {{nominal .Balance}}</td></tr>{{end}}<tr class="balance-total-row"><td colspan="2">{{t $.Lang "total"}}</td><td>Rp {{nominal .TrialDebit}}</td><td>Rp {{nominal .TrialCredit}}</td><td>—</td></tr></tbody>{{template "table-close" .}}{{else}}{{template "empty-state" (t .Lang "no_journal_entries")}}{{end}}
       </section>
       {{end}}
@@ -862,9 +865,17 @@
           });
           add.addEventListener('click', function () {
             var row = body.querySelector('[data-journal-line]').cloneNode(true);
+            row.querySelectorAll('[data-coa-picker]').forEach(function (picker) {
+              picker.removeAttribute('data-member-picker-ready');
+              picker.querySelectorAll(':scope > input, :scope > .member-picker-results, :scope > .member-picker-status').forEach(function (element) { element.remove(); });
+              var select = picker.querySelector('select');
+              select.hidden = false;
+              select.required = true;
+            });
             row.querySelectorAll('input').forEach(function (input) { input.value = ''; });
             row.querySelector('select').selectedIndex = 0;
             body.appendChild(row);
+            document.dispatchEvent(new Event('htmx:load'));
             updateBalance();
           });
           body.addEventListener('click', function (event) {
@@ -1238,6 +1249,7 @@
       <section class="profit-period-toolbar">
         <div class="profit-period-badge"><i data-lucide="calendar-days"></i> {{t .Lang "period"}} {{.Report.PeriodStart}} - {{.Report.PeriodEnd}}</div>
         <form class="profit-period-form" method="get" action="/admin/reports/profit-loss">
+          <div class="date-range-controls">
           <label>
             <span>{{t .Lang "date_from"}}</span>
             <input type="date" name="date_from" value="{{.Period.DateFrom}}">
@@ -1246,8 +1258,15 @@
             <span>{{t .Lang "date_to"}}</span>
             <input type="date" name="date_to" value="{{.Period.DateTo}}">
           </label>
-          <button class="button-link profit-filter-button" type="submit">{{t .Lang "apply_filters"}}</button>
-          <a class="button-link button-link-secondary profit-reset-button" href="/admin/reports/profit-loss">{{t .Lang "reset"}}</a>
+          </div>
+          <div class="filter-actions">
+            <button class="button-link profit-filter-button" type="submit">{{t .Lang "apply_filters"}}</button>
+            <a class="button-link button-link-secondary profit-reset-button" href="/admin/reports/profit-loss">{{t .Lang "reset"}}</a>
+            <span class="profit-export-label">{{t .Lang "data_export"}}</span>
+            <a class="button-link profit-export-button" href="{{.ExportCSVURL}}">{{t .Lang "export_csv"}}</a>
+            <a class="button-link profit-export-button" href="{{.ExportPDFURL}}">{{t .Lang "export_pdf"}}</a>
+            <button class="profit-print-button" type="button" onclick="window.print()">{{t .Lang "print_report"}}</button>
+          </div>
         </form>
       </section>
 
@@ -1270,17 +1289,6 @@
           <strong>+ Rp {{nominal .Report.NetProfit}}</strong>
           <small>{{t .Lang "margin"}} {{.Report.MarginPercent}}%</small>
         </article>
-      </section>
-
-      <section class="profit-card">
-        <header class="profit-card-header"><h2><i data-lucide="download"></i> {{t .Lang "data_export"}}</h2></header>
-        <div class="profit-card-body">
-          <div class="profit-action-row">
-            <a class="button-link profit-export-button" href="{{.ExportCSVURL}}">{{t .Lang "export_csv"}}</a>
-            <a class="button-link profit-export-button" href="{{.ExportPDFURL}}">{{t .Lang "export_pdf"}}</a>
-            <button class="profit-print-button" type="button" onclick="window.print()">{{t .Lang "print_report"}}</button>
-          </div>
-        </div>
       </section>
 
       <section class="profit-tabs-card">
@@ -1435,10 +1443,7 @@
 
 {{define "admin-savings"}}
 {{template "admin-shell-start" .}}
-      <section class="page-actions">
-        {{if index .Permissions "savings.record"}}<a class="button-link" href="/admin/savings/new">{{t .Lang "record_saving"}}</a>{{end}}
-        {{if index .Permissions "reports.view"}}<a class="button-link button-link-secondary" href="{{.ExportPath}}">{{t .Lang "export_csv"}}</a>{{end}}
-      </section>
+      {{if index .Permissions "savings.record"}}<section class="page-actions"><a class="button-link" href="/admin/savings/new">{{t .Lang "record_saving"}}</a></section>{{end}}
       <section class="panel">
         <h2>{{t .Lang "saving_records"}}</h2>
         <form class="filter-form" method="get" action="/admin/savings">
@@ -1467,9 +1472,10 @@
               <option value="withdrawal" {{if eq .Filters.Type "withdrawal"}}selected{{end}}>{{t .Lang "withdrawal"}}</option>
             </select>
           </label>
-          <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.Filters.DateFrom}}"></label>
-          <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.Filters.DateTo}}"></label>
-          <button type="submit">{{t .Lang "apply_filters"}}</button>
+          <div class="date-range-controls"><label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.Filters.DateFrom}}"></label><label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.Filters.DateTo}}"></label></div>
+          <div class="filter-actions"><button type="submit">{{t .Lang "apply_filters"}}</button>
+            {{if index .Permissions "reports.view"}}<a class="button-link button-link-secondary" href="{{.ExportPath}}">{{t .Lang "export_csv"}}</a>{{end}}
+          </div>
         </form>
         {{if .Savings}}
 {{template "table-open" .}}
@@ -1684,12 +1690,11 @@
       </section>
       {{if lt .Summary.EndingBalance 0}}<p class="form-error-message">{{t .Lang "negative_cash_balance_warning"}}</p>{{end}}
       <section class="panel cash-transactions-panel">
-        <div class="section-heading-row"><h2>{{t .Lang "transaction_list"}}</h2><div class="button-row"><a class="button-link button-link-secondary" href="/api/admin/exports/transactions.csv">{{t .Lang "export_csv"}}</a></div></div>
+        <div class="section-heading-row"><h2>{{t .Lang "transaction_list"}}</h2></div>
         <div class="cash-tools-grid">
           <div class="cash-tool-panel cash-filter-panel">
             <form class="filter-form cash-filter-form" method="get" action="/admin/transactions">
-          <label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.Filters.DateFrom}}"></label>
-          <label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.Filters.DateTo}}"></label>
+          <div class="date-range-controls"><label>{{t .Lang "date_from"}} <input name="date_from" type="date" value="{{.Filters.DateFrom}}"></label><label>{{t .Lang "date_to"}} <input name="date_to" type="date" value="{{.Filters.DateTo}}"></label></div>
           <label>{{t .Lang "accounting_direction"}}
             <select name="category">
               <option value="">{{t .Lang "all_categories"}}</option>
@@ -1714,8 +1719,10 @@
               {{range .COAAccounts}}<option value="{{.Code}}" {{if eq $.Filters.TransactionCategory .Code}}selected{{end}}>{{.Code}} — {{.Name}}</option>{{end}}
             </select>
           </label>
-          <button type="submit">{{t .Lang "apply_filters"}}</button>
+          <div class="filter-actions"><button type="submit">{{t .Lang "apply_filters"}}</button>
+              <button class="button-secondary" type="submit" formaction="/api/admin/exports/transactions.csv" formmethod="get">{{t .Lang "export_csv"}}</button>
               <a class="button-link button-link-secondary" href="/admin/transactions">{{t .Lang "reset"}}</a>
+          </div>
             </form>
           </div>
         </div>

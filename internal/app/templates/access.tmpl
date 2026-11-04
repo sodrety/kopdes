@@ -23,7 +23,7 @@
           <p>{{.Body}}</p>
           <small>{{.CreatedAt}}</small>
         </div>
-        <div class="inline-actions">
+        <div class="notification-actions">
           {{if .Link}}<a class="button-link button-link-secondary" href="{{.Link}}">{{t $.Lang "view"}}</a>{{end}}
           {{if not .IsRead}}
           <form method="post" action="/api/notifications/{{.ID}}/read?audience={{$.NotificationAudience}}" hx-post="/api/notifications/{{.ID}}/read?audience={{$.NotificationAudience}}">

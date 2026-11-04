@@ -613,16 +613,12 @@ func drawSavingSlip(pdf *slipPDF, data savingSlipData, lang string) {
 			pdf.nextPage()
 		}
 		drawSlipHeader(pdf, lang, translate(lang, "slip_savings_title"), data.Period, data.Member)
-		pdf.text(50, 398, 10, "F2", translate(lang, "slip_principal_savings"))
-		pdf.text(188, 398, 10, "F2", "Rp")
-		pdf.textRight(335, 398, 10, "F2", slipAmount(data.Current.Pokok))
-		pdf.line(50, 382, 790, 382, 1.5)
-		pdf.text(50, 358, 9.5, "F2", translate(lang, "slip_month"))
-		pdf.text(190, 358, 9, "F2", fmt.Sprintf("%s %s", savedLabel, requiredLabel))
-		pdf.text(315, 358, 9, "F2", fmt.Sprintf("%s %s", totalLabel, requiredLabel))
-		pdf.text(445, 358, 9, "F2", fmt.Sprintf("%s %s", savedLabel, voluntaryLabel))
-		pdf.text(590, 358, 9, "F2", fmt.Sprintf("%s %s", totalLabel, voluntaryLabel))
-		pdf.line(50, 348, 790, 348, 1.5)
+		pdf.text(50, 398, 9.5, "F2", translate(lang, "slip_month"))
+		pdf.text(190, 398, 9, "F2", fmt.Sprintf("%s %s", savedLabel, requiredLabel))
+		pdf.text(315, 398, 9, "F2", fmt.Sprintf("%s %s", totalLabel, requiredLabel))
+		pdf.text(445, 398, 9, "F2", fmt.Sprintf("%s %s", savedLabel, voluntaryLabel))
+		pdf.text(590, 398, 9, "F2", fmt.Sprintf("%s %s", totalLabel, voluntaryLabel))
+		pdf.line(50, 388, 790, 388, 1.5)
 
 		rowsOnPage := baseRowsPerPage
 		if pageIndex < extraRows {
@@ -635,7 +631,7 @@ func drawSavingSlip(pdf *slipPDF, data savingSlipData, lang string) {
 		for index := 0; index < rowsOnPage; index++ {
 			row := rows[rowIndex]
 			rowIndex++
-			y := 332 - float64(index)*rowStep
+			y := 372 - float64(index)*rowStep
 			if row.WithdrawalAmount > 0 {
 				label := strings.ToUpper(translate(lang, "transaction_type_withdrawal") + " " + voluntaryLabel)
 				pdf.text(50, y, 8.5, "F1", label)

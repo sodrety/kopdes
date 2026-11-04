@@ -4,10 +4,10 @@
 <section class="panel">
 <form class="filter-form" method="get" action="/admin/reports/savings-loans">
 <label>{{t .Lang "search"}}<input type="search" name="search" value="{{.Search}}" placeholder="{{t .Lang "search_loans_placeholder"}}"></label>
-<label>{{t .Lang "date_from"}}<input type="date" name="date_from" value="{{.DateFrom}}" {{if .DateTo}}max="{{.DateTo}}"{{end}}></label>
-<label>{{t .Lang "date_to"}}<input type="date" name="date_to" value="{{.DateTo}}" {{if .DateFrom}}min="{{.DateFrom}}"{{end}}></label>
-<button type="submit">{{t .Lang "apply_filters"}}</button>
-<button class="button-secondary" type="submit" name="export" value="xlsx">{{t .Lang "export_xlsx"}}</button>
+<div class="date-range-controls"><label>{{t .Lang "date_from"}}<input type="date" name="date_from" value="{{.DateFrom}}" {{if .DateTo}}max="{{.DateTo}}"{{end}}></label>
+<label>{{t .Lang "date_to"}}<input type="date" name="date_to" value="{{.DateTo}}" {{if .DateFrom}}min="{{.DateFrom}}"{{end}}></label></div>
+<div class="filter-actions"><button type="submit">{{t .Lang "apply_filters"}}</button>
+<button class="button-secondary" type="submit" name="export" value="xlsx">{{t .Lang "export_xlsx"}}</button></div>
 <a class="button-link button-link-secondary" href="/admin/reports/savings-loans">{{t .Lang "reset"}}</a>
 </form>
 </section>

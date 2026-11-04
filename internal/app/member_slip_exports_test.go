@@ -55,10 +55,13 @@ func TestMemberDashboardExportsMonthlySavingsAndLoanSlips(t *testing.T) {
 	if got := savingsResponse.Header().Get("Content-Disposition"); !strings.Contains(got, `slip-simpanan-M-SLIP-001-`+savingsPeriod+`.pdf`) {
 		t.Fatalf("savings slip disposition=%q", got)
 	}
-	for _, text := range []string{"SLIP Simpanan", "SIMPANAN POKOK", "THROUGH MONTH", "SAVED WAJIB", "TOTAL WAJIB", "SAVED MANASUKA", "TOTAL MANASUKA", "FEBRUARY", "50.000", "150.000", "405.000"} {
+	for _, text := range []string{"SLIP Simpanan", "THROUGH MONTH", "SAVED WAJIB", "TOTAL WAJIB", "SAVED MANASUKA", "TOTAL MANASUKA", "FEBRUARY", "50.000", "150.000", "405.000"} {
 		if !strings.Contains(savingsResponse.Body.String(), text) {
 			t.Fatalf("savings slip missing %q", text)
 		}
+	}
+	if strings.Contains(savingsResponse.Body.String(), "SIMPANAN POKOK") {
+		t.Fatalf("savings slip should omit the principal savings content")
 	}
 	for _, header := range []string{"SAVED WAJIB", "TOTAL WAJIB", "SAVED MANASUKA", "TOTAL MANASUKA"} {
 		if strings.Index(savingsResponse.Body.String(), header) < 0 {

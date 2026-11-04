@@ -12,7 +12,7 @@ import (
 var staticAssetFS embed.FS
 
 const appCSS = `
-.member-picker { position: relative; }
+.member-picker { position: relative; min-width: 0; }
 .member-picker input { width: 100%; }
 .password-visibility-toggle { display: flex; align-items: center; gap: 8px; }
 .password-visibility-toggle input { width: auto; }
@@ -27,6 +27,35 @@ const appCSS = `
 .member-picker-option { padding: 10px 12px; cursor: pointer; color: var(--ink); }
 .member-picker-option:hover, .member-picker-option[aria-selected="true"] { background: var(--primary-pale); }
 .member-picker-status { padding: 12px; color: var(--mute); }
+.date-range-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 10px;
+  min-width: 0;
+}
+.date-range-controls > label { min-width: 0; }
+.date-range-controls input[type="date"] { width: 100%; }
+.filter-actions {
+  display: flex;
+  align-items: end;
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+.filter-actions > * { margin: 0; white-space: nowrap; }
+.filter-form .filter-actions button,
+.filter-form .filter-actions .button-link { width: auto; justify-self: start; }
+.profit-export-label { color: var(--heading); font-size: 12px; font-weight: 800; }
+.notification-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  white-space: nowrap;
+}
+.notification-actions form { margin: 0; }
+.notification-actions .button-link,
+.notification-actions button { white-space: nowrap; }
 :root {
   --primary: #0056b3;
   --primary-strong: #004494;
@@ -1777,6 +1806,7 @@ a {
 .cash-filter-form {
   grid-template-columns: repeat(2, minmax(140px, 1fr));
 }
+.cash-filter-form .date-range-controls { grid-column: 1 / -1; }
 .cash-filter-form button,
 .cash-filter-form .button-link {
   align-self: end;
@@ -3225,6 +3255,26 @@ td:nth-child(n+2):not(.review-cell) {
     width: 100%;
     justify-self: stretch;
   }
+  .filter-form .date-range-controls { grid-column: 1 / -1; gap: 6px; }
+  .filter-form .filter-actions {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .filter-form .filter-actions button,
+  .filter-form .filter-actions .button-link { width: 100%; }
+  .filter-form .filter-actions > :only-child { grid-column: 1 / -1; }
+  .profit-period-form .date-range-controls { width: 100%; gap: 6px; }
+  .profit-period-form .filter-actions {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .profit-period-form .profit-export-label { grid-column: 1 / -1; }
+  .profit-period-form .filter-actions > * { width: 100%; }
+  .profit-period-form .date-range-controls input { min-width: 0; }
   .inline-approval-form input,
   .inline-rejection-form input,
   .inline-repayment-form input,
