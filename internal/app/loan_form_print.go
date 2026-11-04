@@ -98,6 +98,67 @@ func (s *Server) adminLoanRequestAcceptanceFormPrintPage(c *gin.Context) {
 	renderLoanFormPrintPage(c, translate(lang, "loan_acceptance_print"), "/admin/loan-requests#loan-request-review-"+requestID, background, texts, masks, loanAcceptanceFormPrintStyles())
 }
 
+func (s *Server) memberLoanRequestApplicationFormPrintPage(c *gin.Context) {
+	request, ok := s.memberLoanRequestForFormPrint(c)
+	if !ok {
+		return
+	}
+	application, err := s.loanRequestApplicationFormData(request.ID)
+	if err != nil {
+		respondLoanRequestFormPrintError(c, err)
+		return
+	}
+	background, texts, masks, err := loanApplicationFormPrintLayout(application)
+	if err != nil {
+		respondLoanFormPrintInternalError(c)
+		return
+	}
+	requestID := url.PathEscape(request.ID)
+	renderLoanFormPrintPage(c, translate(languageFromRequest(c), "loan_application_print"), "/member/loan-requests/"+requestID, background, texts, masks)
+}
+
+func (s *Server) memberLoanRequestAcceptanceFormPrintPage(c *gin.Context) {
+	request, ok := s.memberLoanRequestForFormPrint(c)
+	if !ok {
+		return
+	}
+	lang := languageFromRequest(c)
+	if request.Status != "approved" {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error.Loan request not found"))
+		return
+	}
+	report, err := s.loanRequestAcceptanceReportData(request.ID, lang)
+	if err != nil {
+		respondLoanRequestFormPrintError(c, err)
+		return
+	}
+	background, texts, masks, err := loanAcceptanceFormPrintLayout(report)
+	if err != nil {
+		respondLoanFormPrintInternalError(c)
+		return
+	}
+	requestID := url.PathEscape(request.ID)
+	renderLoanFormPrintPage(c, translate(lang, "loan_acceptance_print"), "/member/loan-requests/"+requestID, background, texts, masks, loanAcceptanceFormPrintStyles())
+}
+
+func (s *Server) memberLoanRequestForFormPrint(c *gin.Context) (LoanRequest, bool) {
+	lang := languageFromRequest(c)
+	member, ok := s.profileMember(c)
+	if !ok {
+		return LoanRequest{}, false
+	}
+	request, err := s.loanRequestByMemberID(c.Param("id"), member.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error.Loan request not found"))
+		return LoanRequest{}, false
+	}
+	if err != nil {
+		respondLoanFormPrintInternalError(c)
+		return LoanRequest{}, false
+	}
+	return request, true
+}
+
 func (s *Server) adminLoanDisbursementApplicationFormPrintPage(c *gin.Context) {
 	lang := languageFromRequest(c)
 	user, _ := currentUser(c)

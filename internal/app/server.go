@@ -226,8 +226,11 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	router.GET("/member/exports/loans.pdf", server.requireRole("member"), server.memberLoanSlipPDF)
 	router.GET("/member/profile", server.requireRole("member"), server.memberProfilePage)
 	router.GET("/member/withdrawal-requests", server.requireRole("member"), server.memberWithdrawalRequestsPage)
+	router.GET("/member/withdrawal-requests/:id/print/application", server.requireRole("member"), server.memberWithdrawalRequestApplicationFormPrintPage)
 	router.GET("/member/loan-requests", server.requireRole("member"), server.memberLoanRequestsPage)
 	router.GET("/member/loan-requests/:id", server.requireRole("member"), server.memberLoanRequestDetailPage)
+	router.GET("/member/loan-requests/:id/print/application", server.requireRole("member"), server.memberLoanRequestApplicationFormPrintPage)
+	router.GET("/member/loan-requests/:id/print/acceptance", server.requireRole("member"), server.memberLoanRequestAcceptanceFormPrintPage)
 
 	return router
 }

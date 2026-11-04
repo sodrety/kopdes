@@ -41,6 +41,45 @@ func (s *Server) adminWithdrawalRequestApplicationFormPrintPage(c *gin.Context) 
 	})
 }
 
+func (s *Server) memberWithdrawalRequestApplicationFormPrintPage(c *gin.Context) {
+	lang := languageFromRequest(c)
+	member, ok := s.profileMember(c)
+	if !ok {
+		return
+	}
+	request, err := s.withdrawalRequestByID(c.Param("id"))
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && request.MemberID != member.ID) {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error.Withdrawal request not found"))
+		return
+	}
+	if err != nil {
+		respondLoanFormPrintInternalError(c)
+		return
+	}
+	report, err := s.withdrawalRequestApplicationFormData(request.ID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error.Withdrawal request not found"))
+			return
+		}
+		respondLoanFormPrintInternalError(c)
+		return
+	}
+	background, err := withdrawalApplicationFormSVG(report)
+	if err != nil {
+		respondLoanFormPrintInternalError(c)
+		return
+	}
+	renderPage(c, "admin-loan-form-print", gin.H{
+		"Lang":              lang,
+		"Title":             translate(lang, "withdrawal_application_print"),
+		"BackURL":           "/member/withdrawal-requests",
+		"BackgroundDataURI": template.URL("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(background)),
+		"Fields":            []loanFormPrintField{},
+		"Masks":             []loanFormPrintMask{},
+	})
+}
+
 func withdrawalApplicationFormSVG(report disbursementApplicationFormData) ([]byte, error) {
 	logo, err := staticAssetFS.ReadFile("static/images/lambang-koperasi.png")
 	if err != nil {
