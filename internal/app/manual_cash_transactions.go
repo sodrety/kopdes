@@ -130,7 +130,7 @@ func validCashTransactionNormalBalance(value string) bool {
 	return value == "" || value == "D" || value == "C"
 }
 
-func validateManualCashTransactionRequest(req manualCashTransactionRequest) error {
+func validateManualCashTransactionRequest(req manualCashTransactionRequest, entryType string) error {
 	if normalizeCashTransactionCategoryName(req.Description) == "" || strings.TrimSpace(req.RecordDate) == "" || len(req.Lines) < 2 {
 		return errInvalidManualCashTransaction
 	}
@@ -140,7 +140,7 @@ func validateManualCashTransactionRequest(req manualCashTransactionRequest) erro
 	}
 	today := time.Now().In(jakartaLocation)
 	today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, jakartaLocation)
-	if date.After(today) {
+	if entryType == "cash" && date.After(today) {
 		return errFutureManualCashTransaction
 	}
 	return nil
@@ -233,7 +233,7 @@ func (s *Server) saveManualCashTransactionDraft(req manualCashTransactionRequest
 	req.RecordDate = strings.TrimSpace(req.RecordDate)
 	req.ReferenceNo = strings.TrimSpace(req.ReferenceNo)
 	req.Note = strings.TrimSpace(req.Note)
-	if err := validateManualCashTransactionRequest(req); err != nil {
+	if err := validateManualCashTransactionRequest(req, entryType); err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(req)
@@ -466,7 +466,7 @@ func (s *Server) insertManualCashTransactionTx(tx *sql.Tx, req manualCashTransac
 			return nil, errCashTransactionCategoryGroup
 		}
 	}
-	if err := validateManualCashTransactionRequest(req); err != nil {
+	if err := validateManualCashTransactionRequest(req, entryType); err != nil {
 		return nil, err
 	}
 

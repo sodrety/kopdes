@@ -700,7 +700,7 @@
         <p class="field-help">{{t .Lang "general_journal_form_help"}}</p>
         <form method="post" action="{{if .JournalDraftID}}/api/admin/journals/drafts/{{.JournalDraftID}}{{else}}/api/admin/journals{{end}}" hx-post="{{if .JournalDraftID}}/api/admin/journals/drafts/{{.JournalDraftID}}{{else}}/api/admin/journals{{end}}" hx-target="#general-journal-error" hx-swap="innerHTML">
           <div class="form-grid form-grid-two">
-            <label>{{t .Lang "date"}} <input name="transaction_date" type="date" value="{{if .JournalDraftID}}{{.JournalEditDraft.TransactionDate}}{{else}}{{.DefaultDate}}{{end}}" max="{{.DefaultDate}}" required></label>
+            <label>{{t .Lang "date"}} <input name="transaction_date" type="date" value="{{if .JournalDraftID}}{{.JournalEditDraft.TransactionDate}}{{else}}{{.DefaultDate}}{{end}}" required></label>
             <label>{{t .Lang "reference_number"}} <input name="reference_no" maxlength="100" value="{{if .JournalDraftID}}{{.JournalEditDraft.ReferenceNo}}{{end}}"></label>
             <label>{{t .Lang "description"}} <input name="description" maxlength="200" value="{{if .JournalDraftID}}{{.JournalEditDraft.Description}}{{end}}" required></label>
             <label>{{t .Lang "note"}} <input name="note" maxlength="500" value="{{if .JournalDraftID}}{{.JournalEditDraft.Note}}{{end}}"></label>
