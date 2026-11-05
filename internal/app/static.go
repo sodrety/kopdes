@@ -1117,7 +1117,12 @@ button:disabled {
 }
 .sidebar-nav {
   display: grid;
+  flex: 1 1 auto;
   gap: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding-top: 10px;
 }
 .sidebar-nav-group {
@@ -3082,10 +3087,12 @@ td:nth-child(n+2):not(.review-cell) {
   }
   .sidebar-nav {
     display: grid;
+    flex: 0 0 auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     min-width: 0;
     max-width: 100%;
+    min-height: auto;
     overflow: visible;
     padding: 0;
   }
