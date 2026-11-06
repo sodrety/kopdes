@@ -468,7 +468,10 @@ func (s *Server) refreshLoanRepaymentScheduleTx(tx *sql.Tx, loan repaymentLoanSt
 		status = "paid"
 	} else if loan.Status == "adjustment_due" {
 		status = "adjustment_due"
-	} else {
+	} else if loan.Status != "active" {
+		// Only block reopening a paid loan. An already active loan stays active
+		// after its repayment schedule is recalculated, so another active loan
+		// does not create a new conflict in that case.
 		var anotherActive int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM loans WHERE member_id=$1 AND id<>$2 AND status='active'`, loan.MemberID, loan.ID).Scan(&anotherActive); err != nil {
 			return err
