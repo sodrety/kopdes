@@ -18,6 +18,7 @@
 <th>{{t .Lang "member_no"}}</th><th>{{t .Lang "full_name"}}</th>
 <th>{{t .Lang "simpanan_pokok"}}</th><th>{{t .Lang "simpanan_wajib"}}</th><th>{{t .Lang "simpanan_manasuka"}}</th><th>{{t .Lang "simpanan_shu_tertahan"}}</th><th>{{t .Lang "simpanan_khusus"}}</th>
 <th>{{t .Lang "saving_balance"}}</th><th>{{t .Lang "savings_loans_running_total"}}</th><th>{{t .Lang "savings_loans_remaining_total"}}</th>
+<th>{{t .Lang "savings_loans_remaining_regular"}}</th><th>{{t .Lang "savings_loans_remaining_secondary"}}</th><th>{{t .Lang "savings_loans_remaining_paylater"}}</th><th>{{t .Lang "savings_loans_remaining_voucher"}}</th>
 </tr></thead>
 <tbody>{{range .Rows}}<tr>
 <td>{{.MemberNo}}</td><td>{{if index $.Permissions "members.view"}}<a href="/admin/members/{{.MemberID}}">{{.FullName}}</a>{{else}}{{.FullName}}{{end}}</td>
@@ -32,4 +33,5 @@
 
 {{define "savings-loans-amount-cells"}}
 <td>{{nominal .PokokBalance}}</td><td>{{nominal .WajibBalance}}</td><td>{{nominal .SukarelaBalance}}</td><td>{{nominal .SHUBalance}}</td><td>{{nominal .KhususBalance}}</td><td>{{nominal .SavingsBalance}}</td><td>{{nominal .RunningLoanTotal}}</td><td>{{nominal .RemainingLoanBalance}}</td>
+<td>{{nominal .RegularLoanBalance}}</td><td>{{nominal .SecondaryGoodsLoanBalance}}</td><td>{{nominal .GoodsPurchasePaylaterLoanBalance}}</td><td>{{nominal .VoucherLoanBalance}}</td>
 {{end}}

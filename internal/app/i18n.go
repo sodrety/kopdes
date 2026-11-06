@@ -16,11 +16,15 @@ const (
 var translations = map[string]map[string]string{
 	defaultLanguage: {
 		"savings_loans_report":             "Savings and loans report",
-		"savings_loans_report_description": "One row per member with current savings balances and running loans. Loan totals include fees; remaining balances already include unpaid fees. Date filters select members with savings, loan or repayment activity during the period; balances remain current.",
+		"savings_loans_report_description": "One row per member with current savings balances and running loans. Loan totals include fees; remaining balances are split by loan type and include unpaid fees. Date filters select members with savings, loan or repayment activity during the period; balances remain current.",
 		"savings_loans_invalid_dates":      "Enter valid dates and ensure the from date is on or before the to date.",
 		"savings_loans_empty":              "No members match these filters.",
 		"savings_loans_running_total":      "Running loans including fees",
 		"savings_loans_remaining_total":    "Remaining loan balance",
+		"savings_loans_remaining_regular":  "Remaining — Regular",
+		"savings_loans_remaining_secondary": "Remaining — Secondary Goods",
+		"savings_loans_remaining_paylater": "Remaining — Goods Purchase/Paylater",
+		"savings_loans_remaining_voucher":  "Remaining — Voucher",
 
 		"savings_auto_status": "Savings status (automatic paid)",
 		"detail_payment":      "Payment",
@@ -1116,11 +1120,15 @@ var translations = map[string]map[string]string{
 	},
 	bahasaLanguage: {
 		"savings_loans_report":             "Laporan Simpan Pinjam",
-		"savings_loans_report_description": "Satu baris per anggota berisi saldo simpanan terkini dan pinjaman berjalan. Total pinjaman termasuk biaya; sisa saldo sudah termasuk biaya yang belum dibayar. Filter tanggal memilih anggota dengan aktivitas simpanan, pinjaman, atau angsuran pada periode tersebut; saldo tetap terkini.",
+		"savings_loans_report_description": "Satu baris per anggota berisi saldo simpanan terkini dan pinjaman berjalan. Total pinjaman termasuk biaya; sisa saldo dirinci per jenis pinjaman dan sudah termasuk biaya yang belum dibayar. Filter tanggal memilih anggota dengan aktivitas simpanan, pinjaman, atau angsuran pada periode tersebut; saldo tetap terkini.",
 		"savings_loans_invalid_dates":      "Masukkan tanggal yang valid dan pastikan tanggal awal tidak melewati tanggal akhir.",
 		"savings_loans_empty":              "Tidak ada anggota yang sesuai dengan filter.",
 		"savings_loans_running_total":      "Total pinjaman berjalan + biaya",
 		"savings_loans_remaining_total":    "Total saldo pinjaman",
+		"savings_loans_remaining_regular":  "Sisa — Reguler",
+		"savings_loans_remaining_secondary": "Sisa — Barang Sekunder",
+		"savings_loans_remaining_paylater": "Sisa — Pembelian Barang/Paylater",
+		"savings_loans_remaining_voucher":  "Sisa — Voucher",
 
 		"savings_auto_status": "Status simpanan (otomatis paid)",
 		"detail_payment":      "Pembayaran",

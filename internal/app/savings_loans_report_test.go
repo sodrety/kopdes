@@ -44,7 +44,7 @@ func TestSavingsLoansReportFiltersAndAccess(t *testing.T) {
 			}
 			rows := savingsLoansReportCells(t, rec.Body.String(), member.MemberNo)
 			if tc.hasMember {
-				expected := [][]string{{member.MemberNo, "Report Filter Member", "0", "370.368", "0", "0", "0", "370.368", "0", "0"}}
+				expected := [][]string{{member.MemberNo, "Report Filter Member", "0", "370.368", "0", "0", "0", "370.368", "0", "0", "0", "0", "0", "0"}}
 				if !reflect.DeepEqual(rows, expected) {
 					t.Fatalf("current member balances=%v want %v", rows, expected)
 				}
@@ -77,7 +77,7 @@ func TestSavingsLoansReportSummarizesAllSavingsCategories(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
-	expected := [][]string{{member.MemberNo, "Summary Member", "100.000", "3.000.000.000", "375.000", "75.000", "200.000", "3.000.750.000", "0", "0"}}
+	expected := [][]string{{member.MemberNo, "Summary Member", "100.000", "3.000.000.000", "375.000", "75.000", "200.000", "3.000.750.000", "0", "0", "0", "0", "0", "0"}}
 	if rows := savingsLoansReportCells(t, rec.Body.String(), member.MemberNo); !reflect.DeepEqual(rows, expected) {
 		t.Fatalf("summary=%v want %v", rows, expected)
 	}
@@ -98,7 +98,7 @@ func TestSavingsLoansReportSummarizesAllSavingsCategories(t *testing.T) {
 	}
 	empty := f.createMember(t, token, `{"member_no":"EMPTY-001","full_name":"Empty Member","join_date":"2026-01-01","status":"inactive"}`)
 	rec = savingsLoansReportResponse(f, token, "?search=EMPTY-001", "")
-	expected = [][]string{{empty.MemberNo, "Empty Member", "0", "0", "0", "0", "0", "0", "0", "0"}}
+	expected = [][]string{{empty.MemberNo, "Empty Member", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0"}}
 	if rows := savingsLoansReportCells(t, rec.Body.String(), empty.MemberNo); !reflect.DeepEqual(rows, expected) {
 		t.Fatalf("empty member balances=%v", rows)
 	}
@@ -133,7 +133,7 @@ func TestSavingsLoansReportRunningLoansIncludeFeesOnce(t *testing.T) {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 		}
 		rows := savingsLoansReportCells(t, rec.Body.String(), member.MemberNo)
-		if len(rows) != 1 || len(rows[0]) != 10 || rows[0][8] != total || rows[0][9] != remaining {
+		if len(rows) != 1 || len(rows[0]) != 14 || rows[0][8] != total || rows[0][9] != remaining {
 			t.Fatalf("loan summary=%v want total %s remaining %s", rows, total, remaining)
 		}
 	}

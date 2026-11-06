@@ -11,6 +11,8 @@ import (
 type savingsLoansReportAmounts struct {
 	PokokBalance, WajibBalance, SukarelaBalance, SHUBalance, KhususBalance int64
 	SavingsBalance, RunningLoanTotal, RemainingLoanBalance                 int64
+	RegularLoanBalance, SecondaryGoodsLoanBalance                          int64
+	GoodsPurchasePaylaterLoanBalance, VoucherLoanBalance                   int64
 }
 
 type savingsLoansReportRow struct {
@@ -44,7 +46,11 @@ func (s *Server) adminSavingsLoansReportPage(c *gin.Context) {
  SUM(CASE WHEN type='deposit' THEN amount ELSE -amount END) AS balance
  FROM saving_records GROUP BY member_id
  ), running_loans AS (
- SELECT member_id,SUM(total_obligation) AS obligation,SUM(remaining_balance) AS balance
+ SELECT member_id,SUM(total_obligation) AS obligation,SUM(remaining_balance) AS balance,
+ SUM(CASE WHEN loan_type='regular' THEN remaining_balance ELSE 0 END) AS regular_balance,
+ SUM(CASE WHEN loan_type='secondary_goods' THEN remaining_balance ELSE 0 END) AS secondary_goods_balance,
+ SUM(CASE WHEN loan_type='goods_purchase_paylater' THEN remaining_balance ELSE 0 END) AS goods_purchase_paylater_balance,
+ SUM(CASE WHEN loan_type='voucher' THEN remaining_balance ELSE 0 END) AS voucher_balance
  FROM loans WHERE status <> 'cancelled' AND remaining_balance>0 GROUP BY member_id
  ), activity AS (
  SELECT member_id,record_date FROM saving_records
@@ -53,7 +59,8 @@ func (s *Server) adminSavingsLoansReportPage(c *gin.Context) {
  )
  SELECT m.id,m.member_no,m.full_name,
  COALESCE(s.pokok,0),COALESCE(s.wajib,0),COALESCE(s.sukarela,0),COALESCE(s.shu,0),COALESCE(s.khusus,0),COALESCE(s.balance,0),
- COALESCE(l.obligation,0),COALESCE(l.balance,0)
+ COALESCE(l.obligation,0),COALESCE(l.balance,0),COALESCE(l.regular_balance,0),COALESCE(l.secondary_goods_balance,0),
+ COALESCE(l.goods_purchase_paylater_balance,0),COALESCE(l.voucher_balance,0)
  FROM members m LEFT JOIN savings s ON s.member_id=m.id LEFT JOIN running_loans l ON l.member_id=m.id
  WHERE ($1='' OR LOWER(m.full_name) LIKE $4 ESCAPE '!' OR LOWER(m.member_no) LIKE $4 ESCAPE '!')
  AND (($2='' AND $3='') OR EXISTS (
@@ -71,7 +78,7 @@ func (s *Server) adminSavingsLoansReportPage(c *gin.Context) {
 	var totals savingsLoansReportAmounts
 	for rows.Next() {
 		var row savingsLoansReportRow
-		if err := rows.Scan(&row.MemberID, &row.MemberNo, &row.FullName, &row.PokokBalance, &row.WajibBalance, &row.SukarelaBalance, &row.SHUBalance, &row.KhususBalance, &row.SavingsBalance, &row.RunningLoanTotal, &row.RemainingLoanBalance); err != nil {
+		if err := rows.Scan(&row.MemberID, &row.MemberNo, &row.FullName, &row.PokokBalance, &row.WajibBalance, &row.SukarelaBalance, &row.SHUBalance, &row.KhususBalance, &row.SavingsBalance, &row.RunningLoanTotal, &row.RemainingLoanBalance, &row.RegularLoanBalance, &row.SecondaryGoodsLoanBalance, &row.GoodsPurchasePaylaterLoanBalance, &row.VoucherLoanBalance); err != nil {
 			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 			return
 		}
@@ -107,6 +114,8 @@ func (total *savingsLoansReportAmounts) add(row savingsLoansReportAmounts) error
 		{&total.SukarelaBalance, row.SukarelaBalance}, {&total.SHUBalance, row.SHUBalance},
 		{&total.KhususBalance, row.KhususBalance}, {&total.SavingsBalance, row.SavingsBalance},
 		{&total.RunningLoanTotal, row.RunningLoanTotal}, {&total.RemainingLoanBalance, row.RemainingLoanBalance},
+		{&total.RegularLoanBalance, row.RegularLoanBalance}, {&total.SecondaryGoodsLoanBalance, row.SecondaryGoodsLoanBalance},
+		{&total.GoodsPurchasePaylaterLoanBalance, row.GoodsPurchasePaylaterLoanBalance}, {&total.VoucherLoanBalance, row.VoucherLoanBalance},
 	} {
 		value, err := checkedReportAdd(*amount.target, amount.value)
 		if err != nil {
