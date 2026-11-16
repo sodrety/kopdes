@@ -39,6 +39,7 @@ type TagihanRow struct {
 	PinjamanBarangSekunder int64  `json:"pinjaman_barang_sekunder"`
 	PembelianBarang        int64  `json:"pembelian_barang"`
 	PinjamanVoucher        int64  `json:"pinjaman_voucher"`
+	PinjamanRetirement     int64  `json:"pinjaman_retirement"`
 	PinjamanNonReguler     int64  `json:"pinjaman_non_reguler"`
 	Total                  int64  `json:"total"`
 	Status                 string `json:"status"`
@@ -291,7 +292,12 @@ func (s *Server) tagihanRows(statementMonth tagihanStatementMonth) ([]TagihanRow
 			return nil, err
 		}
 		row.PinjamanVoucher = voucherDue
-		row.PinjamanNonReguler = row.PinjamanBarangSekunder + row.PembelianBarang + row.PinjamanVoucher
+		retirementDue, err := s.tagihanLoanDueTotalForType(row.MemberID, statementMonth, "retirement")
+		if err != nil {
+			return nil, err
+		}
+		row.PinjamanRetirement = retirementDue
+		row.PinjamanNonReguler = row.PinjamanBarangSekunder + row.PembelianBarang + row.PinjamanVoucher + row.PinjamanRetirement
 		row.Total = row.SimpananWajib + row.SimpananSukarela + row.PinjamanReguler + row.PinjamanNonReguler
 		if row.Total > 0 {
 			tagihanRows = append(tagihanRows, row)
@@ -446,7 +452,7 @@ type sqlRowQueryer interface {
 }
 
 func tagihanMappingCodeWithQueryer(queryer sqlRowQueryer, transactionType, component, loanType string) (string, error) {
-	if loanType == "voucher" {
+	if loanType == "voucher" || loanType == "retirement" {
 		loanType = "goods_purchase_paylater"
 	}
 	var code string
@@ -642,7 +648,7 @@ func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRo
 		_ = workbook.Close()
 		return nil, err
 	}
-	headers := []interface{}{"Member ID", "NPP", translate(language, "old_npp"), "Nama", "Simpanan Wajib", "Simpanan Manasuka", "Pinjaman Reguler", "Pinjaman Barang Sekunder", "Pembelian Barang", "Total Tagihan", "Status", translate(language, "loan_type_voucher")}
+	headers := []interface{}{"Member ID", "NPP", translate(language, "old_npp"), "Nama", "Simpanan Wajib", "Simpanan Manasuka", "Pinjaman Reguler", "Pinjaman Barang Sekunder", "Pembelian Barang", "Total Tagihan", "Status", translate(language, "loan_type_voucher"), translate(language, "loan_type_retirement")}
 	if err := workbook.SetSheetRow(sheet, "A1", &headers); err != nil {
 		_ = workbook.Close()
 		return nil, err
@@ -652,7 +658,7 @@ func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRo
 		if strings.TrimSpace(status) == "" {
 			status = "paid"
 		}
-		values := []interface{}{row.MemberID, row.MemberNo, row.oldNPP, row.FullName, row.SimpananWajib, row.SimpananSukarela, row.PinjamanReguler, row.PinjamanBarangSekunder, row.PembelianBarang, row.Total, status, row.PinjamanVoucher}
+		values := []interface{}{row.MemberID, row.MemberNo, row.oldNPP, row.FullName, row.SimpananWajib, row.SimpananSukarela, row.PinjamanReguler, row.PinjamanBarangSekunder, row.PembelianBarang, row.Total, status, row.PinjamanVoucher, row.PinjamanRetirement}
 		cell, err := excelize.CoordinatesToCellName(1, index+2)
 		if err != nil {
 			_ = workbook.Close()
@@ -669,11 +675,11 @@ func buildTagihanWorkbook(statementMonth tagihanStatementMonth, rows []TagihanRo
 	}
 	style, err := workbook.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
 	if err == nil {
-		_ = workbook.SetCellStyle(sheet, "A1", "L1", style)
+		_ = workbook.SetCellStyle(sheet, "A1", "M1", style)
 	}
 	_ = workbook.SetColWidth(sheet, "A", "A", 28)
 	_ = workbook.SetColWidth(sheet, "B", "D", 22)
-	_ = workbook.SetColWidth(sheet, "E", "L", 18)
+	_ = workbook.SetColWidth(sheet, "E", "M", 18)
 	_ = workbook.SetDocProps(&excelize.DocProperties{
 		Title:   "Tagihan " + statementMonth.Value,
 		Subject: "KKSUK PD Dharma Jaya Tagihan",

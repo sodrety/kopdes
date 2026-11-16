@@ -23,8 +23,8 @@ import (
 
 var errTagihanReview = errors.New("invalid reviewed collection")
 var errTagihanPreviewChanged = errors.New("collection preview changed")
-var reviewKeys = []string{"review_wajib", "review_manasuka", "review_regular", "review_secondary", "review_purchase", "review_voucher"}
-var reviewTypes = []string{"wajib", "sukarela", "regular", "secondary_goods", "goods_purchase_paylater", "voucher"}
+var reviewKeys = []string{"review_wajib", "review_manasuka", "review_regular", "review_secondary", "review_purchase", "review_voucher", "review_retirement"}
+var reviewTypes = []string{"wajib", "sukarela", "regular", "secondary_goods", "goods_purchase_paylater", "voucher", "retirement"}
 
 type tagihanReviewComponent struct {
 	LoanID          string `json:"loan_id,omitempty"`
@@ -49,10 +49,11 @@ type tagihanReviewResult struct {
 	fingerprint   string
 }
 type tagihanReviewRow struct {
-	memberID, status string
-	values           [6]int64
-	explicit         bool
-	excelRow         int
+	memberID, status   string
+	values             [7]int64
+	explicit           bool
+	retirementIncluded bool
+	excelRow           int
 }
 type tagihanReviewLoan struct {
 	ID, Type, Status, Final string
@@ -119,10 +120,10 @@ func readTagihanReviewRows(w *excelize.File) ([]tagihanReviewRow, error) {
 	if !detailed && !hasStatus {
 		return nil, errTagihanReview
 	}
-	var cols [6]int
+	var cols [7]int
 	present := 0
 	if !detailed {
-		for i := 2; i < 6; i++ {
+		for i := 2; i < 7; i++ {
 			cols[i] = -1
 			for _, lang := range []string{"en", "id"} {
 				if col, ok := headers[strings.ToLower(translate(lang, reviewKeys[i]))]; ok {
@@ -134,7 +135,7 @@ func readTagihanReviewRows(w *excelize.File) ([]tagihanReviewRow, error) {
 				present++
 			}
 		}
-		if present != 0 && present != 4 {
+		if present != 0 && present != 4 && present != 5 {
 			return nil, errTagihanReview
 		}
 	}
@@ -144,7 +145,7 @@ func readTagihanReviewRows(w *excelize.File) ([]tagihanReviewRow, error) {
 		if strings.TrimSpace(strings.Join(row, "")) == "" {
 			continue
 		}
-		r := tagihanReviewRow{memberID: tagihanCell(row, memberCol), explicit: present == 4, excelRow: index + 2, status: "paid"}
+		r := tagihanReviewRow{memberID: tagihanCell(row, memberCol), explicit: present == 4 || present == 5, retirementIncluded: !detailed && cols[6] >= 0, excelRow: index + 2, status: "paid"}
 		if !detailed {
 			r.status, ok = parseTagihanStatus(tagihanCell(row, statusCol))
 			if !ok {
@@ -156,7 +157,10 @@ func readTagihanReviewRows(w *excelize.File) ([]tagihanReviewRow, error) {
 		}
 		seen[r.memberID] = true
 		if !detailed && r.explicit && r.status == "paid" {
-			for i := 2; i < 6; i++ {
+			for i := 2; i < 7; i++ {
+				if cols[i] < 0 {
+					continue
+				}
 				cell, _ := excelize.CoordinatesToCellName(cols[i]+1, index+2)
 				amount, e := reviewedExcelAmount(w, sheet, cell)
 				if e != nil {
@@ -297,7 +301,7 @@ func (s *Server) reviewTagihan(month tagihanStatementMonth, date string, data []
 		if e != nil {
 			return result, e
 		}
-		var expected, recorded [6]int64
+		var expected, recorded [7]int64
 		e = tx.QueryRow(`SELECT simpanan_wajib,simpanan_manasuka FROM member_tagihan_configs WHERE member_id=$1`+rowLockClause(s.db), r.memberID).Scan(&expected[0], &expected[1])
 		if e != nil && !errors.Is(e, sql.ErrNoRows) {
 			return result, e
@@ -315,7 +319,7 @@ func (s *Server) reviewTagihan(month tagihanStatementMonth, date string, data []
 			if selected[l.ID] {
 				continue
 			}
-			for k := 2; k < 6; k++ {
+			for k := 2; k < 7; k++ {
 				if l.Type == reviewTypes[k] {
 					expected[k] += l.Due + l.Recorded
 					recorded[k] += l.Recorded
@@ -328,13 +332,17 @@ func (s *Server) reviewTagihan(month tagihanStatementMonth, date string, data []
 			actual = expected
 		}
 		if r.status == "unpaid" {
-			actual = [6]int64{}
+			actual = [7]int64{}
+		} else if r.explicit && !r.retirementIncluded {
+			// Older collection workbooks have no Retirement column. Preserve their
+			// behavior by collecting this one-time component in full.
+			actual[6] = expected[6]
 		}
 		// Savings are always collected in full from authoritative configuration.
 		// Spreadsheet realization and status cells cannot reduce these deposits.
 		actual[0], actual[1] = expected[0], expected[1]
 		job := tagihanReviewWork{memberID: r.memberID}
-		limit := 6
+		limit := 7
 		if detailed {
 			limit = 2
 		}
@@ -541,25 +549,25 @@ func addTagihanRealizationColumns(w *excelize.File, lang string) error {
 	if err != nil {
 		return err
 	}
-	_ = w.SetCellValue("Tagihan", "M1", translate(lang, "suspension_collection_total"))
+	_ = w.SetCellValue("Tagihan", "N1", translate(lang, "suspension_collection_total"))
 	for i, key := range reviewKeys {
-		cell, _ := excelize.CoordinatesToCellName(14+i, 1)
+		cell, _ := excelize.CoordinatesToCellName(15+i, 1)
 		if err = w.SetCellValue("Tagihan", cell, translate(lang, key)); err != nil {
 			return err
 		}
 	}
-	_ = w.SetCellValue("Tagihan", "T1", translate(lang, "review_actual_total"))
-	_ = w.SetCellValue("Tagihan", "U1", translate(lang, "review_difference"))
-	_ = w.SetCellValue("Tagihan", "W1", translate(lang, "review_excel_help"))
-	_ = w.SetColWidth("Tagihan", "N", "U", 25)
-	_ = w.SetColWidth("Tagihan", "W", "W", 90)
+	_ = w.SetCellValue("Tagihan", "V1", translate(lang, "review_actual_total"))
+	_ = w.SetCellValue("Tagihan", "W1", translate(lang, "review_difference"))
+	_ = w.SetCellValue("Tagihan", "X1", translate(lang, "review_excel_help"))
+	_ = w.SetColWidth("Tagihan", "O", "W", 25)
+	_ = w.SetColWidth("Tagihan", "X", "X", 90)
 	suspensionIndex, _ := w.GetSheetIndex(suspensionSheet)
 	suspensionRows, _ := w.GetRows(suspensionSheet)
 	end := max(2, len(suspensionRows))
 	for i := 1; i < len(rows); i++ {
 		r := i + 1
-		for j, source := range []string{"E", "F", "G", "H", "I", "L"} {
-			cell, _ := excelize.CoordinatesToCellName(14+j, r)
+		for j, source := range []string{"E", "F", "G", "H", "I", "L", "M"} {
+			cell, _ := excelize.CoordinatesToCellName(15+j, r)
 			formula := fmt.Sprintf("%s%d", source, r)
 			if j == 2 && suspensionIndex >= 0 {
 				for _, action := range []string{"suspend", translate("en", "suspension_action"), translate("id", "suspension_action")} {
@@ -571,16 +579,16 @@ func addTagihanRealizationColumns(w *excelize.File, lang string) error {
 			}
 		}
 		if suspensionIndex < 0 {
-			_ = w.SetCellFormula("Tagihan", fmt.Sprintf("M%d", r), fmt.Sprintf("J%d", r))
+			_ = w.SetCellFormula("Tagihan", fmt.Sprintf("N%d", r), fmt.Sprintf("J%d", r))
 		}
-		total := fmt.Sprintf(`IF(OR(K%d="paid",K%d="lunas"),SUM(N%d:S%d),0)`, r, r, r, r)
+		total := fmt.Sprintf(`IF(OR(K%d="paid",K%d="lunas"),SUM(O%d:U%d),0)`, r, r, r, r)
 		if suspensionIndex >= 0 {
 			for _, action := range []string{"suspend", translate("en", "suspension_action"), translate("id", "suspension_action")} {
 				total += fmt.Sprintf(`+SUMIFS('%s'!$F$2:$F$%d,'%s'!$B$2:$B$%d,A%d,'%s'!$G$2:$G$%d,"%s")`, suspensionSheet, end, suspensionSheet, end, r, suspensionSheet, end, action)
 			}
 		}
-		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("T%d", r), total)
-		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("U%d", r), fmt.Sprintf("T%d-M%d", r, r))
+		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("V%d", r), total)
+		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("W%d", r), fmt.Sprintf("V%d-N%d", r, r))
 	}
 	return nil
 }

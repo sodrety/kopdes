@@ -192,7 +192,7 @@ func appendLoanDetailPreview(result *tagihanReviewResult, job *tagihanReviewWork
 		remaining = 0
 		deferred = expected
 	}
-	c := tagihanReviewComponent{MemberID: member, LoanID: l.ID, Name: name, Component: l.Type, Label: translate(lang, "review_"+map[string]string{"regular": "regular", "secondary_goods": "secondary", "goods_purchase_paylater": "purchase", "voucher": "voucher"}[l.Type]), Expected: expected, Actual: actual, Difference: actual - expected, Remaining: remaining, AlreadyRecorded: l.Recorded, Deferred: deferred}
+	c := tagihanReviewComponent{MemberID: member, LoanID: l.ID, Name: name, Component: l.Type, Label: translate(lang, "review_"+map[string]string{"regular": "regular", "secondary_goods": "secondary", "goods_purchase_paylater": "purchase", "voucher": "voucher", "retirement": "retirement"}[l.Type]), Expected: expected, Actual: actual, Difference: actual - expected, Remaining: remaining, AlreadyRecorded: l.Recorded, Deferred: deferred}
 	result.Components = append(result.Components, c)
 	result.ExpectedTotal += expected
 	result.ActualTotal += actual
@@ -214,36 +214,36 @@ func addDetailedTagihanSummary(w *excelize.File, lang string) error {
 	end := max(2, len(loans))
 	// Remove earlier realization inputs and formulas before laying out loan-only summaries.
 	for i := range rows {
-		for col := 14; col <= 21; col++ {
+		for col := 15; col <= 22; col++ {
 			cell, _ := excelize.CoordinatesToCellName(col, i+1)
 			_ = w.SetCellFormula("Tagihan", cell, "")
 			_ = w.SetCellValue("Tagihan", cell, "")
 		}
 	}
 	for i, key := range reviewKeys[2:] {
-		cell, _ := excelize.CoordinatesToCellName(14+i, 1)
+		cell, _ := excelize.CoordinatesToCellName(15+i, 1)
 		_ = w.SetCellValue("Tagihan", cell, translate(lang, key))
 	}
 	_ = w.SetCellValue("Tagihan", "K1", translate(lang, "savings_auto_status"))
-	_ = w.SetCellValue("Tagihan", "M1", translate(lang, "suspension_collection_total"))
-	_ = w.SetCellValue("Tagihan", "R1", translate(lang, "review_actual_total"))
-	_ = w.SetCellValue("Tagihan", "S1", translate(lang, "review_difference"))
-	_ = w.SetCellValue("Tagihan", "W1", translate(lang, "detail_summary_help"))
+	_ = w.SetCellValue("Tagihan", "N1", translate(lang, "suspension_collection_total"))
+	_ = w.SetCellValue("Tagihan", "T1", translate(lang, "review_actual_total"))
+	_ = w.SetCellValue("Tagihan", "U1", translate(lang, "review_difference"))
+	_ = w.SetCellValue("Tagihan", "X1", translate(lang, "detail_summary_help"))
 	for i := 1; i < len(rows); i++ {
 		r := i + 1
 		_ = w.SetCellValue("Tagihan", fmt.Sprintf("K%d", r), "paid")
 		for j, kind := range reviewTypes[2:] {
-			cell, _ := excelize.CoordinatesToCellName(14+j, r)
+			cell, _ := excelize.CoordinatesToCellName(15+j, r)
 			formula := fmt.Sprintf(`SUMIFS('%s'!$M$2:$M$%d,'%s'!$B$2:$B$%d,A%d,'%s'!$U$2:$U$%d,"%s")`, loanDetailSheet, end, loanDetailSheet, end, r, loanDetailSheet, end, kind)
 			if err = w.SetCellFormula("Tagihan", cell, formula); err != nil {
 				return err
 			}
 		}
 		fees := fmt.Sprintf(`SUMIFS('%s'!$N$2:$N$%d,'%s'!$B$2:$B$%d,A%d)`, loanDetailSheet, end, loanDetailSheet, end, r)
-		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("R%d", r), fmt.Sprintf("SUM(E%d:F%d)+SUM(N%d:Q%d)+%s", r, r, r, r, fees))
-		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("S%d", r), fmt.Sprintf("R%d-J%d", r, r))
-		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("M%d", r), fmt.Sprintf("J%d", r))
+		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("T%d", r), fmt.Sprintf("SUM(E%d:F%d)+SUM(O%d:S%d)+%s", r, r, r, r, fees))
+		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("U%d", r), fmt.Sprintf("T%d-J%d", r, r))
+		_ = w.SetCellFormula("Tagihan", fmt.Sprintf("N%d", r), fmt.Sprintf("J%d", r))
 	}
-	_ = w.SetColWidth("Tagihan", "N", "S", 25)
+	_ = w.SetColWidth("Tagihan", "O", "U", 25)
 	return nil
 }

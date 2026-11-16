@@ -577,8 +577,8 @@ func (s *Server) createFinancialJournalTx(tx *sql.Tx, input accountingJournalInp
 }
 
 func (s *Server) accountingMappingCOACodeTx(tx *sql.Tx, transactionType, component, category, loanType, transactionDate string) (string, error) {
-	// Voucher uses the same Primer receivable and admin-fee income as Paylater.
-	if loanType == "voucher" {
+	// Manual-fee loans use the same Primer receivable and admin-fee income as Paylater.
+	if loanType == "voucher" || loanType == "retirement" {
 		loanType = "goods_purchase_paylater"
 	}
 	var code string

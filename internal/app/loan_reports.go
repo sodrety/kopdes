@@ -198,7 +198,11 @@ func (s *Server) loanRequestAcceptanceReportData(requestID, language string) (lo
 		if !errors.Is(err, sql.ErrNoRows) {
 			return loanReportData{}, err
 		}
-		report.FirstDueDate = firstScheduledLoanDueDate(report.Loan.StartDate)
+		if request.FirstDueDate != "" {
+			report.FirstDueDate = request.FirstDueDate
+		} else {
+			report.FirstDueDate = firstScheduledLoanDueDate(report.Loan.StartDate)
+		}
 	}
 	return report, nil
 }
@@ -237,7 +241,7 @@ func (s *Server) loanReportData(c *gin.Context) (loanReportData, bool) {
 		`SELECT m.member_no, COALESCE(NULLIF(TRIM(m.old_npp),''),m.member_no,''), m.full_name, COALESCE(m.member_type,'employee'), COALESCE(m.status,'active'),
 			COALESCE(r.purpose,''), COALESCE(r.requested_amount,l.approved_amount),
 			COALESCE(r.duration_months,l.duration_months), COALESCE(r.created_at,l.created_at),
-			COALESCE((SELECT i.due_date FROM loan_installments i WHERE i.loan_id=l.id ORDER BY i.installment_no LIMIT 1),'')
+			COALESCE((SELECT i.due_date FROM loan_installments i WHERE i.loan_id=l.id ORDER BY i.installment_no LIMIT 1),COALESCE(r.first_due_date,''),'')
 		FROM loans l
 		JOIN members m ON m.id=l.member_id
 		LEFT JOIN loan_requests r ON r.id=l.loan_request_id
@@ -613,6 +617,8 @@ func loanReportTypeLabel(loanType string) string {
 	switch loanType {
 	case "voucher":
 		return translate(bahasaLanguage, "loan_type_voucher")
+	case "retirement":
+		return translate(bahasaLanguage, "loan_type_retirement")
 	case "regular":
 		return "Pinjaman uang"
 	case "secondary_goods":

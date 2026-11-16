@@ -104,6 +104,7 @@ var (
 	errInvalidLoanApprovalCalculated      = errors.New("invalid calculated installment")
 	errInvalidLoanStartDate               = errors.New("invalid loan start date")
 	errInvalidLoanDisbursementDate        = errors.New("invalid loan disbursement date")
+	errInvalidFirstDueDate                = errors.New("first due date is before disbursement date")
 	errLoanPayoffExceedsDisbursement      = errors.New("loan payoff exceeds new disbursement amount")
 	errLoanStartDateLocked                = errors.New("loan start date locked")
 	errLoanStartDateStatus                = errors.New("loan start date status ineligible")
@@ -210,6 +211,10 @@ func (s *Server) disburseLoanRequest(c *gin.Context) {
 	)
 	if errors.Is(err, errInvalidLoanDisbursementDate) {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_loan_disbursement_date"))
+		return
+	}
+	if errors.Is(err, errInvalidFirstDueDate) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_first_due_date_range"))
 		return
 	}
 	if errors.Is(err, errLoanRequestNotReadyForDisbursement) {
@@ -387,6 +392,7 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		LoanType                string
 		RequestedAmount         int64
 		RequestedAdminFee       *int64
+		FirstDueDate            string
 		RequestedDurationMonths int
 		Status                  string
 		Stage                   string
@@ -404,9 +410,9 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		CreationSource          string
 	}
 	err = tx.QueryRow(
-		`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),requested_admin_fee,COALESCE(creation_source,'member') FROM loan_requests WHERE id = $1`+rowLockClause(s.db),
+		`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),requested_admin_fee,COALESCE(creation_source,'member'),COALESCE(first_due_date,'') FROM loan_requests WHERE id = $1`+rowLockClause(s.db),
 		requestID,
-	).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.RequestedAdminFee, &request.CreationSource)
+	).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.RequestedAdminFee, &request.CreationSource, &request.FirstDueDate)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
@@ -466,6 +472,12 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 			}
 			calc, err = calculateVoucherLoanSchedule(req.ApprovedAmount, *request.RequestedAdminFee, req.DurationMonths, startDate)
 			adminFeePolicy = voucherAdminFeePolicy
+		case "retirement":
+			if request.RequestedAdminFee == nil {
+				return LoanApprovalResult{}, errInvalidLoanApproval
+			}
+			calc, err = calculateRetirementLoanSchedule(req.ApprovedAmount, *request.RequestedAdminFee, req.DurationMonths, startDate)
+			adminFeePolicy = retirementAdminFeePolicy
 		case "goods_purchase_paylater":
 			calc, err = calculatePaylaterLoanSchedule(req.ApprovedAmount, req.DurationMonths, startDate)
 			adminFeePolicy = paylaterAdminFeePolicy
@@ -479,10 +491,17 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 		request.ProposedDurationMonths = req.DurationMonths
 		request.ProposedStartDate = startDate
 		request.ProposedAdminFeePolicy = adminFeePolicy
-		request.ProposedMonthlyAdminFee = &calc.MonthlyAdminFee
-		if adminFeePolicy == secondaryGoodsAdminFeePolicy || adminFeePolicy == paylaterAdminFeePolicy || adminFeePolicy == voucherAdminFeePolicy {
+		feeSnapshot := calc
+		request.ProposedMonthlyAdminFee = &feeSnapshot.MonthlyAdminFee
+		if adminFeePolicy == secondaryGoodsAdminFeePolicy || adminFeePolicy == paylaterAdminFeePolicy || adminFeePolicy == voucherAdminFeePolicy || adminFeePolicy == retirementAdminFeePolicy {
 			request.ProposedMonthlyAdminFee = nil
 		}
+		calc, err = buildLoanScheduleWithFirstDueDate(feeSnapshot.TotalObligation, req.DurationMonths, startDate, maxLoanDurationForType(request.LoanType), request.FirstDueDate)
+		if err != nil {
+			return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
+		}
+		calc.TotalAdminFee = feeSnapshot.TotalAdminFee
+		calc.MonthlyAdminFee = feeSnapshot.MonthlyAdminFee
 		request.ProposedTotalAdminFee = calc.TotalAdminFee
 		request.ProposedTotalObligation = calc.TotalObligation
 		request.ProposedCashCOACode = ""
@@ -550,10 +569,10 @@ func (s *Server) approveLoanRequestByID(requestID string, officer User, req appr
 	if request.ProposedAdminFeePolicy == secondaryGoodsAdminFeePolicy {
 		maxDuration = maxSecondaryGoodsDuration
 	}
-	if request.ProposedAdminFeePolicy == paylaterAdminFeePolicy || request.ProposedAdminFeePolicy == voucherAdminFeePolicy {
+	if request.ProposedAdminFeePolicy == paylaterAdminFeePolicy || request.ProposedAdminFeePolicy == voucherAdminFeePolicy || request.ProposedAdminFeePolicy == retirementAdminFeePolicy {
 		maxDuration = 1
 	}
-	if _, err := buildLoanScheduleFromObligation(request.ProposedTotalObligation, request.ProposedDurationMonths, request.ProposedStartDate, maxDuration); err != nil {
+	if _, err := buildLoanScheduleWithFirstDueDate(request.ProposedTotalObligation, request.ProposedDurationMonths, request.ProposedStartDate, maxDuration, request.FirstDueDate); err != nil {
 		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
 	}
 
@@ -631,8 +650,9 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, req dis
 		CreationSource          string
 		SettleOutstandingLoans  bool
 		LoanPayoffAmount        int64
+		FirstDueDate            string
 	}
-	err = tx.QueryRow(`SELECT member_id,loan_type,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(disbursement_date,''),COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),COALESCE(creation_source,'member'),COALESCE(settle_outstanding_loans,FALSE),COALESCE(loan_payoff_amount,0) FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.Status, &request.Stage, &request.ReviewedBy, &request.DisbursementDate, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.CreationSource, &request.SettleOutstandingLoans, &request.LoanPayoffAmount)
+	err = tx.QueryRow(`SELECT member_id,loan_type,status,COALESCE(current_approval_stage,''),COALESCE(reviewed_by,''),COALESCE(disbursement_date,''),COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),COALESCE(creation_source,'member'),COALESCE(settle_outstanding_loans,FALSE),COALESCE(loan_payoff_amount,0),COALESCE(first_due_date,'') FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.Status, &request.Stage, &request.ReviewedBy, &request.DisbursementDate, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.CreationSource, &request.SettleOutstandingLoans, &request.LoanPayoffAmount, &request.FirstDueDate)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
@@ -672,10 +692,13 @@ func (s *Server) disburseLoanRequestByID(requestID string, officer User, req dis
 	if request.ProposedAdminFeePolicy == secondaryGoodsAdminFeePolicy {
 		maxDuration = maxSecondaryGoodsDuration
 	}
-	if request.ProposedAdminFeePolicy == paylaterAdminFeePolicy || request.ProposedAdminFeePolicy == voucherAdminFeePolicy {
+	if request.ProposedAdminFeePolicy == paylaterAdminFeePolicy || request.ProposedAdminFeePolicy == voucherAdminFeePolicy || request.ProposedAdminFeePolicy == retirementAdminFeePolicy {
 		maxDuration = 1
 	}
-	calc, err := buildLoanScheduleFromObligation(request.ProposedTotalObligation, request.ProposedDurationMonths, dateText, maxDuration)
+	calc, err := buildLoanScheduleWithFirstDueDate(request.ProposedTotalObligation, request.ProposedDurationMonths, dateText, maxDuration, request.FirstDueDate)
+	if errors.Is(err, errLoanFirstDueDateBeforeStart) {
+		return LoanApprovalResult{}, errInvalidFirstDueDate
+	}
 	if err != nil {
 		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
 	}
@@ -944,13 +967,17 @@ func (s *Server) correctLoanStartDateByID(loanID, adminID, value string) (Loan, 
 	if adminFeePolicy == secondaryGoodsAdminFeePolicy {
 		maxDuration = maxSecondaryGoodsDuration
 	}
-	if adminFeePolicy == paylaterAdminFeePolicy || adminFeePolicy == voucherAdminFeePolicy {
+	if adminFeePolicy == paylaterAdminFeePolicy || adminFeePolicy == voucherAdminFeePolicy || adminFeePolicy == retirementAdminFeePolicy {
 		maxDuration = 1
 	}
 	if legacyTerms || adminFeePolicy == "legacy_flat_monthly" {
 		maxDuration = int(^uint(0) >> 1)
 	}
-	calc, e := buildLoanScheduleFromObligation(totalObligation, duration, value, maxDuration)
+	var firstDueDate string
+	if e = tx.QueryRow(`SELECT COALESCE(first_due_date,'') FROM loan_requests WHERE id=(SELECT loan_request_id FROM loans WHERE id=$1)`, loanID).Scan(&firstDueDate); e != nil {
+		return Loan{}, e
+	}
+	calc, e := buildLoanScheduleWithFirstDueDate(totalObligation, duration, value, maxDuration, firstDueDate)
 	if e != nil {
 		return Loan{}, errInvalidLoanStartDate
 	}

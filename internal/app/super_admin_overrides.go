@@ -249,6 +249,7 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 		LoanType                string
 		RequestedAmount         int64
 		RequestedAdminFee       *int64
+		FirstDueDate            string
 		RequestedDurationMonths int
 		Status                  string
 		Stage                   string
@@ -265,7 +266,7 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 		ProposedAdminFeeCOACode string
 		CreationSource          string
 	}
-	err = tx.QueryRow(`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),requested_admin_fee,COALESCE(creation_source,'member') FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.RequestedAdminFee, &request.CreationSource)
+	err = tx.QueryRow(`SELECT member_id,loan_type,requested_amount,duration_months,status,COALESCE(current_approval_stage,''),created_at,COALESCE(proposed_approved_amount,0),COALESCE(proposed_duration_months,0),proposed_start_date,COALESCE(proposed_admin_fee_policy,''),proposed_monthly_admin_fee,COALESCE(proposed_total_admin_fee,0),COALESCE(proposed_total_obligation,0),COALESCE(proposed_cash_coa_code,''),COALESCE(proposed_loan_coa_code,''),COALESCE(proposed_admin_fee_coa_code,''),requested_admin_fee,COALESCE(creation_source,'member'),COALESCE(first_due_date,'') FROM loan_requests WHERE id=$1`+rowLockClause(s.db), requestID).Scan(&request.MemberID, &request.LoanType, &request.RequestedAmount, &request.RequestedDurationMonths, &request.Status, &request.Stage, &request.CreatedAt, &request.ProposedApprovedAmount, &request.ProposedDurationMonths, &request.ProposedStartDate, &request.ProposedAdminFeePolicy, &request.ProposedMonthlyAdminFee, &request.ProposedTotalAdminFee, &request.ProposedTotalObligation, &request.ProposedCashCOACode, &request.ProposedLoanCOACode, &request.ProposedAdminFeeCOACode, &request.RequestedAdminFee, &request.CreationSource, &request.FirstDueDate)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LoanApprovalResult{}, errLoanRequestNotFound
 	}
@@ -332,6 +333,12 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 			}
 			calc, err = calculateVoucherLoanSchedule(amount, *request.RequestedAdminFee, duration, startDate)
 			adminFeePolicy = voucherAdminFeePolicy
+		case "retirement":
+			if request.RequestedAdminFee == nil {
+				return LoanApprovalResult{}, errInvalidLoanApproval
+			}
+			calc, err = calculateRetirementLoanSchedule(amount, *request.RequestedAdminFee, duration, startDate)
+			adminFeePolicy = retirementAdminFeePolicy
 		case "goods_purchase_paylater":
 			calc, err = calculatePaylaterLoanSchedule(amount, duration, startDate)
 			adminFeePolicy = paylaterAdminFeePolicy
@@ -345,14 +352,21 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 		request.ProposedDurationMonths = duration
 		request.ProposedStartDate = startDate
 		request.ProposedAdminFeePolicy = adminFeePolicy
+		feeSnapshot := calc
 		if adminFeePolicy == regularLoanAdminFeePolicy {
-			monthlyAdminFee := calc.MonthlyAdminFee
-			snapshotMonthlyAdminFee = &monthlyAdminFee
+			request.ProposedMonthlyAdminFee = &feeSnapshot.MonthlyAdminFee
+		} else {
+			request.ProposedMonthlyAdminFee = snapshotMonthlyAdminFee
 		}
-		request.ProposedMonthlyAdminFee = snapshotMonthlyAdminFee
-		if adminFeePolicy == secondaryGoodsAdminFeePolicy || adminFeePolicy == paylaterAdminFeePolicy || adminFeePolicy == voucherAdminFeePolicy {
+		if adminFeePolicy == secondaryGoodsAdminFeePolicy || adminFeePolicy == paylaterAdminFeePolicy || adminFeePolicy == voucherAdminFeePolicy || adminFeePolicy == retirementAdminFeePolicy {
 			request.ProposedMonthlyAdminFee = nil
 		}
+		calc, err = buildLoanScheduleWithFirstDueDate(feeSnapshot.TotalObligation, duration, startDate, maxLoanDurationForType(request.LoanType), request.FirstDueDate)
+		if err != nil {
+			return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
+		}
+		calc.TotalAdminFee = feeSnapshot.TotalAdminFee
+		calc.MonthlyAdminFee = feeSnapshot.MonthlyAdminFee
 		request.ProposedTotalAdminFee = calc.TotalAdminFee
 		request.ProposedTotalObligation = calc.TotalObligation
 		if _, err := tx.Exec(`UPDATE loan_requests SET proposed_approved_amount=$1,proposed_duration_months=$2,proposed_start_date=$3,proposed_admin_fee_policy=$4,proposed_monthly_admin_fee=$5,proposed_total_admin_fee=$6,proposed_total_obligation=$7,updated_at=CURRENT_TIMESTAMP WHERE id=$8 AND status='pending'`, amount, duration, startDate, adminFeePolicy, request.ProposedMonthlyAdminFee, request.ProposedTotalAdminFee, request.ProposedTotalObligation, requestID); err != nil {
@@ -374,10 +388,10 @@ func (s *Server) overrideLoanRequestByID(requestID string, admin User, req appro
 	if request.ProposedAdminFeePolicy == secondaryGoodsAdminFeePolicy {
 		maxDuration = maxSecondaryGoodsDuration
 	}
-	if request.ProposedAdminFeePolicy == paylaterAdminFeePolicy || request.ProposedAdminFeePolicy == voucherAdminFeePolicy {
+	if request.ProposedAdminFeePolicy == paylaterAdminFeePolicy || request.ProposedAdminFeePolicy == voucherAdminFeePolicy || request.ProposedAdminFeePolicy == retirementAdminFeePolicy {
 		maxDuration = 1
 	}
-	calc, err = buildLoanScheduleFromObligation(request.ProposedTotalObligation, request.ProposedDurationMonths, request.ProposedStartDate, maxDuration)
+	calc, err = buildLoanScheduleWithFirstDueDate(request.ProposedTotalObligation, request.ProposedDurationMonths, request.ProposedStartDate, maxDuration, request.FirstDueDate)
 	if err != nil {
 		return LoanApprovalResult{}, errInvalidLoanApprovalCalculated
 	}

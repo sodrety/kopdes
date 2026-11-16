@@ -151,7 +151,7 @@
   }
 
   function loanTypeMaxDuration(type) {
-    if (type === "goods_purchase_paylater" || type === "voucher") {
+    if (type === "goods_purchase_paylater" || type === "voucher" || type === "retirement") {
       return 1;
     }
     if (type === "secondary_goods") {
@@ -170,7 +170,7 @@
     var type = formLoanType(form);
     var maxDuration = loanTypeMaxDuration(type);
     durationField.max = String(maxDuration);
-    if (type === "goods_purchase_paylater" || type === "voucher") {
+    if (type === "goods_purchase_paylater" || type === "voucher" || type === "retirement") {
       durationField.value = "1";
     } else if (Number(durationField.value || "0") > maxDuration) {
       durationField.value = String(maxDuration);
@@ -187,6 +187,27 @@
     if (type === "voucher") {
       var nominalDigits = rupiahDigits(form.dataset.voucherAdminFee || "");
       fee = nominalDigits === null || nominalDigits === "" ? null : {monthly: null, total: BigInt(canonicalDigits(nominalDigits))};
+    } else if (type === "retirement") {
+      var manualFeeField = form.querySelector("[data-manual-admin-fee]");
+      var manualFeeWrapper = form.querySelector("[data-manual-admin-fee-wrapper]");
+      if (manualFeeWrapper) {
+        manualFeeWrapper.hidden = false;
+      }
+      if (manualFeeField) {
+        manualFeeField.required = true;
+      }
+      var manualFeeDigits = rupiahDigits(manualFeeField ? manualFeeField.value : (form.dataset.manualAdminFeeValue || ""));
+      fee = manualFeeDigits === null || manualFeeDigits === "" ? null : {monthly: null, total: BigInt(canonicalDigits(manualFeeDigits))};
+    } else {
+      var inactiveFeeField = form.querySelector("[data-manual-admin-fee]");
+      var inactiveFeeWrapper = form.querySelector("[data-manual-admin-fee-wrapper]");
+      if (inactiveFeeWrapper) {
+        inactiveFeeWrapper.hidden = true;
+      }
+      if (inactiveFeeField) {
+        inactiveFeeField.required = false;
+        inactiveFeeField.value = "";
+      }
     }
     if (!fee) {
       output.hidden = true;

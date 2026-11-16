@@ -647,6 +647,7 @@ var migrations = []migration{
 	}},
 	{Version: 51, Name: "auto_create_imported_voucher_paylater_loans"},
 	{Version: 52, Name: "preserve_loan_approval_integrity_for_auto_imports"},
+	{Version: 53, Name: "add_retirement_loans_and_first_due_dates"},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -758,7 +759,7 @@ func migrationApplied(db *sql.DB, version int) (bool, error) {
 
 func applyMigration(db *sql.DB, migration migration) error {
 	isSQLite := strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
-	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19 || migration.Version == 22 || migration.Version == 23 || migration.Version == 26 || migration.Version == 28 || migration.Version == 29 || migration.Version == 30 || migration.Version == 31 || migration.Version == 43) {
+	if isSQLite && (migration.Version == 9 || migration.Version == 12 || migration.Version == 19 || migration.Version == 22 || migration.Version == 23 || migration.Version == 26 || migration.Version == 28 || migration.Version == 29 || migration.Version == 30 || migration.Version == 31 || migration.Version == 43 || migration.Version == 53) {
 		conn, err := db.Conn(context.Background())
 		if err != nil {
 			return err
@@ -1015,6 +1016,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 	}
 	if migration.Version == 52 {
 		if err := refreshAutoApprovedImportedLoanGuards(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 53 {
+		if err := addRetirementLoanSupport(tx, isSQLite); err != nil {
 			return err
 		}
 	}

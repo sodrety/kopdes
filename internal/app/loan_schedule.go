@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -17,8 +18,11 @@ const (
 	secondaryGoodsAdminFeePolicy = "secondary_goods_one_time_v1"
 	paylaterAdminFeePolicy       = "goods_purchase_paylater_one_time_v1"
 	voucherAdminFeePolicy        = "voucher_nominal_one_time_v1"
+	retirementAdminFeePolicy     = "retirement_manual_one_time_v1"
 	regularLoanFirstTierLimit    = int64(25_000_000)
 )
+
+var errLoanFirstDueDateBeforeStart = errors.New("first due date cannot be before the loan start date")
 
 var jakartaLocation = func() *time.Location {
 	location, err := time.LoadLocation("Asia/Jakarta")
@@ -78,6 +82,29 @@ func buildLoanScheduleFromObligation(totalObligation int64, durationMonths int, 
 	return LoanScheduleCalculation{TotalObligation: totalObligation, Installments: installments}, nil
 }
 
+func buildLoanScheduleWithFirstDueDate(totalObligation int64, durationMonths int, startDate string, maxDuration int, firstDueDate string) (LoanScheduleCalculation, error) {
+	calc, err := buildLoanScheduleFromObligation(totalObligation, durationMonths, startDate, maxDuration)
+	if err != nil || strings.TrimSpace(firstDueDate) == "" {
+		return calc, err
+	}
+
+	start, err := parseLoanDate(startDate)
+	if err != nil {
+		return LoanScheduleCalculation{}, err
+	}
+	firstDue, err := parseLoanDate(strings.TrimSpace(firstDueDate))
+	if err != nil {
+		return LoanScheduleCalculation{}, err
+	}
+	if firstDue.Before(start) {
+		return LoanScheduleCalculation{}, errLoanFirstDueDateBeforeStart
+	}
+	for index := range calc.Installments {
+		calc.Installments[index].DueDate = loanDueDateFromFirstDueDate(firstDue, index+1).Format("2006-01-02")
+	}
+	return calc, nil
+}
+
 func validateLoanFeeSnapshot(policy string, principal int64, durationMonths int, monthlyAdminFee *int64, totalAdminFee, totalObligation int64) error {
 	if principal <= 0 || durationMonths <= 0 || totalAdminFee < 0 || totalObligation <= 0 || principal > math.MaxInt64-totalAdminFee || principal+totalAdminFee != totalObligation {
 		return errors.New("invalid loan fee snapshot totals")
@@ -102,6 +129,10 @@ func validateLoanFeeSnapshot(policy string, principal int64, durationMonths int,
 		if monthlyAdminFee != nil || durationMonths != 1 {
 			return errors.New("invalid Voucher Loan fee snapshot")
 		}
+	case retirementAdminFeePolicy:
+		if monthlyAdminFee != nil || durationMonths != 1 {
+			return errors.New("invalid Retirement Loan fee snapshot")
+		}
 	case "legacy_flat_monthly":
 		// Historical monthly rates were not snapshotted reliably. The preserved
 		// total is authoritative; no derived monthly value may be invented.
@@ -117,6 +148,15 @@ func validateLoanFeeSnapshot(policy string, principal int64, durationMonths int,
 func calculateVoucherLoanSchedule(principal, adminFee int64, durationMonths int, startDate string) (LoanScheduleCalculation, error) {
 	if principal <= 0 || adminFee < 0 || principal > math.MaxInt64-adminFee || durationMonths != 1 {
 		return LoanScheduleCalculation{}, errors.New("invalid voucher loan terms")
+	}
+	calc, err := buildLoanScheduleFromObligation(principal+adminFee, 1, startDate, 1)
+	calc.TotalAdminFee = adminFee
+	return calc, err
+}
+
+func calculateRetirementLoanSchedule(principal, adminFee int64, durationMonths int, startDate string) (LoanScheduleCalculation, error) {
+	if principal <= 0 || adminFee < 0 || principal > math.MaxInt64-adminFee || durationMonths != 1 {
+		return LoanScheduleCalculation{}, errors.New("invalid Retirement loan terms")
 	}
 	calc, err := buildLoanScheduleFromObligation(principal+adminFee, 1, startDate, 1)
 	calc.TotalAdminFee = adminFee
@@ -259,6 +299,13 @@ func loanDueDate(start time.Time, installmentNumber int) time.Time {
 	}
 	targetMonthOffset := firstDueMonthOffset + installmentNumber - 1
 	return time.Date(start.Year(), start.Month()+time.Month(targetMonthOffset), 20, 0, 0, 0, 0, jakartaLocation)
+}
+
+func loanDueDateFromFirstDueDate(firstDueDate time.Time, installmentNumber int) time.Time {
+	targetMonth := time.Date(firstDueDate.Year(), firstDueDate.Month()+time.Month(installmentNumber-1), 1, 0, 0, 0, 0, jakartaLocation)
+	lastDay := time.Date(targetMonth.Year(), targetMonth.Month()+1, 0, 0, 0, 0, 0, jakartaLocation).Day()
+	day := min(firstDueDate.Day(), lastDay)
+	return time.Date(targetMonth.Year(), targetMonth.Month(), day, 0, 0, 0, 0, jakartaLocation)
 }
 
 func calculateLoanSchedule(principal int64, durationMonths, interestRateBPS int, startDate string) (LoanScheduleCalculation, error) {
