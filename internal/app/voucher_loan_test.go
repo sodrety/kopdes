@@ -26,8 +26,9 @@ func voucherWorkbook(t *testing.T, fixture testFixture, token string, rows [][]a
 	defer workbook.Close()
 	version, _ := workbook.GetCellValue("Petunjuk", "B1")
 	header, _ := workbook.GetCellValue("Pengajuan Pinjaman", "F4")
-	if version != "2" || header != "Biaya Admin (Nominal)" {
-		t.Fatalf("unexpected template: version=%q fee header=%q", version, header)
+	firstDueHeader, _ := workbook.GetCellValue("Pengajuan Pinjaman", "G4")
+	if version != "3" || header != "Biaya Admin (Nominal)" || firstDueHeader != "Tanggal Jatuh Tempo Pertama" {
+		t.Fatalf("unexpected template: version=%q fee header=%q first due header=%q", version, header, firstDueHeader)
 	}
 	for index, row := range rows {
 		if err := workbook.SetSheetRow("Pengajuan Pinjaman", fmt.Sprintf("A%d", index+5), &row); err != nil {
@@ -205,7 +206,7 @@ func TestVoucherWorkbookFeeValidation(t *testing.T) {
 		t.Fatalf("invalid Voucher rows must fail preview: %v %d %s", err, preview.Code, preview.Body.String())
 	}
 	for index, row := range batch.Rows[:5] {
-		if !strings.Contains(strings.Join(row.Errors, ","), "admin_issue_voucher_fee") {
+		if !strings.Contains(strings.Join(row.Errors, ","), "admin_issue_manual_admin_fee") {
 			t.Fatalf("row %d missing fee error: %+v", index, row)
 		}
 	}

@@ -214,7 +214,7 @@ func addDetailedTagihanSummary(w *excelize.File, lang string) error {
 	end := max(2, len(loans))
 	// Remove earlier realization inputs and formulas before laying out loan-only summaries.
 	for i := range rows {
-		for col := 15; col <= 22; col++ {
+		for col := 15; col <= 23; col++ {
 			cell, _ := excelize.CoordinatesToCellName(col, i+1)
 			_ = w.SetCellFormula("Tagihan", cell, "")
 			_ = w.SetCellValue("Tagihan", cell, "")

@@ -97,7 +97,7 @@ func TestTagihanReviewedPartialAmountsPreviewAndJournals(t *testing.T) {
 			t.Fatal("unexpected savings realization input", header)
 		}
 	}
-	if rows[0][13] != "Actual regular loan" || rows[0][17] != "Actual collection total" {
+	if rows[0][14] != "Actual regular loan" || rows[0][19] != "Actual collection total" || rows[0][20] != "Actual minus expected" || rows[0][22] != "" {
 		t.Fatal("wrong loan-only summary layout", rows[0])
 	}
 
