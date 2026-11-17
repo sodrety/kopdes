@@ -162,7 +162,7 @@ func (s *Server) adminJournalsPage(c *gin.Context) {
 				respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 				return
 			}
-			workbook, err := financialJournalsWorkbook(languageFromRequest(c), entries)
+			workbook, err := financialJournalsWorkbook(languageFromRequest(c), entries, dateFrom, dateTo)
 			if err != nil {
 				respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 				return

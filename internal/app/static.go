@@ -2996,6 +2996,9 @@ td:nth-child(n+2):not(.review-cell) {
   .auth-form-panel {
     padding: 34px 24px;
   }
+  .auth-form-panel .brand-name {
+    color: var(--ink);
+  }
   .balance-report-card-header {
     align-items: flex-start;
     flex-direction: column;

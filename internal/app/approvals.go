@@ -139,7 +139,12 @@ func createStageNotification(tx *sql.Tx, requestType, requestID, stage, link str
 	var rows *sql.Rows
 	var err error
 	if stage == approvalStageManager {
-		rows, err = tx.Query(`SELECT u.id FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE WHERE oa.role='manager' AND oa.active=TRUE AND m.status='active' AND u.active=TRUE`)
+		managerStageRecipients := `SELECT u.id FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE WHERE oa.role='manager' AND oa.active=TRUE AND m.status='active' AND u.active=TRUE`
+		if requestType == "loan" || requestType == "withdrawal" {
+			// Admin accounts can act on manager-stage requests and need the same new-request alert.
+			managerStageRecipients += ` UNION SELECT id FROM users WHERE role='admin' AND active=TRUE AND historical_identity=FALSE`
+		}
+		rows, err = tx.Query(managerStageRecipients)
 	} else {
 		rows, err = tx.Query(`SELECT u.id FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE WHERE oa.role=$1 AND oa.active=TRUE AND m.status='active' AND u.active=TRUE`, stage)
 	}
