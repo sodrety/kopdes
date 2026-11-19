@@ -3,8 +3,10 @@ package app
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -59,10 +61,12 @@ type rejectWithdrawalInput struct {
 }
 
 type approveWithdrawalInput struct {
-	Source      string `json:"source" form:"source"`
-	COACode     string `json:"coa_code" form:"coa_code"`
-	CashCOACode string `json:"cash_coa_code" form:"cash_coa_code"`
-	Note        string `json:"note" form:"note"`
+	Source                 string `json:"source" form:"source"`
+	COACode                string `json:"coa_code" form:"coa_code"`
+	CashCOACode            string `json:"cash_coa_code" form:"cash_coa_code"`
+	Amount                 int64  `json:"amount" form:"amount"`
+	Note                   string `json:"note" form:"note"`
+	AmountChangeNoteFormat string `json:"-" form:"-"`
 }
 
 type disburseWithdrawalRequestInput struct {
@@ -81,6 +85,8 @@ var (
 	errWithdrawalRequestNotReadyForDisbursement = errors.New("withdrawal request is not ready for disbursement")
 	errInvalidWithdrawalDisbursementDate        = errors.New("invalid withdrawal disbursement date")
 	errWithdrawalDisburserRole                  = errors.New("only bendahara can disburse withdrawals")
+	errWithdrawalFrequencyLimit                 = errors.New("withdrawal frequency limit exceeded")
+	errWithdrawalAmountManagerOnly              = errors.New("only the manager can change a withdrawal amount")
 )
 
 func (s *Server) submitWithdrawalRequest(c *gin.Context) {
@@ -113,6 +119,10 @@ func (s *Server) submitWithdrawalRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errInsufficientSukarelaBalance) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_amount_over_available"))
+		return
+	}
+	if errors.Is(err, errWithdrawalFrequencyLimit) {
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_frequency_limit"))
 		return
 	}
 	if isMonetaryAggregateCapacityError(err) {
@@ -184,6 +194,10 @@ func respondWithdrawalRequestError(c *gin.Context, err error) {
 		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_member_deactivation_pending"))
 	case errors.Is(err, errInsufficientSukarelaBalance):
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_amount_over_available"))
+	case errors.Is(err, errWithdrawalFrequencyLimit):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_frequency_limit"))
+	case errors.Is(err, errWithdrawalAmountManagerOnly):
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(languageFromRequest(c), "error_withdrawal_amount_manager_only"))
 	case errors.Is(err, errWithdrawalRequestNotFound):
 		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_withdrawal_request_not_found"))
 	case errors.Is(err, errWithdrawalRequestNotPending):
@@ -248,6 +262,8 @@ func (s *Server) disburseWithdrawalRequest(c *gin.Context) {
 		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_inactive_withdrawal_member"))
 	case errors.Is(err, errInsufficientSukarelaBalance):
 		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_withdrawal_amount_over_available"))
+	case errors.Is(err, errWithdrawalFrequencyLimit):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_withdrawal_frequency_limit"))
 	case err != nil:
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
 	default:
@@ -263,11 +279,32 @@ func (s *Server) approveWithdrawalRequest(c *gin.Context) {
 	}
 
 	var req approveWithdrawalInput
-	if err := c.ShouldBind(&req); err != nil {
+	var bindErr error
+	if isBrowserFormRequest(c) {
+		if bindErr = c.Request.ParseForm(); bindErr == nil {
+			if _, includesAmount := c.Request.PostForm["amount"]; includesAmount {
+				bindErr = bindRequestWithRupiahAmount(c, &req, "amount")
+			} else {
+				bindErr = c.ShouldBind(&req)
+			}
+		}
+	} else {
+		bindErr = c.ShouldBind(&req)
+	}
+	if errors.Is(bindErr, errInvalidRupiahAmount) {
+		invalidRupiahAmountResponse(c)
+		return
+	}
+	if bindErr != nil {
 		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid approval")
 		return
 	}
+	req.AmountChangeNoteFormat = translate(languageFromRequest(c), "withdrawal_amount_changed_note")
 	request, err := s.approveWithdrawalRequestByID(c.Param("id"), user, req)
+	if errors.Is(err, errInvalidWithdrawalRequest) {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_withdrawal_request"))
+		return
+	}
 	if errors.Is(err, errWithdrawalRequestNotPending) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", "Only pending withdrawal requests can be approved")
 		return
@@ -282,6 +319,14 @@ func (s *Server) approveWithdrawalRequest(c *gin.Context) {
 	}
 	if errors.Is(err, errInsufficientSukarelaBalance) {
 		respondError(c, http.StatusBadRequest, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_amount_over_available"))
+		return
+	}
+	if errors.Is(err, errWithdrawalFrequencyLimit) {
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(languageFromRequest(c), "error_withdrawal_frequency_limit"))
+		return
+	}
+	if errors.Is(err, errWithdrawalAmountManagerOnly) {
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(languageFromRequest(c), "error_withdrawal_amount_manager_only"))
 		return
 	}
 	if errors.Is(err, errWithdrawalRequestNotFound) {
@@ -382,6 +427,9 @@ func (s *Server) insertWithdrawalRequestAs(member Member, req withdrawalRequestI
 	if pendingDeactivation {
 		return WithdrawalRequest{}, errMemberDeactivationPending
 	}
+	if err := validateWithdrawalFrequency(tx, member.ID, time.Now().In(jakartaLocation).Format("2006-01-02"), ""); err != nil {
+		return WithdrawalRequest{}, err
+	}
 	summary, err := savingSummary(tx, member.ID)
 	if err != nil {
 		return WithdrawalRequest{}, err
@@ -425,6 +473,74 @@ func (s *Server) insertWithdrawalRequestAs(member Member, req withdrawalRequestI
 		return WithdrawalRequest{}, err
 	}
 	return request, nil
+}
+
+func validateWithdrawalFrequency(tx *sql.Tx, memberID, withdrawalDate, excludeRequestID string) error {
+	date, err := parseLoanDate(withdrawalDate)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT record_date FROM saving_records WHERE member_id=$1 AND type='withdrawal' AND category='sukarela'`, memberID)
+	if err != nil {
+		return err
+	}
+	withdrawalDates := make([]string, 0)
+	for rows.Next() {
+		var recordDate string
+		if err := rows.Scan(&recordDate); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		withdrawalDates = append(withdrawalDates, recordDate)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	rows, err = tx.Query(`SELECT SUBSTR(CAST(wr.created_at AS TEXT),1,10)
+		FROM withdrawal_requests wr
+		JOIN withdrawal_reservations r ON r.request_id=wr.id AND r.member_id=wr.member_id
+		WHERE r.member_id=$1 AND r.status='active' AND wr.id<>$2 AND wr.status IN ('pending','approved')`, memberID, excludeRequestID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var requestDate string
+		if err := rows.Scan(&requestDate); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		withdrawalDates = append(withdrawalDates, requestDate)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	windowStart := date.AddDate(0, -12, 0)
+	withdrawalsInWindow := 0
+	for _, withdrawalDate := range withdrawalDates {
+		previousDate, err := parseLoanDate(withdrawalDate)
+		if err != nil {
+			return err
+		}
+		if previousDate.After(date) || previousDate.AddDate(0, 6, 0).After(date) {
+			return errWithdrawalFrequencyLimit
+		}
+		if !previousDate.Before(windowStart) {
+			withdrawalsInWindow++
+		}
+	}
+	if withdrawalsInWindow >= 2 {
+		return errWithdrawalFrequencyLimit
+	}
+	return nil
 }
 
 func (s *Server) updateOfficerWithdrawalRequest(requestID string, req withdrawalRequestInput) (WithdrawalRequest, error) {
@@ -603,7 +719,57 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	if request.CurrentApprovalStage != stageRole {
 		return WithdrawalRequest{}, errWrongApprovalStage
 	}
-	if err := insertApprovalDecision(tx, "withdrawal_request_approvals", requestID, officer, "approved", req.Note, ""); err != nil {
+	if req.Amount < 0 {
+		return WithdrawalRequest{}, errInvalidWithdrawalRequest
+	}
+	if req.Amount > 0 && stageRole != approvalStageManager {
+		return WithdrawalRequest{}, errWithdrawalAmountManagerOnly
+	}
+	approvalNote := strings.TrimSpace(req.Note)
+	if stageRole == approvalStageManager {
+		if err := validateWithdrawalFrequency(tx, request.MemberID, time.Now().In(jakartaLocation).Format("2006-01-02"), requestID); err != nil {
+			return WithdrawalRequest{}, err
+		}
+		if req.Amount > 0 && req.Amount != request.Amount {
+			previousAmount := request.Amount
+			summary, err := savingSummary(tx, request.MemberID)
+			if err != nil {
+				return WithdrawalRequest{}, err
+			}
+			var reserved int64
+			if err := tx.QueryRow(`SELECT COALESCE(SUM(amount),0) FROM withdrawal_reservations WHERE member_id=$1 AND status='active' AND request_id<>$2`, request.MemberID, requestID).Scan(&reserved); err != nil {
+				return WithdrawalRequest{}, err
+			}
+			if req.Amount > availableWithdrawalAmountForSukarelaBalance(summary.SukarelaBalance, reserved) {
+				return WithdrawalRequest{}, errInsufficientSukarelaBalance
+			}
+			result, err := tx.Exec(`UPDATE withdrawal_requests SET amount=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='pending' AND current_approval_stage='manager'`, req.Amount, requestID)
+			if err != nil {
+				return WithdrawalRequest{}, err
+			}
+			if affected, _ := result.RowsAffected(); affected != 1 {
+				return WithdrawalRequest{}, errWithdrawalRequestNotPending
+			}
+			result, err = tx.Exec(`UPDATE withdrawal_reservations SET amount=$1 WHERE request_id=$2 AND status='active'`, req.Amount, requestID)
+			if err != nil {
+				return WithdrawalRequest{}, err
+			}
+			if affected, _ := result.RowsAffected(); affected != 1 {
+				return WithdrawalRequest{}, errWithdrawalRequestNotPending
+			}
+			request.Amount = req.Amount
+			amountChangeNoteFormat := req.AmountChangeNoteFormat
+			if amountChangeNoteFormat == "" {
+				amountChangeNoteFormat = translate("en", "withdrawal_amount_changed_note")
+			}
+			amountChangeNote := fmt.Sprintf(amountChangeNoteFormat, previousAmount, request.Amount)
+			if approvalNote != "" {
+				approvalNote += "\n"
+			}
+			approvalNote += amountChangeNote
+		}
+	}
+	if err := insertApprovalDecision(tx, "withdrawal_request_approvals", requestID, officer, "approved", approvalNote, ""); err != nil {
 		return WithdrawalRequest{}, err
 	}
 	if err := resolveRequestNotifications(tx, "withdrawal", requestID); err != nil {
@@ -721,6 +887,9 @@ func (s *Server) disburseWithdrawalRequestByID(requestID string, officer User, d
 	}
 	if memberStatus != "active" {
 		return WithdrawalRequest{}, errInactiveWithdrawalMember
+	}
+	if err := validateWithdrawalFrequency(tx, request.MemberID, dateText, requestID); err != nil {
+		return WithdrawalRequest{}, err
 	}
 	summary, err := savingSummary(tx, request.MemberID)
 	if err != nil {
