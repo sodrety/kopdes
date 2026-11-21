@@ -888,7 +888,8 @@ func createAdminLoanBatchNotification(tx *sql.Tx, batchID string, createdCount i
 	if _, err := tx.Exec(`INSERT INTO notification_events (id,event_type,request_type,request_id,payload) VALUES ($1,'approval_batch_ready','loan_batch',$2,$3)`, eventID, batchID, fmt.Sprintf(`{"count":%d,"stage":"manager"}`, createdCount)); err != nil {
 		return err
 	}
-	rows, err := tx.Query(`SELECT u.id FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE WHERE oa.role IN ('manager','admin') AND oa.active=TRUE AND m.status='active' AND u.active=TRUE`)
+	rows, err := tx.Query(`SELECT u.id FROM officer_appointments oa JOIN members m ON m.id=oa.member_id JOIN users u ON u.member_id=m.id AND u.historical_identity=FALSE WHERE oa.role IN ('manager','admin') AND oa.active=TRUE AND m.status='active' AND u.active=TRUE
+		UNION SELECT id FROM users WHERE role IN ('admin','super_admin') AND active=TRUE AND historical_identity=FALSE`)
 	if err != nil {
 		return err
 	}

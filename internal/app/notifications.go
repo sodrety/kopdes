@@ -108,10 +108,11 @@ func notificationAudienceFromPath(path string) string {
 
 func notificationAudience(c *gin.Context, user User) string {
 	audience := notificationAudienceFromPath(c.Request.URL.Path)
-	if value := strings.TrimSpace(c.Query("audience")); value == "member" || (value == "officer" && isOfficerRole(user.Role)) {
+	isSuperAdmin := user.Role == "super_admin"
+	if value := strings.TrimSpace(c.Query("audience")); value == "member" || (value == "officer" && (isOfficerRole(user.Role) || isSuperAdmin)) {
 		audience = value
 	}
-	if audience == "officer" && !isOfficerRole(user.Role) {
+	if audience == "officer" && !isOfficerRole(user.Role) && !isSuperAdmin {
 		return "member"
 	}
 	return audience
