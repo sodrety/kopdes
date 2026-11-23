@@ -206,8 +206,8 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 53 {
-		t.Fatalf("expected fifty-three tracked migrations, got %d", migrationCount)
+	if migrationCount != 54 {
+		t.Fatalf("expected fifty-four tracked migrations, got %d", migrationCount)
 	}
 
 	var pelunasanMigrationName string
@@ -218,11 +218,11 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 		t.Fatalf("expected loan pelunasan migration, got %q", pelunasanMigrationName)
 	}
 	var latestName string
-	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 53`).Scan(&latestName); err != nil {
+	if err := db.QueryRow(`SELECT name FROM schema_migrations WHERE version = 54`).Scan(&latestName); err != nil {
 		t.Fatalf("read latest migration: %v", err)
 	}
-	if latestName != "add_retirement_loans_and_first_due_dates" {
-		t.Fatalf("expected latest migration to add Retirement loans and first due dates, got %q", latestName)
+	if latestName != "allow_voucher_imports_with_other_pending_requests" {
+		t.Fatalf("expected latest migration to allow Voucher imports with other pending requests, got %q", latestName)
 	}
 
 	if _, err := db.Exec(`INSERT INTO members (id, member_no, full_name, join_date, status) VALUES ('migrate-member', 'M-MIGRATE', 'Migrated Member', '2026-06-18', 'active')`); err != nil {
