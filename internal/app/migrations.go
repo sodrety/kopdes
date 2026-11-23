@@ -648,6 +648,10 @@ var migrations = []migration{
 	{Version: 51, Name: "auto_create_imported_voucher_paylater_loans"},
 	{Version: 52, Name: "preserve_loan_approval_integrity_for_auto_imports"},
 	{Version: 53, Name: "add_retirement_loans_and_first_due_dates"},
+	{Version: 54, Name: "allow_voucher_imports_with_other_pending_requests", Statements: []string{
+		`DROP INDEX IF EXISTS idx_loan_requests_one_pending_per_member`,
+		`CREATE UNIQUE INDEX idx_loan_requests_one_pending_per_member ON loan_requests(member_id) WHERE (status='pending' OR (status='approved' AND disbursement_date='')) AND NOT (auto_approved_import=TRUE AND loan_type='voucher')`,
+	}},
 }
 
 func defaultAccountingMappingSeedStatement() string {
