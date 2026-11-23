@@ -71,6 +71,12 @@ func TestVoucherBulkNominalFeeApprovalAndPrimerJournals(t *testing.T) {
 			if response := adminLoanJSONRequest(fixture, http.MethodPost, "/api/member/loan-requests", memberToken, body); response.Code != http.StatusBadRequest {
 				t.Fatalf("member intake must reject Voucher: %d %s", response.Code, response.Body.String())
 			}
+			otherLoanRequestID := fixture.createLoanRequest(t, memberToken, 100000, 6)
+			otherLoan := fixture.approveLoanRequest(t, manager, otherLoanRequestID, 100000, 6)
+			if otherLoan.RemainingBalance <= 0 {
+				t.Fatalf("expected existing loan to retain a balance, got %d", otherLoan.RemainingBalance)
+			}
+			// Voucher Excel import must allow a member who already has an outstanding loan.
 			preview := adminLoanMultipartRequest(fixture, admin, voucherWorkbook(t, fixture, admin, [][]any{{"V-001", "Voucher", 100000, 1, "Voucher", fee}}))
 			var batch struct {
 				ID         string
