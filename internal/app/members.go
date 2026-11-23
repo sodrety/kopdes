@@ -156,6 +156,11 @@ type memberBankDetailsInput struct {
 	BankAccount string `json:"bank_account" form:"bank_account"`
 }
 
+type memberContactDetailsInput struct {
+	Phone   string `json:"phone" form:"phone"`
+	Address string `json:"address" form:"address"`
+}
+
 var errInvalidMemberBankDetails = errors.New("invalid member bank details")
 
 func (s *Server) updateMemberBankDetails(c *gin.Context) {
@@ -190,6 +195,43 @@ func (s *Server) updateOwnMemberBankDetails(c *gin.Context) {
 		return
 	}
 	respondOKOrHXRedirect(c, "/member/profile", updated)
+}
+
+func (s *Server) updateOwnMemberContactDetails(c *gin.Context) {
+	member, ok := s.profileMember(c)
+	if !ok {
+		return
+	}
+	var req memberContactDetailsInput
+	if err := c.ShouldBind(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_member_contact_details"))
+		return
+	}
+	updated, err := s.updateMemberContactDetailsByID(member.ID, req)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(languageFromRequest(c), "error_member_not_found"))
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
+		return
+	}
+	respondOKOrHXRedirect(c, "/member/profile", updated)
+}
+
+func (s *Server) updateMemberContactDetailsByID(id string, req memberContactDetailsInput) (Member, error) {
+	result, err := s.db.Exec(`UPDATE members SET phone=$1,address=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$3`, strings.TrimSpace(req.Phone), strings.TrimSpace(req.Address), id)
+	if err != nil {
+		return Member{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return Member{}, err
+	}
+	if affected == 0 {
+		return Member{}, sql.ErrNoRows
+	}
+	return s.memberByID(id)
 }
 
 func (s *Server) updateMemberBankDetailsByID(id string, c *gin.Context) (Member, error) {

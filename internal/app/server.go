@@ -168,6 +168,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	member.Use(server.requireRole("member"))
 	member.GET("/profile", server.memberProfile)
 	member.POST("/profile/bank-details", server.updateOwnMemberBankDetails)
+	member.POST("/profile/contact-details", server.updateOwnMemberContactDetails)
 	member.GET("/savings", server.memberSavings)
 	member.GET("/savings/summary", server.memberSavingSummary)
 	member.POST("/withdrawal-requests", server.submitWithdrawalRequest)

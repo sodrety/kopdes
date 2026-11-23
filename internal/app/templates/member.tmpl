@@ -240,11 +240,16 @@
     </section>
     {{end}}
     <section class="profile-secondary-grid">
-      <section class="panel profile-details-panel">
+      <section class="panel form-panel profile-details-panel">
         <h2>{{t .Lang "member_detail"}}</h2>
+        <p class="field-help">{{t .Lang "member_contact_details_description"}}</p>
+        <form method="post" action="/api/member/profile/contact-details" hx-post="/api/member/profile/contact-details" hx-target="#member-contact-details-error" hx-swap="innerHTML">
+          <label>{{t .Lang "phone"}} <input name="phone" value="{{.Member.Phone}}" autocomplete="tel"></label>
+          <label>{{t .Lang "address"}} <textarea name="address" rows="3" autocomplete="street-address">{{.Member.Address}}</textarea></label>
+          <button type="submit">{{t .Lang "save_contact_details"}}</button>
+        </form>
+{{template "form-error" (dict "ID" "member-contact-details-error")}}
         <div class="detail-grid">
-          <div><span>{{t .Lang "phone"}}</span><strong>{{if .Member.Phone}}{{.Member.Phone}}{{else}}{{t .Lang "none"}}{{end}}</strong></div>
-          <div><span>{{t .Lang "address"}}</span><strong>{{if .Member.Address}}{{.Member.Address}}{{else}}{{t .Lang "none"}}{{end}}</strong></div>
           <div><span>{{t .Lang "join_date"}}</span><strong>{{.Member.JoinDate}}</strong></div>
         </div>
       </section>
