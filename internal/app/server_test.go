@@ -5191,6 +5191,16 @@ func (f testFixture) approveWithdrawalRequest(t *testing.T, managerToken, reques
 
 func (f testFixture) disburseWithdrawalRequest(t *testing.T, requestID string) {
 	t.Helper()
+	location, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		t.Fatalf("load Jakarta timezone: %v", err)
+	}
+	date := time.Now().In(location).Format("2006-01-02")
+	f.disburseWithdrawalRequestAtDate(t, requestID, date)
+}
+
+func (f testFixture) disburseWithdrawalRequestAtDate(t *testing.T, requestID, date string) {
+	t.Helper()
 	const officerID = "ketua-i-user-id"
 	var originalRole string
 	if err := f.db.QueryRow(`SELECT role FROM officer_appointments WHERE id=$1`, officerID).Scan(&originalRole); err != nil {
@@ -5204,11 +5214,6 @@ func (f testFixture) disburseWithdrawalRequest(t *testing.T, requestID string) {
 			t.Errorf("restore fixture officer role after Bendahara withdrawal disbursement: %v", err)
 		}
 	}()
-	location, err := time.LoadLocation("Asia/Jakarta")
-	if err != nil {
-		t.Fatalf("load Jakarta timezone: %v", err)
-	}
-	date := time.Now().In(location).Format("2006-01-02")
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/withdrawal-requests/"+requestID+"/disburse", bytes.NewBufferString(`{"disbursement_date":"`+date+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+f.login(t, "ketua-i@coop.test", "password"))

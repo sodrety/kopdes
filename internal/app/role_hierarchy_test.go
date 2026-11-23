@@ -284,7 +284,8 @@ func TestWithdrawalReservationsReleaseUntilBendaharaDisbursement(t *testing.T) {
 	if approvalCount != 3 || ketuaUtamaApprovalCount != 0 {
 		t.Fatalf("expected three approvals without Ketua Utama, got total=%d ketua_utama=%d", approvalCount, ketuaUtamaApprovalCount)
 	}
-	fixture.disburseWithdrawalRequest(t, secondID)
+	sixMonthsAgo := time.Now().In(time.FixedZone("Asia/Jakarta", 7*60*60)).AddDate(0, -6, 0).Format("2006-01-02")
+	fixture.disburseWithdrawalRequestAtDate(t, secondID, sixMonthsAgo)
 	var disbursedCount int
 	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM saving_records WHERE type='withdrawal' AND member_id=$1`, member.ID).Scan(&disbursedCount); err != nil {
 		t.Fatalf("count disbursed withdrawal records: %v", err)
@@ -292,7 +293,6 @@ func TestWithdrawalReservationsReleaseUntilBendaharaDisbursement(t *testing.T) {
 	if disbursedCount != 1 {
 		t.Fatalf("expected Bendahara disbursement to create one withdrawal record, got %d", disbursedCount)
 	}
-
 	var firstReservation, secondReservation string
 	if err := fixture.db.QueryRow(`SELECT status FROM withdrawal_reservations WHERE request_id=$1`, firstID).Scan(&firstReservation); err != nil {
 		t.Fatalf("read released reservation: %v", err)

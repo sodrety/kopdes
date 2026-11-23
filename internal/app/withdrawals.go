@@ -427,9 +427,6 @@ func (s *Server) insertWithdrawalRequestAs(member Member, req withdrawalRequestI
 	if pendingDeactivation {
 		return WithdrawalRequest{}, errMemberDeactivationPending
 	}
-	if err := validateWithdrawalFrequency(tx, member.ID, time.Now().In(jakartaLocation).Format("2006-01-02"), ""); err != nil {
-		return WithdrawalRequest{}, err
-	}
 	summary, err := savingSummary(tx, member.ID)
 	if err != nil {
 		return WithdrawalRequest{}, err
@@ -440,6 +437,9 @@ func (s *Server) insertWithdrawalRequestAs(member Member, req withdrawalRequestI
 	}
 	if req.Amount > availableWithdrawalAmountForSukarelaBalance(summary.SukarelaBalance, reserved) {
 		return WithdrawalRequest{}, errInsufficientSukarelaBalance
+	}
+	if err := validateWithdrawalFrequency(tx, member.ID, time.Now().In(jakartaLocation).Format("2006-01-02")); err != nil {
+		return WithdrawalRequest{}, err
 	}
 
 	request := WithdrawalRequest{
@@ -475,7 +475,7 @@ func (s *Server) insertWithdrawalRequestAs(member Member, req withdrawalRequestI
 	return request, nil
 }
 
-func validateWithdrawalFrequency(tx *sql.Tx, memberID, withdrawalDate, excludeRequestID string) error {
+func validateWithdrawalFrequency(tx *sql.Tx, memberID, withdrawalDate string) error {
 	date, err := parseLoanDate(withdrawalDate)
 	if err != nil {
 		return err
@@ -500,29 +500,6 @@ func validateWithdrawalFrequency(tx *sql.Tx, memberID, withdrawalDate, excludeRe
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	rows, err = tx.Query(`SELECT SUBSTR(CAST(wr.created_at AS TEXT),1,10)
-		FROM withdrawal_requests wr
-		JOIN withdrawal_reservations r ON r.request_id=wr.id AND r.member_id=wr.member_id
-		WHERE r.member_id=$1 AND r.status='active' AND wr.id<>$2 AND wr.status IN ('pending','approved')`, memberID, excludeRequestID)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var requestDate string
-		if err := rows.Scan(&requestDate); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		withdrawalDates = append(withdrawalDates, requestDate)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-
 	windowStart := date.AddDate(0, -12, 0)
 	withdrawalsInWindow := 0
 	for _, withdrawalDate := range withdrawalDates {
@@ -727,7 +704,7 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 	}
 	approvalNote := strings.TrimSpace(req.Note)
 	if stageRole == approvalStageManager {
-		if err := validateWithdrawalFrequency(tx, request.MemberID, time.Now().In(jakartaLocation).Format("2006-01-02"), requestID); err != nil {
+		if err := validateWithdrawalFrequency(tx, request.MemberID, time.Now().In(jakartaLocation).Format("2006-01-02")); err != nil {
 			return WithdrawalRequest{}, err
 		}
 		if req.Amount > 0 && req.Amount != request.Amount {
@@ -888,7 +865,7 @@ func (s *Server) disburseWithdrawalRequestByID(requestID string, officer User, d
 	if memberStatus != "active" {
 		return WithdrawalRequest{}, errInactiveWithdrawalMember
 	}
-	if err := validateWithdrawalFrequency(tx, request.MemberID, dateText, requestID); err != nil {
+	if err := validateWithdrawalFrequency(tx, request.MemberID, dateText); err != nil {
 		return WithdrawalRequest{}, err
 	}
 	summary, err := savingSummary(tx, request.MemberID)
