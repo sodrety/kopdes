@@ -104,7 +104,16 @@ func (s *Server) adminJournalsPage(c *gin.Context) {
 		view = "journal"
 	}
 	dateFrom, dateTo := strings.TrimSpace(c.Query("date_from")), strings.TrimSpace(c.Query("date_to"))
-	data := gin.H{"View": view, "DateFrom": dateFrom, "DateTo": dateTo, "DefaultDate": time.Now().In(jakartaLocation).Format("2006-01-02"), "InitialJournalLines": []int{0, 1}}
+	today := time.Now().In(jakartaLocation)
+	data := gin.H{
+		"View":                view,
+		"DateFrom":            dateFrom,
+		"DateTo":              dateTo,
+		"DefaultDate":         today.Format("2006-01-02"),
+		"ReportDateFrom":      time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, today.Location()).Format("2006-01-02"),
+		"ReportDateTo":        today.Format("2006-01-02"),
+		"InitialJournalLines": []int{0, 1},
+	}
 	accounts, err := s.coaPostingAccountsForAdmin()
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))

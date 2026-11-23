@@ -689,7 +689,10 @@
         {{if index .Permissions "transactions.view"}}<a class="button-link button-link-secondary" href="/admin/transactions">{{t .Lang "cash_transactions"}}</a>{{end}}
         {{if index .Permissions "reports.view"}}<form class="balance-export-form" method="get" action="/admin/reports/balance">
           <input type="hidden" name="export" value="xlsx">
-          <label>{{t .Lang "report_as_of_date"}} <input type="date" name="as_of" value="{{.DefaultDate}}" required></label>
+          <div class="date-range-controls">
+            <label>{{t .Lang "date_from"}} <input type="date" name="date_from" value="{{.ReportDateFrom}}" required></label>
+            <label>{{t .Lang "date_to"}} <input type="date" name="date_to" value="{{.ReportDateTo}}" required></label>
+          </div>
           <button class="button-link-secondary" type="submit">{{t .Lang "export_financial_statement"}}</button>
         </form>{{end}}
       </section>

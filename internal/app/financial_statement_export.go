@@ -37,36 +37,52 @@ type financialStatementExportStyles struct {
 	period   int
 }
 
-func financialStatementDateFromQuery(value string) (time.Time, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return time.Now().In(jakartaLocation), nil
+func financialStatementDateRangeFromQuery(fromValue, toValue string) (time.Time, time.Time, error) {
+	fromValue, toValue = strings.TrimSpace(fromValue), strings.TrimSpace(toValue)
+	today := time.Now().In(jakartaLocation)
+	if fromValue == "" && toValue == "" {
+		dateFrom := time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, today.Location())
+		return dateFrom, today, nil
 	}
-	date, err := time.Parse("2006-01-02", value)
-	if err != nil || date.Format("2006-01-02") != value {
-		return time.Time{}, fmt.Errorf("invalid financial statement date")
+	if fromValue == "" || toValue == "" {
+		return time.Time{}, time.Time{}, fmt.Errorf("financial statement period requires both dates")
 	}
-	return date, nil
+	dateFrom, err := time.Parse("2006-01-02", fromValue)
+	if err != nil || dateFrom.Format("2006-01-02") != fromValue {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid financial statement start date")
+	}
+	dateTo, err := time.Parse("2006-01-02", toValue)
+	if err != nil || dateTo.Format("2006-01-02") != toValue {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid financial statement end date")
+	}
+	if dateTo.Before(dateFrom) {
+		return time.Time{}, time.Time{}, fmt.Errorf("financial statement end date before start date")
+	}
+	return dateFrom, dateTo, nil
 }
 
-func (s *Server) bentukLaporanWorkbook(asOf time.Time) ([]byte, error) {
+func (s *Server) bentukLaporanWorkbook(lang string, dateFrom, dateTo time.Time) ([]byte, error) {
 	if err := s.ensureFinancialJournalsBackfilled(); err != nil {
 		return nil, err
 	}
-	dateTo := asOf.Format("2006-01-02")
-	allRows, _, err := s.financialTrialBalanceForAdmin("", dateTo)
+	dateToValue := dateTo.Format("2006-01-02")
+	allRows, _, err := s.financialTrialBalanceForAdmin("", dateToValue)
 	if err != nil {
 		return nil, err
 	}
-	yearStart := time.Date(asOf.Year(), time.January, 1, 0, 0, 0, 0, asOf.Location()).Format("2006-01-02")
-	yearRows, _, err := s.financialTrialBalanceForAdmin(yearStart, dateTo)
+	yearStart := time.Date(dateTo.Year(), time.January, 1, 0, 0, 0, 0, dateTo.Location()).Format("2006-01-02")
+	yearRows, _, err := s.financialTrialBalanceForAdmin(yearStart, dateToValue)
 	if err != nil {
 		return nil, err
 	}
-	return buildBentukLaporanWorkbook(allRows, yearRows, asOf)
+	periodRows, _, err := s.financialTrialBalanceForAdmin(dateFrom.Format("2006-01-02"), dateToValue)
+	if err != nil {
+		return nil, err
+	}
+	return buildBentukLaporanWorkbook(lang, allRows, yearRows, periodRows, dateFrom, dateTo)
 }
 
-func buildBentukLaporanWorkbook(allRows, yearRows []FinancialTrialBalanceRow, asOf time.Time) ([]byte, error) {
+func buildBentukLaporanWorkbook(lang string, allRows, yearRows, periodRows []FinancialTrialBalanceRow, dateFrom, dateTo time.Time) ([]byte, error) {
 	allIncome, allExpense, err := financialStatementIncomeAndExpense(allRows)
 	if err != nil {
 		return nil, err
@@ -131,7 +147,7 @@ func buildBentukLaporanWorkbook(allRows, yearRows []FinancialTrialBalanceRow, as
 		equity = append(equity, financialStatementLine{Name: "SHU TAHUN BERJALAN (BELUM DITUTUP)", NormalBalance: "C", Amount: yearNet})
 	}
 
-	for _, row := range yearRows {
+	for _, row := range periodRows {
 		if row.AccountType != "revenue" && row.AccountType != "expense" {
 			continue
 		}
@@ -227,7 +243,7 @@ func buildBentukLaporanWorkbook(allRows, yearRows []FinancialTrialBalanceRow, as
 
 	leftRows := buildBentukLaporanNeracaRows(currentAssets, currentAssetsTotal, fixedAssets, fixedAssetsTotal, assetsTotal, liabilities, liabilitiesTotal, equity, equityTotal, liabilitiesAndEquity)
 	rightRows := buildBentukLaporanProfitLossRows(operatingIncome, operatingIncomeTotal, costOfSales, costOfSalesTotal, grossProfit, operatingExpenses, operatingExpensesTotal, operatingProfit, otherIncome, otherIncomeTotal, otherExpenses, otherExpensesTotal, netProfit)
-	return writeBentukLaporanSheet(leftRows, rightRows, asOf)
+	return writeBentukLaporanSheet(lang, leftRows, rightRows, dateFrom, dateTo)
 }
 
 func financialStatementIncomeAndExpense(rows []FinancialTrialBalanceRow) (int64, int64, error) {
@@ -324,7 +340,7 @@ func appendFinancialStatementDetails(rows []financialStatementExportRow, lines [
 	return rows
 }
 
-func writeBentukLaporanSheet(leftRows, rightRows []financialStatementExportRow, asOf time.Time) ([]byte, error) {
+func writeBentukLaporanSheet(lang string, leftRows, rightRows []financialStatementExportRow, dateFrom, dateTo time.Time) ([]byte, error) {
 	book := excelize.NewFile()
 	defer book.Close()
 	if err := book.SetSheetName("Sheet1", financialStatementSheet); err != nil {
@@ -343,8 +359,8 @@ func writeBentukLaporanSheet(leftRows, rightRows []financialStatementExportRow, 
 		{cell: "G1", value: "KKSUK DHARMAJAYA", style: styles.title},
 		{cell: "A2", value: "NERACA", style: styles.section},
 		{cell: "G2", value: "LABA RUGI", style: styles.section},
-		{cell: "A3", value: "Per " + asOf.Format("02-01-2006"), style: styles.period},
-		{cell: "G3", value: "YTD 01-01-" + fmt.Sprint(asOf.Year()) + " s.d. " + asOf.Format("02-01-2006"), style: styles.period},
+		{cell: "A3", value: "Per " + dateTo.Format("02-01-2006"), style: styles.period},
+		{cell: "G3", value: translate(lang, "period") + " " + dateFrom.Format("02-01-2006") + " " + translate(lang, "to") + " " + dateTo.Format("02-01-2006"), style: styles.period},
 	} {
 		if err := book.SetCellValue(financialStatementSheet, item.cell, item.value); err != nil {
 			return nil, err

@@ -178,17 +178,17 @@ func (s *Server) adminReportsPage(c *gin.Context) {
 
 func (s *Server) adminBalanceReportPage(c *gin.Context) {
 	if c.Query("export") == "xlsx" {
-		asOf, err := financialStatementDateFromQuery(c.Query("as_of"))
+		dateFrom, dateTo, err := financialStatementDateRangeFromQuery(c.Query("date_from"), c.Query("date_to"))
 		if err != nil {
-			respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_financial_statement_date"))
+			respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(languageFromRequest(c), "error_invalid_financial_statement_period"))
 			return
 		}
-		workbook, err := s.bentukLaporanWorkbook(asOf)
+		workbook, err := s.bentukLaporanWorkbook(languageFromRequest(c), dateFrom, dateTo)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(languageFromRequest(c), "error.Internal server error"))
 			return
 		}
-		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="laporan-keuangan-%s.xlsx"`, asOf.Format("2006-01-02")))
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="laporan-keuangan-%s-s-d-%s.xlsx"`, dateFrom.Format("2006-01-02"), dateTo.Format("2006-01-02")))
 		c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", workbook)
 		return
 	}
@@ -222,8 +222,7 @@ func (s *Server) adminBalanceReportPage(c *gin.Context) {
 		return
 	}
 	renderPage(c, "admin-balance-report", pageData(c, "Balance Report - KKSUK PD Dharma Jaya", "reports", "balance_report", "balance_report_description", gin.H{
-		"Report":         report,
-		"ReportAsOfDate": time.Now().In(jakartaLocation).Format("2006-01-02"),
+		"Report": report,
 	}))
 }
 
