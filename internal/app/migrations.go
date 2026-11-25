@@ -652,6 +652,7 @@ var migrations = []migration{
 		`DROP INDEX IF EXISTS idx_loan_requests_one_pending_per_member`,
 		`CREATE UNIQUE INDEX idx_loan_requests_one_pending_per_member ON loan_requests(member_id) WHERE (status='pending' OR (status='approved' AND disbursement_date='')) AND NOT (auto_approved_import=TRUE AND loan_type='voucher')`,
 	}},
+	{Version: 55, Name: "super_admin_withdrawal_disbursement_override_audit"},
 }
 
 func defaultAccountingMappingSeedStatement() string {
@@ -1025,6 +1026,11 @@ func applyMigrationOnTx(begin func() (*sql.Tx, error), migration migration, isSQ
 	}
 	if migration.Version == 53 {
 		if err := addRetirementLoanSupport(tx, isSQLite); err != nil {
+			return err
+		}
+	}
+	if migration.Version == 55 {
+		if err := addSuperAdminWithdrawalDisbursementOverrideAudit(tx, isSQLite); err != nil {
 			return err
 		}
 	}

@@ -99,6 +99,7 @@ func NewServer(cfg Config, db *sql.DB) http.Handler {
 	admin.POST("/withdrawal-requests/:id/update", server.requirePermission(PermissionWithdrawalRequestsManage), server.updateAdminWithdrawalRequest)
 	admin.POST("/withdrawal-requests/:id/approve", server.requirePermission(PermissionRequestsDecide), server.approveWithdrawalRequest)
 	admin.POST("/withdrawal-requests/:id/disburse", server.requirePermission(PermissionLoansManage), server.disburseWithdrawalRequest)
+	admin.POST("/withdrawal-requests/:id/override-disburse", server.requirePermission(PermissionRequestsOverride), server.overrideDisburseWithdrawalRequest)
 	admin.POST("/withdrawal-requests/:id/reject", server.requirePermission(PermissionRequestsDecide), server.rejectWithdrawalRequest)
 	admin.POST("/withdrawal-requests/:id/override-approve", server.requirePermission(PermissionRequestsOverride), server.overrideWithdrawalRequest)
 	admin.POST("/withdrawal-requests/:id/override-reject", server.requirePermission(PermissionRequestsOverride), server.overrideWithdrawalRejection)

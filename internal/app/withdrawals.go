@@ -73,6 +73,11 @@ type disburseWithdrawalRequestInput struct {
 	DisbursementDate string `json:"disbursement_date" form:"disbursement_date"`
 }
 
+type superAdminWithdrawalDisbursementInput struct {
+	DisbursementDate string `json:"disbursement_date" form:"disbursement_date"`
+	Reason           string `json:"reason" form:"reason"`
+}
+
 var (
 	errInvalidWithdrawalRequest                 = errors.New("invalid withdrawal request")
 	errInactiveWithdrawalMember                 = errors.New("inactive withdrawal member")
@@ -85,6 +90,8 @@ var (
 	errWithdrawalRequestNotReadyForDisbursement = errors.New("withdrawal request is not ready for disbursement")
 	errInvalidWithdrawalDisbursementDate        = errors.New("invalid withdrawal disbursement date")
 	errWithdrawalDisburserRole                  = errors.New("only bendahara can disburse withdrawals")
+	errWithdrawalDisbursementOverrideReason     = errors.New("super admin disbursement override reason required")
+	errWithdrawalDisbursementBeforePrior        = errors.New("withdrawal disbursement date precedes a prior withdrawal")
 	errWithdrawalFrequencyLimit                 = errors.New("withdrawal frequency limit exceeded")
 	errWithdrawalAmountManagerOnly              = errors.New("only the manager can change a withdrawal amount")
 )
@@ -264,6 +271,51 @@ func (s *Server) disburseWithdrawalRequest(c *gin.Context) {
 		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_withdrawal_amount_over_available"))
 	case errors.Is(err, errWithdrawalFrequencyLimit):
 		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_withdrawal_frequency_limit"))
+	case err != nil:
+		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
+	default:
+		respondOKOrHXRedirect(c, "/admin/withdrawal-disbursements", request)
+	}
+}
+
+func (s *Server) overrideDisburseWithdrawalRequest(c *gin.Context) {
+	lang := languageFromRequest(c)
+	user, ok := currentUser(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", translate(lang, "error_authentication_required"))
+		return
+	}
+	if !isSuperAdmin(user) {
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(lang, "error_super_admin_only"))
+		return
+	}
+	var req superAdminWithdrawalDisbursementInput
+	if err := c.ShouldBind(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_withdrawal_disbursement_date"))
+		return
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_withdrawal_disbursement_override_reason_required"))
+		return
+	}
+	request, err := s.disburseWithdrawalRequestBySuperAdmin(c.Param("id"), user, req.DisbursementDate, translate(lang, "journal_withdrawal_disbursement_description"), req.Reason)
+	switch {
+	case errors.Is(err, errWithdrawalRequestNotFound):
+		respondError(c, http.StatusNotFound, "NOT_FOUND", translate(lang, "error_withdrawal_request_not_found"))
+	case errors.Is(err, errInvalidWithdrawalDisbursementDate):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_invalid_withdrawal_disbursement_date"))
+	case errors.Is(err, errWithdrawalDisbursementOverrideReason):
+		respondError(c, http.StatusBadRequest, "VALIDATION_ERROR", translate(lang, "error_withdrawal_disbursement_override_reason_required"))
+	case errors.Is(err, errWithdrawalRequestNotReadyForDisbursement):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_withdrawal_request_not_ready_for_disbursement"))
+	case errors.Is(err, errWithdrawalDisburserRole):
+		respondError(c, http.StatusForbidden, "FORBIDDEN", translate(lang, "error_super_admin_only"))
+	case errors.Is(err, errWithdrawalDisbursementBeforePrior):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_withdrawal_disbursement_date_before_prior_withdrawal"))
+	case errors.Is(err, errInactiveWithdrawalMember):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_inactive_withdrawal_member"))
+	case errors.Is(err, errInsufficientSukarelaBalance):
+		respondError(c, http.StatusConflict, "BUSINESS_RULE_VIOLATION", translate(lang, "error_withdrawal_amount_over_available"))
 	case err != nil:
 		respondError(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", translate(lang, "error.Internal server error"))
 	default:
@@ -516,6 +568,28 @@ func validateWithdrawalFrequency(tx *sql.Tx, memberID, withdrawalDate string) er
 	}
 	if withdrawalsInWindow >= 2 {
 		return errWithdrawalFrequencyLimit
+	}
+	return nil
+}
+
+func ensureWithdrawalDateNotBeforeExisting(tx *sql.Tx, memberID, withdrawalDate string) error {
+	date, err := parseLoanDate(withdrawalDate)
+	if err != nil {
+		return err
+	}
+	var latestDate sql.NullString
+	if err := tx.QueryRow(`SELECT MAX(record_date) FROM saving_records WHERE member_id=$1 AND type='withdrawal' AND category='sukarela'`, memberID).Scan(&latestDate); err != nil {
+		return err
+	}
+	if !latestDate.Valid || strings.TrimSpace(latestDate.String) == "" {
+		return nil
+	}
+	previousDate, err := parseLoanDate(latestDate.String)
+	if err != nil {
+		return err
+	}
+	if previousDate.After(date) {
+		return errWithdrawalDisbursementBeforePrior
 	}
 	return nil
 }
@@ -824,7 +898,28 @@ func (s *Server) approveWithdrawalRequestByID(requestID string, officer User, re
 }
 
 func (s *Server) disburseWithdrawalRequestByID(requestID string, officer User, disbursementDate, description string) (WithdrawalRequest, error) {
-	if officer.Role != "bendahara" || !hasPermission(officer.Role, PermissionLoansManage) {
+	return s.disburseWithdrawalRequestByIDWithOverride(requestID, officer, disbursementDate, description, "")
+}
+
+func (s *Server) disburseWithdrawalRequestBySuperAdmin(requestID string, officer User, disbursementDate, description, reason string) (WithdrawalRequest, error) {
+	reason = strings.TrimSpace(reason)
+	if !isSuperAdmin(officer) {
+		return WithdrawalRequest{}, errWithdrawalDisburserRole
+	}
+	if reason == "" {
+		return WithdrawalRequest{}, errWithdrawalDisbursementOverrideReason
+	}
+	return s.disburseWithdrawalRequestByIDWithOverride(requestID, officer, disbursementDate, description, reason)
+}
+
+func (s *Server) disburseWithdrawalRequestByIDWithOverride(requestID string, officer User, disbursementDate, description, overrideReason string) (WithdrawalRequest, error) {
+	adminOverride := strings.TrimSpace(overrideReason) != ""
+	if adminOverride {
+		if !isSuperAdmin(officer) {
+			return WithdrawalRequest{}, errWithdrawalDisburserRole
+		}
+		overrideReason = strings.TrimSpace(overrideReason)
+	} else if officer.Role != "bendahara" || !hasPermission(officer.Role, PermissionLoansManage) {
 		return WithdrawalRequest{}, errWithdrawalDisburserRole
 	}
 	dateText := strings.TrimSpace(disbursementDate)
@@ -865,8 +960,17 @@ func (s *Server) disburseWithdrawalRequestByID(requestID string, officer User, d
 	if memberStatus != "active" {
 		return WithdrawalRequest{}, errInactiveWithdrawalMember
 	}
+	if adminOverride {
+		if err := ensureWithdrawalDateNotBeforeExisting(tx, request.MemberID, dateText); err != nil {
+			return WithdrawalRequest{}, err
+		}
+	}
+	frequencyLimitBypassed := false
 	if err := validateWithdrawalFrequency(tx, request.MemberID, dateText); err != nil {
-		return WithdrawalRequest{}, err
+		if !adminOverride || !errors.Is(err, errWithdrawalFrequencyLimit) {
+			return WithdrawalRequest{}, err
+		}
+		frequencyLimitBypassed = true
 	}
 	summary, err := savingSummary(tx, request.MemberID)
 	if err != nil {
@@ -882,6 +986,11 @@ func (s *Server) disburseWithdrawalRequestByID(requestID string, officer User, d
 	}
 	if reservationStatus != "active" || reservationAmount != request.Amount {
 		return WithdrawalRequest{}, errWithdrawalRequestNotReadyForDisbursement
+	}
+	if adminOverride {
+		if _, err := tx.Exec(`INSERT INTO withdrawal_disbursement_overrides (id,request_id,actor_id,disbursement_date,frequency_limit_bypassed,reason) VALUES ($1,$2,$3,$4,$5,$6)`, newID(), requestID, officer.ID, dateText, frequencyLimitBypassed, overrideReason); err != nil {
+			return WithdrawalRequest{}, err
+		}
 	}
 	source := transactionSourceBank
 	recordID := newID()

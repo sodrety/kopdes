@@ -198,6 +198,30 @@
                 </form>
               </div>
             </div>
+            {{else if and (eq $.Role "super_admin") (index $.Permissions "requests.override")}}
+            <a class="button-link button-link-secondary" href="#withdrawal-override-disbursement-{{.ID}}">{{t $.Lang "super_admin_withdrawal_disbursement"}}</a>
+            <div id="withdrawal-override-disbursement-{{.ID}}" class="review-modal" role="dialog" aria-modal="true" aria-labelledby="withdrawal-override-disbursement-title-{{.ID}}">
+              <a class="review-modal-backdrop" href="#" aria-label="{{t $.Lang "close"}}"></a>
+              <div class="review-modal-card">
+                <header class="review-modal-header">
+                  <h2 id="withdrawal-override-disbursement-title-{{.ID}}">{{t $.Lang "super_admin_withdrawal_disbursement_title"}}</h2>
+                  <a class="review-modal-close" href="#" aria-label="{{t $.Lang "close"}}">×</a>
+                </header>
+                <p class="field-help">{{t $.Lang "super_admin_withdrawal_disbursement_help"}}</p>
+                <div class="review-modal-actions">
+                  <a class="button-link button-link-secondary" href="/api/admin/withdrawal-requests/{{.ID}}/disbursement-form.pdf" download>{{t $.Lang "download_withdrawal_disbursement_form"}}</a>
+                </div>
+                <form method="post" action="/api/admin/withdrawal-requests/{{.ID}}/override-disburse" hx-post="/api/admin/withdrawal-requests/{{.ID}}/override-disburse" hx-target="#withdrawal-disbursement-error" hx-swap="innerHTML" onsubmit="return window.confirm(this.dataset.confirm)" data-confirm="{{t $.Lang "super_admin_withdrawal_disbursement_confirm"}}">
+                  <label>{{t $.Lang "withdrawal_disbursement_date"}}
+                    <input name="disbursement_date" type="date" value="{{$.CurrentDate}}" required aria-label="{{t $.Lang "withdrawal_disbursement_date"}}">
+                  </label>
+                  <label>{{t $.Lang "withdrawal_disbursement_override_reason"}}
+                    <textarea name="reason" maxlength="1000" required></textarea>
+                  </label>
+                  <button type="submit">{{t $.Lang "record_withdrawal_disbursement_override"}}</button>
+                </form>
+              </div>
+            </div>
             {{else}}
             {{t $.Lang "withdrawal_waiting_for_disbursement"}}
             {{end}}
