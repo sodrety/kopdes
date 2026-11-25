@@ -206,8 +206,8 @@ func TestMigrateTracksAppliedVersionsAndIsRepeatable(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 54 {
-		t.Fatalf("expected fifty-four tracked migrations, got %d", migrationCount)
+	if migrationCount != 55 {
+		t.Fatalf("expected fifty-five tracked migrations, got %d", migrationCount)
 	}
 
 	var pelunasanMigrationName string
